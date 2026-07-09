@@ -28,7 +28,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tetraploid.joyforold.agent.AgentRuntime
-import com.tetraploid.joyforold.ui.VoiceConfirmBanner
 
 @Composable
 fun FloatingOverlayContent(
@@ -43,40 +42,13 @@ fun FloatingOverlayContent(
 ) {
     val uiState by AgentRuntime.state.collectAsStateWithLifecycle()
 
-    // 等待语音确认时：即使收起悬浮窗，也显示确认条（避免只看到小圆钮）
     if (!expanded) {
-        if (uiState.waitingForUserConfirm && uiState.confirmPrompt != null) {
-            Card(
-                modifier = Modifier
-                    .width(300.dp)
-                    .padding(4.dp),
-                shape = RoundedCornerShape(16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xF2FFFFFF)),
-            ) {
-                Column(
-                    modifier = Modifier.padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    VoiceConfirmBanner(
-                        prompt = uiState.confirmPrompt.orEmpty(),
-                        isListening = uiState.isListening,
-                        speechText = uiState.speechText,
-                        onCancel = { AgentRuntime.clearPendingConfirmUI() },
-                    )
-                    TextButton(onClick = onToggleExpand) {
-                        Text("展开助手面板")
-                    }
-                }
-            }
-        } else {
-            FloatingActionButton(
-                onClick = onToggleExpand,
-                modifier = Modifier.padding(4.dp),
-                containerColor = MaterialTheme.colorScheme.primary,
-            ) {
-                Text("助手", color = Color.White)
-            }
+        FloatingActionButton(
+            onClick = onToggleExpand,
+            modifier = Modifier.padding(4.dp),
+            containerColor = MaterialTheme.colorScheme.primary,
+        ) {
+            Text("助手", color = Color.White)
         }
         return
     }
@@ -114,15 +86,6 @@ fun FloatingOverlayContent(
                 },
                 style = MaterialTheme.typography.bodySmall,
             )
-
-            if (uiState.waitingForUserConfirm && uiState.confirmPrompt != null) {
-                VoiceConfirmBanner(
-                    prompt = uiState.confirmPrompt.orEmpty(),
-                    isListening = uiState.isListening,
-                    speechText = uiState.speechText,
-                    onCancel = { AgentRuntime.clearPendingConfirmUI() },
-                )
-            }
 
             OutlinedTextField(
                 value = uiState.command,

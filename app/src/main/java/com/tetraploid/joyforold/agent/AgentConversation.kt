@@ -18,12 +18,59 @@ data class AgentStepRecord(
 
 class AgentConversationSession(
     val sessionId: String = UUID.randomUUID().toString(),
-    val rootCommand: String,
+    rootCommand: String,
     messages: List<ChatMessage> = emptyList(),
     stepRecords: List<AgentStepRecord> = emptyList(),
+    answeredConfirmPrompts: Set<String> = emptySet(),
+    resolvedConfirmTopics: Set<String> = emptySet(),
 ) {
     private val messages = messages.toMutableList()
     val stepRecords = stepRecords.toMutableList()
+    var rootCommand: String = rootCommand
+    private val answeredConfirmPrompts = answeredConfirmPrompts.toMutableSet()
+    private val resolvedConfirmTopics = resolvedConfirmTopics.toMutableSet()
+
+    fun hasAnsweredConfirmPrompt(prompt: String): Boolean {
+        return answeredConfirmPrompts.contains(prompt.trim())
+    }
+
+    fun hasResolvedConfirmTopic(topic: String): Boolean {
+        return topic in resolvedConfirmTopics
+    }
+
+    /** 记录用户对确认问题的完整原话，供 AI 与守卫续跑使用 */
+    fun recordConfirmAnswer(aiPrompt: String, userReply: String) {
+        val prompt = aiPrompt.trim()
+        val reply = userReply.trim()
+        if (prompt.isNotBlank()) {
+            answeredConfirmPrompts += prompt
+            inferConfirmTopic(prompt)?.let { resolvedConfirmTopics += it }
+        }
+        if (reply.isNotBlank()) {
+            addUser(
+                buildString {
+                    appendLine("【用户回答确认】")
+                    if (prompt.isNotBlank()) appendLine("问题：$prompt")
+                    appendLine("回答：$reply")
+                }.trim(),
+            )
+            rootCommand = if (rootCommand.isBlank()) {
+                reply
+            } else {
+                "${rootCommand.trim()}\n[用户回答] $reply"
+            }
+        }
+    }
+
+    private fun inferConfirmTopic(aiPrompt: String): String? {
+        return when {
+            aiPrompt.contains("打电话") || aiPrompt.contains("QQ电话") || aiPrompt.contains("手机电话") ->
+                CONFIRM_TOPIC_CALL_ROUTE
+            aiPrompt.contains("发送") || aiPrompt.contains("取消") ->
+                CONFIRM_TOPIC_SEND
+            else -> null
+        }
+    }
     var status: String = "running"
     var finalSummary: String = ""
 
@@ -111,6 +158,14 @@ class AgentConversationSession(
         put("status", status)
         put("final_summary", finalSummary)
         put(
+            "answered_confirm_prompts",
+            JSONArray().apply { answeredConfirmPrompts.forEach { put(it) } },
+        )
+        put(
+            "resolved_confirm_topics",
+            JSONArray().apply { resolvedConfirmTopics.forEach { put(it) } },
+        )
+        put(
             "messages",
             JSONArray().apply {
                 messages.forEach { msg ->
@@ -137,6 +192,9 @@ class AgentConversationSession(
     }
 
     companion object {
+        const val CONFIRM_TOPIC_CALL_ROUTE = "call_route"
+        const val CONFIRM_TOPIC_SEND = "send"
+
         fun fromJson(json: JSONObject): AgentConversationSession {
             val messages = json.optJSONArray("messages")?.let { arr ->
                 buildList {
@@ -171,6 +229,12 @@ class AgentConversationSession(
                 rootCommand = json.optString("root_command"),
                 messages = messages,
                 stepRecords = stepRecords,
+                answeredConfirmPrompts = json.optJSONArray("answered_confirm_prompts")
+                    ?.let { arr -> buildSet { for (i in 0 until arr.length()) add(arr.getString(i)) } }
+                    .orEmpty(),
+                resolvedConfirmTopics = json.optJSONArray("resolved_confirm_topics")
+                    ?.let { arr -> buildSet { for (i in 0 until arr.length()) add(arr.getString(i)) } }
+                    .orEmpty(),
             ).apply {
                 status = json.optString("status", "running")
                 finalSummary = json.optString("final_summary", "")

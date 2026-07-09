@@ -45,8 +45,9 @@ class AgentActionGuardTest {
 
     @Test
     fun sensitiveConfirmOverride_sendRequiresConfirm() {
+        val session = AgentConversationSession(rootCommand = "发消息：你好")
         val override = AgentActionGuard.sensitiveConfirmOverride(
-            rootCommand = "发消息：你好",
+            session = session,
             action = AgentAction(action = "send"),
         )
         assertNotNull(override)
@@ -55,8 +56,9 @@ class AgentActionGuardTest {
 
     @Test
     fun sensitiveConfirmOverride_callRouteBeforeDialButton() {
+        val session = AgentConversationSession(rootCommand = "给610打电话")
         val override = AgentActionGuard.sensitiveConfirmOverride(
-            rootCommand = "给610打电话",
+            session = session,
             action = AgentAction(action = "click", targetText = "语音通话"),
         )
         assertNotNull(override)

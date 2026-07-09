@@ -51,15 +51,17 @@ class AgentOrchestrator(
             ?: return AgentRunResult(false, "请先开启无障碍服务", emptyList())
 
         pendingState?.let { pending ->
-            val enriched = buildString {
-                appendLine("原指令：${pending.originalCommand}")
-                appendLine("助手询问：${pending.aiPrompt}")
-                appendLine("用户回答：$command")
-            }.trim()
+            val userReply = command.trim()
+            pending.session.recordConfirmAnswer(pending.aiPrompt, userReply)
+            val enriched = ConfirmResumeBuilder.buildEnrichedResume(
+                originalCommand = pending.originalCommand,
+                aiPrompt = pending.aiPrompt,
+                userReply = userReply,
+            )
             pendingState = null
             return runAgentLoop(
                 loopCommand = enriched,
-                rootCommand = pending.originalCommand,
+                rootCommand = pending.session.rootCommand,
                 apiKey = apiKey,
                 service = service,
                 runContext = runContext,
@@ -159,7 +161,7 @@ class AgentOrchestrator(
 
                 var action = AgentAction.fromJson(json)
 
-                AgentActionGuard.sensitiveConfirmOverride(session.rootCommand, action)?.let { override ->
+                AgentActionGuard.sensitiveConfirmOverride(session, action)?.let { override ->
                     action = override
                 }
 

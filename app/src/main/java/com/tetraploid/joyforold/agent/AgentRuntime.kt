@@ -4,6 +4,7 @@ import android.app.Application
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.data.ApiKeyStore
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
+import com.tetraploid.joyforold.overlay.VoiceConfirmOverlayService
 import com.tetraploid.joyforold.speech.DoubaoAsrClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -50,11 +51,13 @@ object AgentRuntime {
     private var voiceReplyApplication: Application? = null
     private var agentJob: Job? = null
     private var runContext: AgentRunContext? = null
+    private var application: Application? = null
 
     private val _state = MutableStateFlow(AgentUiState())
     val state: StateFlow<AgentUiState> = _state.asStateFlow()
 
     fun initIfNeeded(application: Application) {
+        this.application = application.applicationContext as Application
         if (apiKeyStore == null) {
             apiKeyStore = ApiKeyStore(application)
             memoryStore = AgentMemoryStore(application).also { orchestrator.bindMemoryStore(it) }
@@ -92,6 +95,7 @@ object AgentRuntime {
                 confirmPrompt = prompt,
             )
         }
+        syncConfirmOverlay()
     }
 
     fun updateApiKey(value: String) {
@@ -299,6 +303,7 @@ object AgentRuntime {
                     statusMessage = "启动中",
                 )
             }
+            syncConfirmOverlay()
             FloatingOverlayService.collapsePanel()
             val startedAt = System.currentTimeMillis()
             appendLog("开始执行：${current.command}")
@@ -337,8 +342,8 @@ object AgentRuntime {
                         statusMessage = if (result.success) "完成" else result.summary,
                     )
                 }
+                syncConfirmOverlay()
                 if (result.waitingForUserConfirm) {
-                    FloatingOverlayService.expandPanel()
                     startVoiceReplyToConfirm(application)
                 }
             } catch (_: CancellationException) {
@@ -358,6 +363,17 @@ object AgentRuntime {
         orchestrator.clearPendingUserReply()
         if (_state.value.isListening) stopVoiceInput()
         _state.update { it.copy(waitingForUserConfirm = false, confirmPrompt = null) }
+        syncConfirmOverlay()
+    }
+
+    private fun syncConfirmOverlay() {
+        val app = application ?: return
+        val current = _state.value
+        VoiceConfirmOverlayService.sync(
+            app,
+            waiting = current.waitingForUserConfirm,
+            prompt = current.confirmPrompt,
+        )
     }
 
     fun previewPageTree() {

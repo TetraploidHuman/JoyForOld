@@ -9,6 +9,10 @@ object AgentActionGuard {
     )
     private val sendKeywords = listOf("发送", "send", "发表", "送出")
 
+    private const val CALL_ROUTE_PROMPT = "你要在哪里打电话？请说 QQ电话 或 手机电话。"
+    private const val SEND_PROMPT = "即将发送消息。请确认：要说「发送」还是「取消」？"
+    private const val SEND_CLICK_PROMPT = "即将点击发送。请确认：要说「发送」还是「取消」？"
+
     fun actionKey(action: AgentAction): String {
         return buildString {
             append(action.action.lowercase())
@@ -51,16 +55,18 @@ object AgentActionGuard {
      * 返回 finish 动作表示应询问用户而非直接执行。
      */
     fun sensitiveConfirmOverride(
-        rootCommand: String,
+        session: AgentConversationSession,
         action: AgentAction,
     ): AgentAction? {
         if (action.action.equals("finish", ignoreCase = true)) return null
         if (action.waitingForUser) return null
 
-        val root = rootCommand.trim()
+        val root = session.rootCommand.trim()
 
         if (action.action.equals("send", ignoreCase = true)) {
-            return confirmFinish("即将发送消息。请确认：要说「发送」还是「取消」？")
+            return maybeConfirm(session, SEND_PROMPT) {
+                !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND)
+            }
         }
 
         if (action.action.equals("click", ignoreCase = true)) {
@@ -68,20 +74,26 @@ object AgentActionGuard {
             if (sendKeywords.any { target.contains(it, ignoreCase = true) } &&
                 SendIntentDetector.isSendCommand(root)
             ) {
-                return confirmFinish("即将点击发送。请确认：要说「发送」还是「取消」？")
+                return maybeConfirm(session, SEND_CLICK_PROMPT) {
+                    !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND)
+                }
             }
-            if (isCallIntent(root) && !hasExplicitCallRoute(root) &&
+            if (isCallIntent(root) &&
                 callButtonKeywords.any { target.contains(it, ignoreCase = true) }
             ) {
-                return confirmFinish("你要在哪里打电话？请说 QQ电话 或 手机电话。")
+                return maybeConfirm(session, CALL_ROUTE_PROMPT) {
+                    !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_CALL_ROUTE)
+                }
             }
         }
 
-        if (isCallIntent(root) && !hasExplicitCallRoute(root)) {
+        if (isCallIntent(root)) {
             if (action.action.equals("open_app", ignoreCase = true)) {
                 val target = action.targetText?.trim().orEmpty().lowercase()
                 if (target.contains("电话") || target.contains("拨号") || target.contains("dialer")) {
-                    return confirmFinish("你要在哪里打电话？请说 QQ电话 或 手机电话。")
+                    return maybeConfirm(session, CALL_ROUTE_PROMPT) {
+                        !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_CALL_ROUTE)
+                    }
                 }
             }
         }
@@ -90,11 +102,20 @@ object AgentActionGuard {
             action.action.equals("type", ignoreCase = true) &&
             !action.inputText.isNullOrBlank()
         ) {
-            // 给指定人发消息：输入后应确认，不直接继续点发送
-            return null // type 本身可执行，send 会在上面拦截
+            return null
         }
 
         return null
+    }
+
+    private inline fun maybeConfirm(
+        session: AgentConversationSession,
+        prompt: String,
+        shouldAsk: () -> Boolean,
+    ): AgentAction? {
+        if (!shouldAsk()) return null
+        if (session.hasAnsweredConfirmPrompt(prompt)) return null
+        return confirmFinish(prompt)
     }
 
     private fun confirmFinish(message: String): AgentAction {
@@ -118,13 +139,5 @@ object AgentActionGuard {
             lower.contains("呼叫") || lower.contains("拨号") || lower.contains("拨打")
         val hasAction = lower.contains("打") || lower.contains("拨") || lower.contains("呼叫")
         return (hasCallCore && hasAction) || lower.contains("call")
-    }
-
-    private fun hasExplicitCallRoute(command: String): Boolean {
-        val lower = command.lowercase()
-        return lower.contains("qq") || lower.contains("腾讯") ||
-            lower.contains("手机电话") || lower.contains("系统电话") ||
-            lower.contains("系统拨号") ||
-            (lower.contains("手机") && lower.contains("打"))
     }
 }

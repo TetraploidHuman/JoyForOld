@@ -4,4 +4,7 @@
     <string name="overlay_channel_name">JoyForOld 悬浮助手</string>
     <string name="overlay_notification_title">JoyForOld 助手运行中</string>
     <string name="overlay_notification_text">可在其他应用上使用 AI 辅助操作</string>
+    <string name="confirm_overlay_channel_name">JoyForOld 确认弹窗</string>
+    <string name="confirm_overlay_notification_title">等待您的确认</string>
+    <string name="confirm_overlay_notification_text">请用语音回答助手的确认问题</string>
 </resources>
