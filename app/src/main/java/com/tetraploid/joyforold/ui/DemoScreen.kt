@@ -259,6 +259,41 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 }
             }
 
+            if (uiState.isRunning) {
+                Text(
+                    text = buildString {
+                        append("Agent 步骤 ${uiState.currentStep}")
+                        if (uiState.statusMessage.isNotBlank()) append(" · ${uiState.statusMessage}")
+                        if (uiState.isPaused) append("（已暂停）")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            if (uiState.isPaused) viewModel.resumeAgent() else viewModel.pauseAgent()
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (uiState.isPaused) "继续" else "暂停")
+                    }
+                    OutlinedButton(
+                        onClick = viewModel::cancelAgent,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("停止 Agent")
+                    }
+                }
+            }
+
+            if (uiState.recentMemories.isNotEmpty()) {
+                Text("历史记忆（最近）", style = MaterialTheme.typography.titleSmall)
+                uiState.recentMemories.take(3).forEach { memory ->
+                    Text("· $memory", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+
             if (uiState.waitingForUserConfirm && uiState.confirmPrompt != null) {
                 VoiceConfirmBanner(
                     prompt = uiState.confirmPrompt.orEmpty(),

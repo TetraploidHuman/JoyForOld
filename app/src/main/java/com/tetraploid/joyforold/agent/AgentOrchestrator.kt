@@ -1,17 +1,26 @@
 package com.tetraploid.joyforold.agent
 
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 
 class AgentOrchestrator(
     private val deepSeekClient: DeepSeekClient = DeepSeekClient(),
+    private var memoryStore: AgentMemoryStore? = null,
 ) {
     private data class PendingUserReply(
         val originalCommand: String,
         val aiPrompt: String,
+        val sessionId: String,
     )
 
     private var pendingUserReply: PendingUserReply? = null
+
+    fun bindMemoryStore(store: AgentMemoryStore) {
+        memoryStore = store
+    }
 
     fun clearPendingUserReply() {
         pendingUserReply = null
@@ -20,6 +29,8 @@ class AgentOrchestrator(
     suspend fun run(
         userCommand: String,
         apiKey: String,
+        runContext: AgentRunContext = AgentRunContext(),
+        onProgress: ((Int, String) -> Unit)? = null,
     ): AgentRunResult {
         val command = userCommand.trim()
         if (command.isEmpty()) {
@@ -29,241 +40,194 @@ class AgentOrchestrator(
         val service = JoyAccessibilityService.instance
             ?: return AgentRunResult(false, "请先开启无障碍服务", emptyList())
 
-        // AI 曾通过 finish + waiting_for_user 提问：结合用户回答与当前页面续跑
         pendingUserReply?.let { pending ->
             pendingUserReply = null
-            val pageContext = service.snapshotCompactForAgent()
-            val planJson = try {
-                deepSeekClient.planAfterUserReply(
-                    originalCommand = pending.originalCommand,
-                    assistantPrompt = pending.aiPrompt,
-                    userAnswer = command,
-                    pageContext = pageContext,
-                    apiKey = apiKey,
-                )
-            } catch (error: Exception) {
-                return AgentRunResult(false, error.message ?: "AI 续跑失败", emptyList())
-            }
-            val steps = ActionPlanNormalizer.normalize(
-                pending.originalCommand,
-                AgentAction.parsePlan(planJson),
-            )
-            return executeSteps(
-                service,
-                steps,
-                source = "AI续跑",
-                userCommand = pending.originalCommand,
+            val enriched = buildString {
+                appendLine("原指令：${pending.originalCommand}")
+                appendLine("助手询问：${pending.aiPrompt}")
+                appendLine("用户回答：$command")
+            }.trim()
+            return runAgentLoop(
+                loopCommand = enriched,
+                rootCommand = pending.originalCommand,
                 apiKey = apiKey,
+                service = service,
+                runContext = runContext,
+                onProgress = onProgress,
+                resumeSessionId = pending.sessionId,
             )
         }
-
-        val pageContext = service.snapshotCompactForAgent()
 
         LocalCommandParser.parse(command)?.let { localSteps ->
-            if (LocalCommandParser.isSendToSpecificPerson(command) && looksLikeOpenChatPage(pageContext)) {
-                val aiJson = try {
-                    deepSeekClient.planBatch(command, pageContext, apiKey)
-                } catch (error: Exception) {
-                    return AgentRunResult(false, error.message ?: "AI 请求失败", emptyList())
+            if (LocalCommandParser.isSendToSpecificPerson(command)) {
+                val pageContext = service.snapshotCompactForAgent()
+                if (looksLikeOpenChatPage(pageContext)) {
+                    return runAgentLoop(command, command, apiKey, service, runContext, onProgress)
                 }
-                val aiSteps = ActionPlanNormalizer.normalize(command, AgentAction.parsePlan(aiJson))
-                return executeSteps(service, aiSteps, source = "AI聊天页", userCommand = command, apiKey = apiKey)
             }
 
-            val localResult = executeSteps(
-                service,
-                ActionPlanNormalizer.normalize(command, localSteps),
-                source = "本地",
-                userCommand = command,
-                apiKey = apiKey,
-            )
-            if (localResult.success) {
+            val localResult = executeLocalSteps(service, localSteps, command, runContext)
+            if (localResult.success || localResult.waitingForUserConfirm) {
                 return localResult
             }
-
-            val fallbackJson = try {
-                deepSeekClient.planBatch(command, pageContext, apiKey)
-            } catch (error: Exception) {
-                return localResult
-            }
-            val fallbackSteps = ActionPlanNormalizer.normalize(command, AgentAction.parsePlan(fallbackJson))
-            val aiResult = executeSteps(
-                service,
-                fallbackSteps,
-                source = "AI通用回退",
-                userCommand = command,
-                apiKey = apiKey,
-            )
-            if (aiResult.success) {
-                val mergedLogs = localResult.logs + aiResult.logs.map { log ->
-                    log.copy(step = log.step + localResult.logs.size)
-                }
-                return aiResult.copy(logs = mergedLogs)
-            }
-            return aiResult
         }
 
-        val planJson = try {
-            deepSeekClient.planBatch(command, pageContext, apiKey)
-        } catch (error: Exception) {
-            return AgentRunResult(false, error.message ?: "AI 请求失败", emptyList())
-        }
-
-        val plannedSteps = ActionPlanNormalizer.normalize(command, AgentAction.parsePlan(planJson))
-        val result = executeSteps(service, plannedSteps, source = "AI批量", userCommand = command, apiKey = apiKey)
-
-        if (result.success || result.logs.none { !it.success }) {
-            return result
-        }
-
-        val lastFailed = result.logs.lastOrNull { !it.success } ?: return result
-        return retryOnce(service, command, apiKey, lastFailed.detail, result.logs)
+        return runAgentLoop(command, command, apiKey, service, runContext, onProgress)
     }
 
-    private suspend fun retryOnce(
-        service: JoyAccessibilityService,
-        command: String,
+    private suspend fun runAgentLoop(
+        loopCommand: String,
+        rootCommand: String,
         apiKey: String,
-        lastResult: String,
-        previousLogs: List<AgentStepLog>,
-    ): AgentRunResult {
-        val pageContext = service.snapshotCompactForAgent()
-        val json = try {
-            deepSeekClient.replanStep(command, pageContext, apiKey, lastResult)
-        } catch (error: Exception) {
-            return AgentRunResult(false, error.message ?: "AI 重试失败", previousLogs)
-        }
-
-        val action = AgentAction.fromJson(json)
-        val stepIndex = previousLogs.size + 1
-        if (action.action.equals("finish", ignoreCase = true) || action.finished) {
-            return finishStepResult(action, userCommand = command, source = "AI重试", stepNo = stepIndex, logs = previousLogs)
-        }
-
-        val detail = executeAction(service, action)
-        val logs = previousLogs + AgentStepLog(stepIndex, action, !detail.contains("失败"), detail)
-        val success = !detail.contains("失败")
-        return AgentRunResult(success, if (success) detail else "部分步骤失败：$detail", logs)
-    }
-
-    private suspend fun executeSteps(
         service: JoyAccessibilityService,
-        steps: List<AgentAction>,
-        source: String,
-        userCommand: String = "",
-        apiKey: String = "",
+        runContext: AgentRunContext,
+        onProgress: ((Int, String) -> Unit)?,
+        resumeSessionId: String? = null,
     ): AgentRunResult {
         val logs = mutableListOf<AgentStepLog>()
+        val session = AgentConversationSession(
+            sessionId = resumeSessionId ?: java.util.UUID.randomUUID().toString(),
+            rootCommand = extractRootCommand(rootCommand),
+        )
+        val memories = memoryStore?.loadRecentMemories().orEmpty()
+        val memoryPrompt = memoryStore?.formatMemoriesForPrompt(memories).orEmpty()
+
+        var previousSnapshot: StructuredPageSnapshot? = null
         var stepNo = 0
-        var typedSuccessfully = false
-        var sentSuccessfully = false
 
-        for (action in steps) {
-            if (action.action.equals("finish", ignoreCase = true) || action.finished) {
-                if (SendIntentDetector.isSendCommand(userCommand) &&
-                    !LocalCommandParser.isSendToSpecificPerson(userCommand) &&
-                    !isCallIntent(userCommand) &&
-                    !isSmsIntent(userCommand) &&
-                    typedSuccessfully && !sentSuccessfully
-                ) {
-                    val autoSend = executeAction(service, AgentAction(action = "send"))
-                    stepNo++
-                    val sendOk = !autoSend.contains("失败")
-                    logs += AgentStepLog(stepNo, AgentAction(action = "send"), sendOk, "[$source-补发] $autoSend")
-                    if (sendOk) sentSuccessfully = true
-                }
-                return finishStepResult(action, userCommand, source, stepNo + 1, logs)
+        suspend fun captureObservation(): Pair<String, String> {
+            val snapshots = service.captureStructuredSnapshots()
+            val merged = service.mergeSnapshots(snapshots)
+            if (merged == null) {
+                return "无法读取页面，请切换到目标应用。" to "无法读取页面"
             }
+            val pageContext = merged.toCompactSummary()
+            val pageDiff = PageObservation.diff(previousSnapshot, merged)
+            previousSnapshot = merged
+            return pageContext to pageDiff
+        }
 
-            stepNo++
-            val detail = executeAction(service, action)
-            val success = !detail.contains("失败")
-            logs += AgentStepLog(stepNo, action, success, "[$source] $detail")
+        try {
+            val (pageContext, pageDiff) = captureObservation()
+            val effectiveCommand = if (loopCommand != rootCommand) loopCommand else session.rootCommand
+            runContext.awaitContinuation()
 
-            if (action.action.equals("type", ignoreCase = true) && success) {
-                typedSuccessfully = true
-                if (SendIntentDetector.isSendCommand(userCommand) &&
-                    !LocalCommandParser.isSendToSpecificPerson(userCommand) &&
-                    !isCallIntent(userCommand) &&
-                    !isSmsIntent(userCommand) &&
-                    !sentSuccessfully
-                ) {
+            var json = deepSeekClient.beginTask(
+                apiKey = apiKey,
+                conversation = session,
+                userCommand = effectiveCommand,
+                pageContext = pageContext,
+                pageDiff = pageDiff,
+                keyMemories = memoryPrompt,
+            )
+
+            repeat(MAX_AGENT_STEPS) {
+                coroutineContext.ensureActive()
+                runContext.awaitContinuation()
+
+                stepNo++
+                runContext.updateProgress(stepNo, "规划第 $stepNo 步")
+                onProgress?.invoke(stepNo, runContext.statusMessage)
+
+                val action = AgentAction.fromJson(json)
+
+                if (action.action.equals("finish", ignoreCase = true) || action.finished) {
+                    return finishAndPersist(
+                        action = action,
+                        loopCommand = loopCommand,
+                        session = session,
+                        apiKey = apiKey,
+                        source = if (resumeSessionId != null) "Agent续跑" else "Agent",
+                        stepNo = stepNo,
+                        logs = logs,
+                        runContext = runContext,
+                    )
+                }
+
+                runContext.updateProgress(stepNo, "执行：${action.action}")
+                onProgress?.invoke(stepNo, runContext.statusMessage)
+
+                val result = AgentToolRegistry.execute(service, action)
+                val (_, pageDiff) = captureObservation()
+                logs += AgentStepLog(
+                    step = stepNo,
+                    action = action,
+                    success = result.success,
+                    detail = "[Agent] ${result.toAgentFeedback()}",
+                )
+                session.recordStep(stepNo, action, result, pageDiff)
+
+                val feedback = buildString {
+                    appendLine("【上一步执行结果】")
+                    appendLine("操作：${action.action}" +
+                        action.targetText?.let { " target=\"$it\"" }.orEmpty() +
+                        action.inputText?.let { " input=\"$it\"" }.orEmpty())
+                    append(result.toAgentFeedback())
+                }
+
+                if (needsNavigationDelay(action)) {
+                    delay(NAVIGATION_DELAY_MS)
+                } else if (result.success) {
                     delay(ACTION_DELAY_MS)
-                    stepNo++
-                    val autoSend = executeAction(service, AgentAction(action = "send"))
-                    val sendOk = !autoSend.contains("失败")
-                    logs += AgentStepLog(stepNo, AgentAction(action = "send"), sendOk, "[$source-紧随输入] $autoSend")
-                    if (sendOk) sentSuccessfully = true
                 }
-            }
-            if ((action.action.equals("send", ignoreCase = true) || action.isSendClick()) && success) {
-                sentSuccessfully = true
+
+                coroutineContext.ensureActive()
+                runContext.awaitContinuation()
+
+                val (nextPageContext, nextPageDiff) = captureObservation()
+                json = deepSeekClient.continueAfterStep(
+                    apiKey = apiKey,
+                    conversation = session,
+                    stepFeedback = feedback,
+                    pageContext = nextPageContext,
+                    pageDiff = nextPageDiff,
+                )
             }
 
-            if (!success) {
-                if (apiKey.isNotBlank() &&
-                    !action.action.equals("wait", ignoreCase = true) &&
-                    (detail.contains("未找到") || detail.contains("失败"))
-                ) {
-                    val pageContext = service.snapshotCompactForAgent()
-                    val json = try {
-                        deepSeekClient.replanStep(userCommand, pageContext, apiKey, detail)
-                    } catch (_: Exception) {
-                        return AgentRunResult(false, detail, logs)
-                    }
-                    val replanned = AgentAction.fromJson(json)
-                    if (replanned.action.equals("finish", ignoreCase = true) || replanned.finished) {
-                        return finishStepResult(replanned, userCommand, "$source-重规划", stepNo + 1, logs)
-                    }
-                    val replannedDetail = executeAction(service, replanned)
-                    val replannedOk = !replannedDetail.contains("失败")
-                    stepNo++
-                    logs += AgentStepLog(stepNo, replanned, replannedOk, "[$source-重规划] $replannedDetail")
-                    if (!replannedOk) {
-                        return AgentRunResult(false, replannedDetail, logs)
-                    }
-                    continue
-                }
-                return AgentRunResult(false, detail, logs)
-            }
-
-            if (needsNavigationDelay(action)) {
-                delay(NAVIGATION_DELAY_MS)
-            } else {
-                delay(ACTION_DELAY_MS)
-            }
+            session.status = "max_steps"
+            session.finalSummary = "达到最大步数"
+            persistMemory(apiKey, session)
+            return AgentRunResult(
+                false,
+                "已达到最大步数（$MAX_AGENT_STEPS），请简化指令或重试",
+                logs,
+                sessionId = session.sessionId,
+            )
+        } catch (_: CancellationException) {
+            session.status = "cancelled"
+            session.finalSummary = "用户已停止"
+            persistMemory(apiKey, session)
+            return AgentRunResult(
+                false,
+                "已停止执行",
+                logs,
+                sessionId = session.sessionId,
+            )
         }
-
-        if (SendIntentDetector.isSendCommand(userCommand) &&
-            !LocalCommandParser.isSendToSpecificPerson(userCommand) &&
-            !isCallIntent(userCommand) &&
-            !isSmsIntent(userCommand) &&
-            typedSuccessfully && !sentSuccessfully
-        ) {
-            stepNo++
-            val autoSend = executeAction(service, AgentAction(action = "send"))
-            val sendOk = !autoSend.contains("失败")
-            logs += AgentStepLog(stepNo, AgentAction(action = "send"), sendOk, "[$source-补发] $autoSend")
-        }
-
-        return AgentRunResult(true, "步骤已执行", logs)
     }
 
-    private fun finishStepResult(
+    private suspend fun finishAndPersist(
         action: AgentAction,
-        userCommand: String,
+        loopCommand: String,
+        session: AgentConversationSession,
+        apiKey: String,
         source: String,
         stepNo: Int,
-        logs: List<AgentStepLog>,
+        logs: MutableList<AgentStepLog>,
+        runContext: AgentRunContext,
     ): AgentRunResult {
         val rawSummary = action.message ?: "任务已完成"
-        val (summary, shouldWait) = resolveWaitForUser(action, userCommand, rawSummary)
+        val shouldWait = action.waitingForUser || looksLikeAiQuestion(rawSummary)
+        val summary = rawSummary
         val updatedLogs = logs + AgentStepLog(stepNo, action, true, "[$source] $summary")
 
         if (shouldWait) {
+            session.status = "waiting_user"
+            session.finalSummary = summary
             pendingUserReply = PendingUserReply(
-                originalCommand = extractRootCommand(userCommand),
+                originalCommand = extractRootCommand(loopCommand),
                 aiPrompt = summary,
+                sessionId = session.sessionId,
             )
             return AgentRunResult(
                 success = true,
@@ -271,34 +235,62 @@ class AgentOrchestrator(
                 logs = updatedLogs,
                 waitingForUserConfirm = true,
                 confirmPrompt = summary,
+                sessionId = session.sessionId,
             )
         }
 
-        return AgentRunResult(true, summary, updatedLogs)
+        session.status = if (action.finished) "success" else "done"
+        session.finalSummary = summary
+        persistMemory(apiKey, session)
+        runContext.updateProgress(stepNo, "完成")
+        return AgentRunResult(true, summary, updatedLogs, sessionId = session.sessionId)
     }
 
-    /**
-     * AI 用 finish 提问时应带 waiting_for_user:true。
-     * 若 AI 问了但没设 flag，或打电话场景下回了“请描述页面”这类无效 finish，仍进入语音等待。
-     */
-    private fun resolveWaitForUser(
-        action: AgentAction,
+    private suspend fun persistMemory(apiKey: String, session: AgentConversationSession) {
+        val store = memoryStore ?: return
+        val extracted = deepSeekClient.extractKeyMemory(apiKey, session.buildSessionSummary())
+        store.saveFromSession(session, extracted)
+    }
+
+    private suspend fun executeLocalSteps(
+        service: JoyAccessibilityService,
+        steps: List<AgentAction>,
         userCommand: String,
-        rawSummary: String,
-    ): Pair<String, Boolean> {
-        if (action.waitingForUser) {
-            return normalizeAiWaitPrompt(userCommand, rawSummary) to true
-        }
-        if (looksLikeAiQuestion(rawSummary)) {
-            return rawSummary to true
-        }
+        runContext: AgentRunContext,
+    ): AgentRunResult {
+        val logs = mutableListOf<AgentStepLog>()
+        var stepNo = 0
 
-        val root = extractRootCommand(userCommand)
-        if (isCallIntent(root) && !hasExplicitCallRoute(root) && looksLikeWrongAiPrompt(rawSummary)) {
-            return normalizeAiWaitPrompt(userCommand, rawSummary) to true
+        for (action in steps) {
+            runContext.awaitContinuation()
+            if (action.action.equals("finish", ignoreCase = true) || action.finished) {
+                val rawSummary = action.message ?: "任务已完成"
+                val shouldWait = action.waitingForUser || looksLikeAiQuestion(rawSummary)
+                if (shouldWait) {
+                    pendingUserReply = PendingUserReply(
+                        originalCommand = userCommand,
+                        aiPrompt = rawSummary,
+                        sessionId = java.util.UUID.randomUUID().toString(),
+                    )
+                    return AgentRunResult(
+                        success = true,
+                        summary = rawSummary,
+                        logs = logs,
+                        waitingForUserConfirm = true,
+                        confirmPrompt = rawSummary,
+                    )
+                }
+                return AgentRunResult(true, rawSummary, logs)
+            }
+            stepNo++
+            val result = AgentToolRegistry.execute(service, action)
+            logs += AgentStepLog(stepNo, action, result.success, "[本地] ${result.toAgentFeedback()}")
+            if (!result.success) {
+                return AgentRunResult(false, result.summary, logs)
+            }
+            if (needsNavigationDelay(action)) delay(NAVIGATION_DELAY_MS) else delay(ACTION_DELAY_MS)
         }
-
-        return rawSummary to false
+        return AgentRunResult(true, "步骤已执行", logs)
     }
 
     private fun looksLikeAiQuestion(message: String): Boolean {
@@ -308,35 +300,7 @@ class AgentOrchestrator(
             text.contains("?") ||
             text.contains("请说") ||
             text.contains("请选择") ||
-            text.contains("请确认") ||
-            text.contains("你要") && (text.contains("还是") || text.contains("哪种") || text.contains("哪里"))
-    }
-
-    private fun looksLikeWrongAiPrompt(message: String): Boolean {
-        val lower = message.lowercase()
-        return lower.contains("打开") ||
-            lower.contains("页面") ||
-            lower.contains("告诉我") ||
-            lower.contains("描述") ||
-            lower.contains("当前页面")
-    }
-
-    /** AI 已决定要问用户，但偶尔问错（如让用户描述页面）；仅修正文案，不替 AI 决定是否询问。 */
-    private fun normalizeAiWaitPrompt(userCommand: String, message: String): String {
-        val root = extractRootCommand(userCommand)
-        if (!isCallIntent(root) || hasExplicitCallRoute(root)) return message
-
-        val lower = message.lowercase()
-        val alreadyAsksRoute = (lower.contains("qq") && lower.contains("手机")) ||
-            lower.contains("在哪里打") ||
-            lower.contains("哪种电话")
-        if (alreadyAsksRoute) return message
-
-        val looksLikeWrongPrompt = looksLikeWrongAiPrompt(message)
-        if (looksLikeWrongPrompt) {
-            return "你要在哪里打电话？请说 QQ电话 或 手机电话。"
-        }
-        return message
+            text.contains("请确认")
     }
 
     private fun extractRootCommand(command: String): String {
@@ -347,73 +311,23 @@ class AgentOrchestrator(
             ?: command.trim()
     }
 
-    private fun hasExplicitCallRoute(command: String): Boolean {
-        val lower = command.lowercase()
-        return lower.contains("qq") ||
-            lower.contains("腾讯") ||
-            lower.contains("手机电话") ||
-            lower.contains("系统电话") ||
-            lower.contains("系统拨号") ||
-            (lower.contains("手机") && lower.contains("打"))
-    }
-
-    private fun isCallIntent(command: String): Boolean {
-        val lower = command.trim().lowercase()
-        val hasCallCore = lower.contains("电话") ||
-            lower.contains("通话") ||
-            lower.contains("呼叫") ||
-            lower.contains("拨号") ||
-            lower.contains("拨打") ||
-            lower.contains("视频通话") ||
-            lower.contains("语音通话") ||
-            lower.contains("语音电话")
-
-        val hasAction = lower.contains("打") ||
-            lower.contains("拨") ||
-            lower.contains("呼叫") ||
-            lower.contains("接通") ||
-            lower.contains("通话")
-
-        return (hasCallCore && hasAction) || lower.contains("call")
-    }
-
-    private fun isSmsIntent(command: String): Boolean {
-        val lower = command.trim().lowercase()
-        return lower.contains("发短信") ||
-            lower.contains("发送短信") ||
-            lower.contains("短信") ||
-            lower.contains("留言") ||
-            lower.contains("sms")
-    }
-
     private fun looksLikeOpenChatPage(pageContext: String): Boolean {
         val text = pageContext.lowercase()
-        val hasInput = text.contains("可输入(") || text.contains("输入区") || text.contains("input")
-        val hasSend = text.contains("发送相关(") || text.contains("send-like") || text.contains("发送")
-        val hasChatHint = text.contains("聊天") || text.contains("会话") || text.contains("当前为 qq") || text.contains("当前为微信")
+        val hasInput = text.contains("可输入(") || text.contains("输入区") || text.contains("[输入区]")
+        val hasSend = text.contains("发送相关(") || text.contains("发送")
+        val hasChatHint = text.contains("qq") || text.contains("微信") || text.contains("聊天")
         return hasInput && hasSend && hasChatHint
-    }
-
-    private fun AgentAction.isSendClick(): Boolean {
-        return action.equals("click", ignoreCase = true) &&
-            targetText?.contains("发送", ignoreCase = true) == true
-    }
-
-    private suspend fun executeAction(service: JoyAccessibilityService, action: AgentAction): String {
-        if (action.action.equals("wait", ignoreCase = true)) {
-            delay(NAVIGATION_DELAY_MS)
-            return "等待界面刷新"
-        }
-        return service.execute(action)
     }
 
     private fun needsNavigationDelay(action: AgentAction): Boolean {
         return action.action.equals("click", ignoreCase = true) ||
-            action.action.equals("back", ignoreCase = true)
+            action.action.equals("back", ignoreCase = true) ||
+            action.action.equals("swipe_down", ignoreCase = true)
     }
 
     companion object {
-        private const val ACTION_DELAY_MS = 80L
-        private const val NAVIGATION_DELAY_MS = 220L
+        private const val MAX_AGENT_STEPS = 30
+        private const val ACTION_DELAY_MS = 100L
+        private const val NAVIGATION_DELAY_MS = 280L
     }
 }

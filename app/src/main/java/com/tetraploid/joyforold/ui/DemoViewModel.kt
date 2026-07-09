@@ -36,4 +36,10 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
     fun startVoiceReplyToConfirm() = AgentRuntime.startVoiceReplyToConfirm(getApplication())
 
     fun clearPendingConfirmUI() = AgentRuntime.clearPendingConfirmUI()
+
+    fun cancelAgent() = AgentRuntime.cancelAgent()
+
+    fun pauseAgent() = AgentRuntime.pauseAgent()
+
+    fun resumeAgent() = AgentRuntime.resumeAgent()
 }

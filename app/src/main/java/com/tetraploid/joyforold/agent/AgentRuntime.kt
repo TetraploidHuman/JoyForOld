@@ -6,8 +6,10 @@ import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.data.ApiKeyStore
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.speech.DoubaoAsrClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,18 +25,26 @@ data class AgentUiState(
     val logs: List<String> = emptyList(),
     val isRunning: Boolean = false,
     val isListening: Boolean = false,
+    val isPaused: Boolean = false,
     val accessibilityEnabled: Boolean = false,
     val waitingForUserConfirm: Boolean = false,
     val confirmPrompt: String? = null,
+    val currentStep: Int = 0,
+    val statusMessage: String = "",
+    val sessionId: String? = null,
+    val recentMemories: List<String> = emptyList(),
 )
 
 object AgentRuntime {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val orchestrator = AgentOrchestrator()
     private var apiKeyStore: ApiKeyStore? = null
+    private var memoryStore: AgentMemoryStore? = null
     private var asrClient: DoubaoAsrClient? = null
     private var voiceConfirmReplyMode = false
     private var voiceReplyApplication: Application? = null
+    private var agentJob: Job? = null
+    private var runContext: AgentRunContext? = null
 
     private val _state = MutableStateFlow(AgentUiState())
     val state: StateFlow<AgentUiState> = _state.asStateFlow()
@@ -42,6 +52,8 @@ object AgentRuntime {
     fun initIfNeeded(application: Application) {
         if (apiKeyStore == null) {
             apiKeyStore = ApiKeyStore(application)
+            memoryStore = AgentMemoryStore(application).also { orchestrator.bindMemoryStore(it) }
+            refreshMemories()
             _state.update {
                 it.copy(
                     apiKey = apiKeyStore!!.getApiKey(),
@@ -53,6 +65,11 @@ object AgentRuntime {
 
     fun refreshAccessibilityState() {
         _state.update { it.copy(accessibilityEnabled = JoyAccessibilityService.instance != null) }
+    }
+
+    private fun refreshMemories() {
+        val summaries = memoryStore?.loadRecentMemories()?.map { it.summary }.orEmpty()
+        _state.update { it.copy(recentMemories = summaries) }
     }
 
     fun updateApiKey(value: String) {
@@ -69,11 +86,45 @@ object AgentRuntime {
         _state.update { it.copy(command = value) }
     }
 
+    fun cancelAgent() {
+        runContext?.cancel()
+        agentJob?.cancel()
+        agentJob = null
+        if (_state.value.isListening) {
+            asrClient?.let { client ->
+                scope.launch { client.stop { } }
+            }
+        }
+        voiceConfirmReplyMode = false
+        voiceReplyApplication = null
+        _state.update {
+            it.copy(
+                isRunning = false,
+                isPaused = false,
+                statusMessage = "已停止",
+            )
+        }
+        appendLog("Agent 已停止")
+    }
+
+    fun pauseAgent() {
+        if (!_state.value.isRunning || _state.value.isPaused) return
+        runContext?.pause()
+        _state.update { it.copy(isPaused = true, statusMessage = "已暂停") }
+        appendLog("Agent 已暂停")
+    }
+
+    fun resumeAgent() {
+        if (!_state.value.isRunning || !_state.value.isPaused) return
+        runContext?.resume()
+        _state.update { it.copy(isPaused = false, statusMessage = "继续执行") }
+        appendLog("Agent 继续执行")
+    }
+
     fun startVoiceInput() {
         startVoiceInputInternal(confirmReplyMode = false, application = null)
     }
 
-    /** AI 提问后自动开麦，用户说完（静音自动结束）即提交回答并续跑。 */
     fun startVoiceReplyToConfirm(application: Application) {
         if (!_state.value.waitingForUserConfirm) return
         if (_state.value.isListening || _state.value.isRunning) return
@@ -85,7 +136,7 @@ object AgentRuntime {
         if (_state.value.isListening) return
         val client = ensureAsrClient()
         if (client == null) {
-            appendLog("语音识别未配置：请在 local.properties 设置 volc.asr.api_key，或旧版 volc.asr.app_id / volc.asr.access_token")
+            appendLog("语音识别未配置：请在 local.properties 设置 volc.asr.api_key")
             return
         }
         voiceConfirmReplyMode = confirmReplyMode
@@ -154,11 +205,7 @@ object AgentRuntime {
         voiceReplyApplication = null
 
         appendLog(
-            if (merged.isBlank()) {
-                "语音识别结束：未识别到文本"
-            } else {
-                "语音识别：$merged"
-            },
+            if (merged.isBlank()) "语音识别结束：未识别到文本" else "语音识别：$merged",
         )
 
         if (merged.isBlank()) {
@@ -178,7 +225,7 @@ object AgentRuntime {
     }
 
     fun appendLog(message: String) {
-        _state.update { it.copy(logs = (it.logs + message).takeLast(80)) }
+        _state.update { it.copy(logs = (it.logs + message).takeLast(100)) }
     }
 
     fun runAgent(application: Application) {
@@ -186,40 +233,69 @@ object AgentRuntime {
         val current = _state.value
         if (current.isRunning) return
 
-        scope.launch {
-            _state.update { it.copy(isRunning = true, waitingForUserConfirm = false, confirmPrompt = null) }
+        val context = AgentRunContext()
+        runContext = context
+
+        agentJob = scope.launch {
+            _state.update {
+                it.copy(
+                    isRunning = true,
+                    isPaused = false,
+                    waitingForUserConfirm = false,
+                    confirmPrompt = null,
+                    currentStep = 0,
+                    statusMessage = "启动中",
+                )
+            }
             FloatingOverlayService.collapsePanel()
             val startedAt = System.currentTimeMillis()
             appendLog("开始执行：${current.command}")
 
-            val result = orchestrator.run(
-                userCommand = current.command,
-                apiKey = current.apiKey.ifBlank { apiKeyStore?.getApiKey().orEmpty() },
-            )
+            try {
+                val result = orchestrator.run(
+                    userCommand = current.command,
+                    apiKey = current.apiKey.ifBlank { apiKeyStore?.getApiKey().orEmpty() },
+                    runContext = context,
+                    onProgress = { step, message ->
+                        _state.update {
+                            it.copy(currentStep = step, statusMessage = message, sessionId = it.sessionId)
+                        }
+                    },
+                )
 
-            val elapsed = System.currentTimeMillis() - startedAt
-            result.logs.forEach { step ->
+                val elapsed = System.currentTimeMillis() - startedAt
+                result.logs.forEach { step ->
+                    appendLog(
+                        "步骤${step.step} ${step.action.action} -> " +
+                            "${if (step.success) "成功" else "失败"}：${step.detail}",
+                    )
+                }
                 appendLog(
-                    "步骤${step.step} ${step.action.action} -> ${if (step.success) "成功" else "失败"}：${step.detail}",
+                    if (result.success) "完成（${elapsed}ms）：${result.summary}"
+                    else "结束（${elapsed}ms）：${result.summary}",
                 )
-            }
-            appendLog(
-                if (result.success) {
-                    "完成（${elapsed}ms）：${result.summary}"
-                } else {
-                    "结束（${elapsed}ms）：${result.summary}"
-                },
-            )
-            _state.update {
-                it.copy(
-                    isRunning = false,
-                    waitingForUserConfirm = result.waitingForUserConfirm,
-                    confirmPrompt = result.confirmPrompt,
-                )
-            }
-            if (result.waitingForUserConfirm) {
-                FloatingOverlayService.expandPanel()
-                startVoiceReplyToConfirm(application)
+                refreshMemories()
+                _state.update {
+                    it.copy(
+                        isRunning = false,
+                        isPaused = false,
+                        waitingForUserConfirm = result.waitingForUserConfirm,
+                        confirmPrompt = result.confirmPrompt,
+                        sessionId = result.sessionId,
+                        statusMessage = if (result.success) "完成" else result.summary,
+                    )
+                }
+                if (result.waitingForUserConfirm) {
+                    FloatingOverlayService.expandPanel()
+                    startVoiceReplyToConfirm(application)
+                }
+            } catch (_: CancellationException) {
+                _state.update {
+                    it.copy(isRunning = false, isPaused = false, statusMessage = "已停止")
+                }
+            } finally {
+                agentJob = null
+                runContext = null
             }
         }
     }
@@ -228,9 +304,7 @@ object AgentRuntime {
         voiceConfirmReplyMode = false
         voiceReplyApplication = null
         orchestrator.clearPendingUserReply()
-        if (_state.value.isListening) {
-            stopVoiceInput()
-        }
+        if (_state.value.isListening) stopVoiceInput()
         _state.update { it.copy(waitingForUserConfirm = false, confirmPrompt = null) }
     }
 
@@ -248,10 +322,9 @@ object AgentRuntime {
     private fun ensureAsrClient(): DoubaoAsrClient? {
         if (asrClient != null) return asrClient
         val hasNewApiKey = BuildConfig.VOLC_ASR_API_KEY.isNotBlank()
-        val hasLegacyAuth = BuildConfig.VOLC_ASR_APP_ID.isNotBlank() && BuildConfig.VOLC_ASR_ACCESS_TOKEN.isNotBlank()
-        if (!hasNewApiKey && !hasLegacyAuth) {
-            return null
-        }
+        val hasLegacyAuth = BuildConfig.VOLC_ASR_APP_ID.isNotBlank() &&
+            BuildConfig.VOLC_ASR_ACCESS_TOKEN.isNotBlank()
+        if (!hasNewApiKey && !hasLegacyAuth) return null
         asrClient = DoubaoAsrClient(
             apiKey = BuildConfig.VOLC_ASR_API_KEY,
             appId = BuildConfig.VOLC_ASR_APP_ID,

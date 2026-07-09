@@ -8,7 +8,11 @@ import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import com.tetraploid.joyforold.agent.ActionExecutionResult
 import com.tetraploid.joyforold.agent.AgentAction
+import com.tetraploid.joyforold.agent.AgentToolRegistry
+import com.tetraploid.joyforold.agent.PageObservation
+import com.tetraploid.joyforold.agent.StructuredPageSnapshot
 import com.tetraploid.joyforold.agent.UiNodeHeuristics
 import com.tetraploid.joyforold.agent.UiPageProbe
 import com.tetraploid.joyforold.agent.UiTreeSerializer
@@ -52,23 +56,35 @@ class JoyAccessibilityService : AccessibilityService() {
 
   fun isReady(): Boolean = instance != null
 
-  fun snapshotCompactForAgent(): String {
+  fun captureStructuredSnapshots(): List<StructuredPageSnapshot> {
     val roots = collectExternalRoots()
-    if (roots.isEmpty()) {
-      return "无法读取页面，请切换到目标应用。"
-    }
+    if (roots.isEmpty()) return emptyList()
     return try {
-      buildString {
-        roots.forEachIndexed { index, root ->
-          val pkg = root.packageName?.toString() ?: "unknown"
-          appendLine("package: $pkg")
-          append(UiPageProbe.buildSummary(root))
-          if (index < roots.lastIndex) appendLine()
-        }
-      }
+      roots.map { PageObservation.capture(it) }
     } finally {
       roots.forEach { it.recycle() }
     }
+  }
+
+  fun snapshotCompactForAgent(): String {
+    val snapshots = captureStructuredSnapshots()
+    if (snapshots.isEmpty()) {
+      return "无法读取页面，请切换到目标应用。"
+    }
+    return snapshots.joinToString("\n\n") { it.toCompactSummary() }
+  }
+
+  fun mergeSnapshots(snapshots: List<StructuredPageSnapshot>): StructuredPageSnapshot? {
+    if (snapshots.isEmpty()) return null
+    if (snapshots.size == 1) return snapshots.first()
+    val primary = snapshots.maxByOrNull { it.clickables.size + it.visibleTexts.size } ?: snapshots.first()
+    return primary.copy(
+      clickables = snapshots.flatMap { it.clickables }.distinct(),
+      editables = snapshots.flatMap { it.editables }.distinct(),
+      visibleTexts = snapshots.flatMap { it.visibleTexts }.distinct(),
+      sendButtons = snapshots.flatMap { it.sendButtons }.distinct(),
+      fingerprint = snapshots.joinToString("|") { it.fingerprint },
+    )
   }
 
   fun snapshotForAgent(): String {
@@ -92,18 +108,77 @@ class JoyAccessibilityService : AccessibilityService() {
     }
   }
 
-  fun execute(action: AgentAction): String {
+  fun execute(action: AgentAction): String = executeWithResult(action).summary
+
+  fun executeWithResult(action: AgentAction): ActionExecutionResult {
     return when (action.action.lowercase()) {
-      "click" -> clickByText(action.targetText)
-      "type" -> typeText(action.inputText)
-      "send" -> clickSend()
-      "scroll_down" -> scroll(true)
-      "scroll_up" -> scroll(false)
-      "back" -> global(AccessibilityService.GLOBAL_ACTION_BACK, "已执行返回")
-      "home" -> global(AccessibilityService.GLOBAL_ACTION_HOME, "已回到桌面")
-      "wait" -> "等待下一步"
-      "finish" -> action.message ?: "任务结束"
-      else -> "未知操作: ${action.action}"
+      "click" -> clickByTextResult(action.targetText)
+      "type" -> typeTextResult(action.inputText)
+      "send" -> clickSendResult()
+      "scroll_down" -> scrollResult(true)
+      "scroll_up" -> scrollResult(false)
+      "back" -> globalResult(AccessibilityService.GLOBAL_ACTION_BACK, "已执行返回", "返回失败")
+      "home" -> globalResult(AccessibilityService.GLOBAL_ACTION_HOME, "已回到桌面", "回桌面失败")
+      "wait" -> ActionExecutionResult(true, "等待界面刷新")
+      "finish" -> ActionExecutionResult(true, action.message ?: "任务结束")
+      else -> ActionExecutionResult(
+        success = false,
+        summary = "未知操作: ${action.action}",
+        suggestions = listOf("请使用已注册工具：${AgentToolRegistry.toolNames.joinToString()}"),
+      )
+    }
+  }
+
+  fun findOnPage(targetText: String?): ActionExecutionResult {
+    val query = targetText?.trim().orEmpty()
+    if (query.isEmpty()) {
+      return ActionExecutionResult(false, "搜索失败", detail = "缺少 target_text")
+    }
+
+    val roots = collectExternalRoots()
+    if (roots.isEmpty()) {
+      return ActionExecutionResult(false, "搜索失败", detail = "无法读取页面")
+    }
+
+    return try {
+      val matches = linkedSetOf<String>()
+      for (root in roots) {
+        matches += NodeFinder.findMatchingLabels(root, query, limit = 20)
+      }
+      if (matches.isEmpty()) {
+        ActionExecutionResult(
+          success = false,
+          summary = "未找到包含「$query」的元素",
+          suggestions = listOf("尝试 scroll_down 或 swipe_down", "用 read_tree 查看结构", "检查同音字/谐音"),
+        )
+      } else {
+        ActionExecutionResult(
+          success = true,
+          summary = "找到 ${matches.size} 个匹配项",
+            matchedElements = matches.toList(),
+        )
+      }
+    } finally {
+      roots.forEach { it.recycle() }
+    }
+  }
+
+  fun readTreeSnippet(): ActionExecutionResult {
+    val root = getTargetRoot() ?: return ActionExecutionResult(
+      success = false,
+      summary = "读取失败",
+      detail = "无法读取页面",
+    )
+    return try {
+      val tree = UiTreeSerializer.serialize(root)
+      val snippet = if (tree.length > 3500) tree.take(3500) + "\n...(已截断)" else tree
+      ActionExecutionResult(
+        success = true,
+        summary = "已读取结构树片段",
+        detail = snippet,
+      )
+    } finally {
+      root.recycle()
     }
   }
 
@@ -162,6 +237,47 @@ class JoyAccessibilityService : AccessibilityService() {
       }
     }
     return null
+  }
+
+  private fun clickByTextResult(targetText: String?): ActionExecutionResult {
+    val msg = clickByText(targetText)
+    val success = !msg.contains("失败")
+    return ActionExecutionResult(
+      success = success,
+      summary = msg,
+      suggestions = if (success) emptyList() else listOf("用 find_on_page 先确认文字", "尝试更短的关键词"),
+    )
+  }
+
+  private fun typeTextResult(input: String?): ActionExecutionResult {
+    val msg = typeText(input)
+    val success = !msg.contains("失败")
+    return ActionExecutionResult(
+      success = success,
+      summary = msg,
+      suggestions = if (success) emptyList() else listOf("先 click 输入框", "用 read_tree 找输入区"),
+    )
+  }
+
+  private fun clickSendResult(): ActionExecutionResult {
+    val msg = clickSend()
+    val success = !msg.contains("失败")
+    return ActionExecutionResult(success = success, summary = msg)
+  }
+
+  private fun scrollResult(down: Boolean): ActionExecutionResult {
+    val msg = scroll(down)
+    val success = !msg.contains("失败")
+    return ActionExecutionResult(
+      success = success,
+      summary = msg,
+      suggestions = if (success) emptyList() else listOf("尝试 swipe_down 手势滚动"),
+    )
+  }
+
+  private fun globalResult(action: Int, okMsg: String, failMsg: String): ActionExecutionResult {
+    val ok = performGlobalAction(action)
+    return ActionExecutionResult(success = ok, summary = if (ok) okMsg else failMsg)
   }
 
   private fun clickSend(): String {
@@ -369,6 +485,44 @@ class JoyAccessibilityService : AccessibilityService() {
 }
 
 private object NodeFinder {
+  fun findMatchingLabels(
+    root: AccessibilityNodeInfo,
+    query: String,
+    limit: Int = 20,
+  ): List<String> {
+    val lower = query.lowercase()
+    val tokens = lower.split(Regex("\\s+")).filter { it.isNotBlank() }
+    val results = linkedSetOf<String>()
+    val queue = ArrayDeque<AccessibilityNodeInfo>()
+    queue.add(AccessibilityNodeInfo.obtain(root))
+    var walked = 0
+
+    while (queue.isNotEmpty() && results.size < limit && walked < 1200) {
+      walked++
+      val node = queue.removeFirst()
+      val label = UiNodeHeuristics.nodeLabel(node)
+      val nodeLower = label.lowercase()
+      val matched = nodeLower.contains(lower) ||
+        tokens.any { token -> token.length >= 1 && nodeLower.contains(token) }
+
+      if (matched && label.isNotBlank()) {
+        val suffix = when {
+          node.isClickable -> " [可点击]"
+          UiNodeHeuristics.isInputLike(node, UiNodeHeuristics.screenHeight(root)) -> " [输入区]"
+          else -> ""
+        }
+        results += label.take(80) + suffix
+      }
+
+      for (i in 0 until node.childCount) {
+        node.getChild(i)?.let(queue::add)
+      }
+      node.recycle()
+    }
+    queue.forEach { it.recycle() }
+    return results.toList()
+  }
+
   fun findClickableByText(root: AccessibilityNodeInfo, text: String): AccessibilityNodeInfo? {
     val queue = ArrayDeque<AccessibilityNodeInfo>()
     queue.add(AccessibilityNodeInfo.obtain(root))

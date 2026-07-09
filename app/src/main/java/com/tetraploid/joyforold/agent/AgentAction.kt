@@ -59,4 +59,5 @@ data class AgentRunResult(
     val logs: List<AgentStepLog>,
     val waitingForUserConfirm: Boolean = false,
     val confirmPrompt: String? = null,
+    val sessionId: String? = null,
 )

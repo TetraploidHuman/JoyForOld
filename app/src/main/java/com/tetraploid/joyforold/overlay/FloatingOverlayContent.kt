@@ -134,6 +134,18 @@ fun FloatingOverlayContent(
                 minLines = 2,
             )
 
+            if (uiState.isRunning) {
+                Text(
+                    text = buildString {
+                        append("步骤 ${uiState.currentStep}")
+                        if (uiState.statusMessage.isNotBlank()) append(" · ${uiState.statusMessage}")
+                        if (uiState.isPaused) append("（已暂停）")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = onRun,
@@ -148,6 +160,25 @@ fun FloatingOverlayContent(
                     modifier = Modifier.weight(1f),
                 ) {
                     Text("读页面")
+                }
+            }
+
+            if (uiState.isRunning) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            if (uiState.isPaused) AgentRuntime.resumeAgent() else AgentRuntime.pauseAgent()
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (uiState.isPaused) "继续" else "暂停")
+                    }
+                    OutlinedButton(
+                        onClick = { AgentRuntime.cancelAgent() },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("停止")
+                    }
                 }
             }
 
