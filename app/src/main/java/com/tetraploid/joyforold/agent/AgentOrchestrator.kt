@@ -9,21 +9,31 @@ import kotlin.coroutines.coroutineContext
 class AgentOrchestrator(
     private val deepSeekClient: DeepSeekClient = DeepSeekClient(),
     private var memoryStore: AgentMemoryStore? = null,
+    private var sessionStore: AgentSessionStore? = null,
 ) {
-    private data class PendingUserReply(
-        val originalCommand: String,
-        val aiPrompt: String,
-        val sessionId: String,
-    )
-
-    private var pendingUserReply: PendingUserReply? = null
+    private var pendingState: PendingAgentState? = null
 
     fun bindMemoryStore(store: AgentMemoryStore) {
         memoryStore = store
     }
 
+    fun bindSessionStore(store: AgentSessionStore) {
+        sessionStore = store
+        restorePendingFromDisk()
+    }
+
+    fun restorePendingFromDisk() {
+        if (pendingState != null) return
+        pendingState = sessionStore?.loadPending()
+    }
+
+    fun peekPendingPrompt(): String? = pendingState?.aiPrompt
+
+    fun hasPendingConfirm(): Boolean = pendingState != null
+
     fun clearPendingUserReply() {
-        pendingUserReply = null
+        pendingState = null
+        sessionStore?.clearPending()
     }
 
     suspend fun run(
@@ -40,13 +50,13 @@ class AgentOrchestrator(
         val service = JoyAccessibilityService.instance
             ?: return AgentRunResult(false, "请先开启无障碍服务", emptyList())
 
-        pendingUserReply?.let { pending ->
-            pendingUserReply = null
+        pendingState?.let { pending ->
             val enriched = buildString {
                 appendLine("原指令：${pending.originalCommand}")
                 appendLine("助手询问：${pending.aiPrompt}")
                 appendLine("用户回答：$command")
             }.trim()
+            pendingState = null
             return runAgentLoop(
                 loopCommand = enriched,
                 rootCommand = pending.originalCommand,
@@ -54,7 +64,10 @@ class AgentOrchestrator(
                 service = service,
                 runContext = runContext,
                 onProgress = onProgress,
-                resumeSessionId = pending.sessionId,
+                existingSession = pending.session,
+                initialSnapshot = pending.previousSnapshot,
+                resumeAfterUserReply = true,
+                resumePending = pending,
             )
         }
 
@@ -82,18 +95,20 @@ class AgentOrchestrator(
         service: JoyAccessibilityService,
         runContext: AgentRunContext,
         onProgress: ((Int, String) -> Unit)?,
-        resumeSessionId: String? = null,
+        existingSession: AgentConversationSession? = null,
+        initialSnapshot: StructuredPageSnapshot? = null,
+        resumeAfterUserReply: Boolean = false,
+        resumePending: PendingAgentState? = null,
     ): AgentRunResult {
         val logs = mutableListOf<AgentStepLog>()
-        val session = AgentConversationSession(
-            sessionId = resumeSessionId ?: java.util.UUID.randomUUID().toString(),
+        val session = existingSession ?: AgentConversationSession(
             rootCommand = extractRootCommand(rootCommand),
         )
         val memories = memoryStore?.loadRecentMemories().orEmpty()
         val memoryPrompt = memoryStore?.formatMemoriesForPrompt(memories).orEmpty()
 
-        var previousSnapshot: StructuredPageSnapshot? = null
-        var stepNo = 0
+        var previousSnapshot: StructuredPageSnapshot? = initialSnapshot
+        var stepNo = session.stepRecords.size
 
         suspend fun captureObservation(): Pair<String, String> {
             val snapshots = service.captureStructuredSnapshots()
@@ -108,18 +123,31 @@ class AgentOrchestrator(
         }
 
         try {
-            val (pageContext, pageDiff) = captureObservation()
-            val effectiveCommand = if (loopCommand != rootCommand) loopCommand else session.rootCommand
-            runContext.awaitContinuation()
-
-            var json = deepSeekClient.beginTask(
-                apiKey = apiKey,
-                conversation = session,
-                userCommand = effectiveCommand,
-                pageContext = pageContext,
-                pageDiff = pageDiff,
-                keyMemories = memoryPrompt,
-            )
+            var json = if (resumeAfterUserReply) {
+                deepSeekClient.ensureSystemSeeded(session, memoryPrompt)
+                val (pageContext, pageDiff) = captureObservation()
+                runContext.awaitContinuation()
+                deepSeekClient.continueAfterStep(
+                    apiKey = apiKey,
+                    conversation = session,
+                    stepFeedback = "【用户已回答，请继续任务】\n$loopCommand",
+                    pageContext = pageContext,
+                    pageDiff = pageDiff,
+                    keyMemories = memoryPrompt,
+                )
+            } else {
+                val (pageContext, pageDiff) = captureObservation()
+                val effectiveCommand = if (loopCommand != rootCommand) loopCommand else session.rootCommand
+                runContext.awaitContinuation()
+                deepSeekClient.beginTask(
+                    apiKey = apiKey,
+                    conversation = session,
+                    userCommand = effectiveCommand,
+                    pageContext = pageContext,
+                    pageDiff = pageDiff,
+                    keyMemories = memoryPrompt,
+                )
+            }
 
             repeat(MAX_AGENT_STEPS) {
                 coroutineContext.ensureActive()
@@ -129,26 +157,63 @@ class AgentOrchestrator(
                 runContext.updateProgress(stepNo, "规划第 $stepNo 步")
                 onProgress?.invoke(stepNo, runContext.statusMessage)
 
-                val action = AgentAction.fromJson(json)
+                var action = AgentAction.fromJson(json)
+
+                AgentActionGuard.sensitiveConfirmOverride(session.rootCommand, action)?.let { override ->
+                    action = override
+                }
 
                 if (action.action.equals("finish", ignoreCase = true) || action.finished) {
                     return finishAndPersist(
                         action = action,
-                        loopCommand = loopCommand,
+                        userCommand = extractRootCommand(rootCommand),
                         session = session,
                         apiKey = apiKey,
-                        source = if (resumeSessionId != null) "Agent续跑" else "Agent",
+                        source = if (resumeAfterUserReply) "Agent续跑" else "Agent",
                         stepNo = stepNo,
                         logs = logs,
                         runContext = runContext,
+                        previousSnapshot = previousSnapshot,
                     )
                 }
 
                 runContext.updateProgress(stepNo, "执行：${action.action}")
                 onProgress?.invoke(stepNo, runContext.statusMessage)
 
+                AgentActionGuard.blockedRepeatReason(session, action)?.let { blockReason ->
+                    val blockResult = ActionExecutionResult(
+                        success = false,
+                        summary = "已阻止重复操作",
+                        detail = blockReason,
+                    )
+                    logs += AgentStepLog(
+                        step = stepNo,
+                        action = action,
+                        success = false,
+                        detail = "[Agent] $blockReason",
+                    )
+                    session.recordStep(stepNo, action, blockResult, "")
+                    val (pageContext, pageDiff) = captureObservation()
+                    json = deepSeekClient.continueAfterStep(
+                        apiKey = apiKey,
+                        conversation = session,
+                        stepFeedback = "【系统阻止重复操作】\n$blockReason",
+                        pageContext = pageContext,
+                        pageDiff = pageDiff,
+                        keyMemories = memoryPrompt,
+                    )
+                    return@repeat
+                }
+
                 val result = AgentToolRegistry.execute(service, action)
-                val (_, pageDiff) = captureObservation()
+
+                if (needsNavigationDelay(action)) {
+                    delay(NAVIGATION_DELAY_MS)
+                } else if (result.success) {
+                    delay(ACTION_DELAY_MS)
+                }
+
+                val (pageContext, pageDiff) = captureObservation()
                 logs += AgentStepLog(
                     step = stepNo,
                     action = action,
@@ -159,94 +224,143 @@ class AgentOrchestrator(
 
                 val feedback = buildString {
                     appendLine("【上一步执行结果】")
-                    appendLine("操作：${action.action}" +
-                        action.targetText?.let { " target=\"$it\"" }.orEmpty() +
-                        action.inputText?.let { " input=\"$it\"" }.orEmpty())
+                    appendLine(
+                        "操作：${action.action}" +
+                            action.targetText?.let { " target=\"$it\"" }.orEmpty() +
+                            action.inputText?.let { " input=\"$it\"" }.orEmpty(),
+                    )
                     append(result.toAgentFeedback())
-                }
-
-                if (needsNavigationDelay(action)) {
-                    delay(NAVIGATION_DELAY_MS)
-                } else if (result.success) {
-                    delay(ACTION_DELAY_MS)
                 }
 
                 coroutineContext.ensureActive()
                 runContext.awaitContinuation()
 
-                val (nextPageContext, nextPageDiff) = captureObservation()
                 json = deepSeekClient.continueAfterStep(
                     apiKey = apiKey,
                     conversation = session,
                     stepFeedback = feedback,
-                    pageContext = nextPageContext,
-                    pageDiff = nextPageDiff,
+                    pageContext = pageContext,
+                    pageDiff = pageDiff,
+                    keyMemories = memoryPrompt,
                 )
             }
 
             session.status = "max_steps"
             session.finalSummary = "达到最大步数"
-            persistMemory(apiKey, session)
-            return AgentRunResult(
+            val maxStepResult = AgentRunResult(
                 false,
                 "已达到最大步数（$MAX_AGENT_STEPS），请简化指令或重试",
                 logs,
                 sessionId = session.sessionId,
             )
+            if (resumePending != null) {
+                restorePendingAfterFailedResume(
+                    resumePending,
+                    session,
+                    previousSnapshot,
+                )
+            }
+            return maxStepResult
         } catch (_: CancellationException) {
             session.status = "cancelled"
             session.finalSummary = "用户已停止"
-            persistMemory(apiKey, session)
-            return AgentRunResult(
+            val cancelResult = AgentRunResult(
                 false,
                 "已停止执行",
                 logs,
                 sessionId = session.sessionId,
             )
+            if (resumePending != null) {
+                restorePendingAfterFailedResume(
+                    resumePending,
+                    session,
+                    previousSnapshot,
+                )
+            }
+            return cancelResult
+        } catch (error: Exception) {
+            session.status = "failed"
+            session.finalSummary = error.message ?: "AI 请求失败"
+            val failResult = AgentRunResult(
+                false,
+                error.message ?: "AI 请求失败",
+                logs,
+                sessionId = session.sessionId,
+            )
+            if (resumePending != null) {
+                restorePendingAfterFailedResume(
+                    resumePending,
+                    session,
+                    previousSnapshot,
+                )
+            }
+            return failResult
         }
+    }
+
+    private fun restorePendingAfterFailedResume(
+        original: PendingAgentState,
+        session: AgentConversationSession,
+        previousSnapshot: StructuredPageSnapshot?,
+    ) {
+        savePendingState(
+            original.copy(
+                session = session,
+                previousSnapshot = previousSnapshot ?: original.previousSnapshot,
+            ),
+        )
+    }
+
+    private fun savePendingState(state: PendingAgentState) {
+        pendingState = state
+        sessionStore?.savePending(state)
     }
 
     private suspend fun finishAndPersist(
         action: AgentAction,
-        loopCommand: String,
+        userCommand: String,
         session: AgentConversationSession,
         apiKey: String,
         source: String,
         stepNo: Int,
         logs: MutableList<AgentStepLog>,
         runContext: AgentRunContext,
+        previousSnapshot: StructuredPageSnapshot?,
     ): AgentRunResult {
         val rawSummary = action.message ?: "任务已完成"
         val shouldWait = action.waitingForUser || looksLikeAiQuestion(rawSummary)
-        val summary = rawSummary
-        val updatedLogs = logs + AgentStepLog(stepNo, action, true, "[$source] $summary")
+        val updatedLogs = logs + AgentStepLog(stepNo, action, true, "[$source] $rawSummary")
 
         if (shouldWait) {
             session.status = "waiting_user"
-            session.finalSummary = summary
-            pendingUserReply = PendingUserReply(
-                originalCommand = extractRootCommand(loopCommand),
-                aiPrompt = summary,
-                sessionId = session.sessionId,
+            session.finalSummary = rawSummary
+            val state = PendingAgentState(
+                originalCommand = userCommand,
+                aiPrompt = rawSummary,
+                session = session,
+                previousSnapshot = previousSnapshot,
             )
+            savePendingState(state)
             return AgentRunResult(
                 success = true,
-                summary = summary,
+                summary = rawSummary,
                 logs = updatedLogs,
                 waitingForUserConfirm = true,
-                confirmPrompt = summary,
+                confirmPrompt = rawSummary,
                 sessionId = session.sessionId,
             )
         }
 
         session.status = if (action.finished) "success" else "done"
-        session.finalSummary = summary
-        persistMemory(apiKey, session)
+        session.finalSummary = rawSummary
+        persistMemoryIfWorthy(apiKey, session)
+        clearPendingUserReply()
         runContext.updateProgress(stepNo, "完成")
-        return AgentRunResult(true, summary, updatedLogs, sessionId = session.sessionId)
+        return AgentRunResult(true, rawSummary, updatedLogs, sessionId = session.sessionId)
     }
 
-    private suspend fun persistMemory(apiKey: String, session: AgentConversationSession) {
+    private suspend fun persistMemoryIfWorthy(apiKey: String, session: AgentConversationSession) {
+        if (session.status != "success" && session.status != "done") return
         val store = memoryStore ?: return
         val extracted = deepSeekClient.extractKeyMemory(apiKey, session.buildSessionSummary())
         store.saveFromSession(session, extracted)
@@ -260,6 +374,10 @@ class AgentOrchestrator(
     ): AgentRunResult {
         val logs = mutableListOf<AgentStepLog>()
         var stepNo = 0
+        val memoryPrompt = memoryStore?.formatMemoriesForPrompt(
+            memoryStore?.loadRecentMemories().orEmpty(),
+        ).orEmpty()
+        val localSession = AgentConversationSession(rootCommand = userCommand)
 
         for (action in steps) {
             runContext.awaitContinuation()
@@ -267,11 +385,16 @@ class AgentOrchestrator(
                 val rawSummary = action.message ?: "任务已完成"
                 val shouldWait = action.waitingForUser || looksLikeAiQuestion(rawSummary)
                 if (shouldWait) {
-                    pendingUserReply = PendingUserReply(
+                    deepSeekClient.ensureSystemSeeded(localSession, memoryPrompt)
+                    localSession.addUser("【用户指令】$userCommand")
+                    localSession.appendLocalStepsSummary(logs)
+                    val state = PendingAgentState(
                         originalCommand = userCommand,
                         aiPrompt = rawSummary,
-                        sessionId = java.util.UUID.randomUUID().toString(),
+                        session = localSession,
+                        previousSnapshot = service.mergeSnapshots(service.captureStructuredSnapshots()),
                     )
+                    savePendingState(state)
                     return AgentRunResult(
                         success = true,
                         summary = rawSummary,
@@ -285,6 +408,7 @@ class AgentOrchestrator(
             stepNo++
             val result = AgentToolRegistry.execute(service, action)
             logs += AgentStepLog(stepNo, action, result.success, "[本地] ${result.toAgentFeedback()}")
+            localSession.recordStep(stepNo, action, result, "")
             if (!result.success) {
                 return AgentRunResult(false, result.summary, logs)
             }
@@ -322,7 +446,8 @@ class AgentOrchestrator(
     private fun needsNavigationDelay(action: AgentAction): Boolean {
         return action.action.equals("click", ignoreCase = true) ||
             action.action.equals("back", ignoreCase = true) ||
-            action.action.equals("swipe_down", ignoreCase = true)
+            action.action.equals("swipe_down", ignoreCase = true) ||
+            action.action.equals("open_app", ignoreCase = true)
     }
 
     companion object {

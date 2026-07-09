@@ -62,6 +62,7 @@ class DoubaoAsrClient(
 
         connectId = UUID.randomUUID().toString()
         finalText = ""
+        lastAsrErrorDetail = null
         opened = false
 
         val requestBuilder = Request.Builder()
@@ -88,7 +89,7 @@ class DoubaoAsrClient(
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    handleServerBinaryFrame(bytes.toByteArray(), onPartialText, onError)
+                    handleServerBinaryFrame(bytes.toByteArray(), onPartialText)
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -142,14 +143,17 @@ class DoubaoAsrClient(
                     sendAudioFrame(payload, isLast = false)
                 }
 
-                finalizeSession(onFinalText)
+                finalizeSession(onFinalText, onError)
             }.onFailure {
                 onError("录音失败：${it.message ?: "unknown"}")
             }
         }
     }
 
-    private suspend fun finalizeSession(onFinalText: (String) -> Unit) {
+    private suspend fun finalizeSession(
+        onFinalText: (String) -> Unit,
+        onError: (String) -> Unit,
+    ) {
         releaseRecording()
         if (opened) {
             val last = lastAudioFrame
@@ -162,7 +166,33 @@ class DoubaoAsrClient(
             opened = false
             lastAudioFrame = null
         }
+        if (finalText.isBlank() && !lastAsrErrorDetail.isNullOrBlank()) {
+            onError("语音识别失败：$lastAsrErrorDetail")
+            lastAsrErrorDetail = null
+            return
+        }
+        lastAsrErrorDetail = null
         onFinalText(finalText)
+    }
+
+    private fun parseErrorFrameDetail(raw: ByteArray): String? {
+        if (raw.size < 12) return null
+        return runCatching {
+            val payloadSize = ByteBuffer.wrap(raw, 8, 4).order(ByteOrder.BIG_ENDIAN).int
+            if (payloadSize <= 0 || raw.size < 12 + payloadSize) return null
+            val payload = raw.copyOfRange(12, 12 + payloadSize)
+            val compression = raw[2].toInt() and 0x0F
+            val decoded = if (compression == COMPRESSION_GZIP) gunzip(payload) else payload
+            val text = String(decoded, Charsets.UTF_8).trim()
+            if (text.startsWith("{")) {
+                val obj = JSONObject(text)
+                obj.optString("message").ifBlank {
+                    obj.optJSONObject("error")?.optString("message").orEmpty()
+                }.ifBlank { text.take(120) }
+            } else {
+                text.take(120)
+            }
+        }.getOrNull()
     }
 
     private fun chunkHasSpeech(payload: ByteArray): Boolean {
@@ -269,10 +299,12 @@ class DoubaoAsrClient(
         socket.send(ByteString.of(*frame))
     }
 
+    @Volatile
+    private var lastAsrErrorDetail: String? = null
+
     private fun handleServerBinaryFrame(
         raw: ByteArray,
         onPartialText: (String) -> Unit,
-        onError: (String) -> Unit,
     ) {
         if (raw.size < 8) return
         val second = raw[1].toInt() and 0xFF
@@ -280,7 +312,7 @@ class DoubaoAsrClient(
         val compression = raw[2].toInt() and 0x0F
 
         if (messageType == MESSAGE_TYPE_ERROR) {
-            onError("豆包 ASR 返回错误帧")
+            lastAsrErrorDetail = parseErrorFrameDetail(raw) ?: "服务端返回错误帧"
             return
         }
         if (messageType != MESSAGE_TYPE_FULL_SERVER_RESPONSE) return

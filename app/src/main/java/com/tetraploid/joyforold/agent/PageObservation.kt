@@ -3,6 +3,8 @@ package com.tetraploid.joyforold.agent
 import android.graphics.Rect
 import android.os.Build
 import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONArray
+import org.json.JSONObject
 
 data class StructuredPageSnapshot(
     val packageName: String,
@@ -24,6 +26,35 @@ data class StructuredPageSnapshot(
         appendLine("可输入(${editables.size}): ${editables.take(30).joinToString(" | ")}")
         appendLine("可见文字(${visibleTexts.size}): ${visibleTexts.take(80).joinToString(" | ")}")
     }.trimEnd()
+
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("package_name", packageName)
+        put("app_hint", appHint)
+        put("clickables", JSONArray(clickables))
+        put("editables", JSONArray(editables))
+        put("visible_texts", JSONArray(visibleTexts))
+        put("send_buttons", JSONArray(sendButtons))
+        put("fingerprint", fingerprint)
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): StructuredPageSnapshot = StructuredPageSnapshot(
+            packageName = json.optString("package_name"),
+            appHint = json.optString("app_hint"),
+            clickables = json.optJSONArray("clickables").toStringList(),
+            editables = json.optJSONArray("editables").toStringList(),
+            visibleTexts = json.optJSONArray("visible_texts").toStringList(),
+            sendButtons = json.optJSONArray("send_buttons").toStringList(),
+            fingerprint = json.optString("fingerprint"),
+        )
+
+        private fun JSONArray?.toStringList(): List<String> {
+            if (this == null) return emptyList()
+            return buildList {
+                for (i in 0 until length()) add(optString(i))
+            }
+        }
+    }
 }
 
 object PageObservation {

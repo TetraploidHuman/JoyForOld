@@ -40,6 +40,7 @@ object AgentRuntime {
     private val orchestrator = AgentOrchestrator()
     private var apiKeyStore: ApiKeyStore? = null
     private var memoryStore: AgentMemoryStore? = null
+    private var sessionStore: AgentSessionStore? = null
     private var asrClient: DoubaoAsrClient? = null
     private var voiceConfirmReplyMode = false
     private var voiceReplyApplication: Application? = null
@@ -53,7 +54,9 @@ object AgentRuntime {
         if (apiKeyStore == null) {
             apiKeyStore = ApiKeyStore(application)
             memoryStore = AgentMemoryStore(application).also { orchestrator.bindMemoryStore(it) }
+            sessionStore = AgentSessionStore(application).also { orchestrator.bindSessionStore(it) }
             refreshMemories()
+            restorePendingUiIfNeeded()
             _state.update {
                 it.copy(
                     apiKey = apiKeyStore!!.getApiKey(),
@@ -70,6 +73,17 @@ object AgentRuntime {
     private fun refreshMemories() {
         val summaries = memoryStore?.loadRecentMemories()?.map { it.summary }.orEmpty()
         _state.update { it.copy(recentMemories = summaries) }
+    }
+
+    private fun restorePendingUiIfNeeded() {
+        orchestrator.restorePendingFromDisk()
+        val prompt = orchestrator.peekPendingPrompt() ?: return
+        _state.update {
+            it.copy(
+                waitingForUserConfirm = true,
+                confirmPrompt = prompt,
+            )
+        }
     }
 
     fun updateApiKey(value: String) {

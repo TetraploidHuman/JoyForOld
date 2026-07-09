@@ -2,6 +2,7 @@ package com.tetraploid.joyforold.accessibility
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
@@ -119,6 +120,7 @@ class JoyAccessibilityService : AccessibilityService() {
       "scroll_up" -> scrollResult(false)
       "back" -> globalResult(AccessibilityService.GLOBAL_ACTION_BACK, "已执行返回", "返回失败")
       "home" -> globalResult(AccessibilityService.GLOBAL_ACTION_HOME, "已回到桌面", "回桌面失败")
+      "open_app" -> openAppResult(action.targetText)
       "wait" -> ActionExecutionResult(true, "等待界面刷新")
       "finish" -> ActionExecutionResult(true, action.message ?: "任务结束")
       else -> ActionExecutionResult(
@@ -237,6 +239,49 @@ class JoyAccessibilityService : AccessibilityService() {
       }
     }
     return null
+  }
+
+  private fun openAppResult(targetText: String?): ActionExecutionResult {
+    val query = targetText?.trim().orEmpty()
+    if (query.isEmpty()) {
+      return ActionExecutionResult(false, "打开失败", detail = "缺少 target_text（如 QQ、微信、电话）")
+    }
+
+    val packageName = resolveAppPackage(query)
+    if (packageName == null) {
+      return ActionExecutionResult(
+        success = false,
+        summary = "未识别应用：$query",
+        suggestions = listOf(
+            "仅支持：QQ、微信、电话、联系人、短信、设置",
+            "不要用包名或系统组件名",
+        ),
+      )
+    }
+
+    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+      ?: return ActionExecutionResult(
+        success = false,
+        summary = "无法打开：$query",
+        detail = "应用 $packageName 没有桌面启动入口（可能是系统后台组件，不能打开）",
+        suggestions = listOf("改用 QQ、微信、电话 等常用应用名"),
+      )
+
+    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    return try {
+      startActivity(launchIntent)
+      ActionExecutionResult(true, "已打开：$query（$packageName）")
+    } catch (error: Exception) {
+      ActionExecutionResult(false, "打开失败：${error.message ?: query}")
+    }
+  }
+
+  private fun resolveAppPackage(query: String): String? {
+    val normalized = query.trim().lowercase()
+    APP_ALIASES[normalized]?.let { return it }
+    return APP_ALIASES.entries.firstOrNull { (alias, _) ->
+        normalized.contains(alias)
+    }?.value
   }
 
   private fun clickByTextResult(targetText: String?): ActionExecutionResult {
@@ -471,6 +516,18 @@ class JoyAccessibilityService : AccessibilityService() {
 
   companion object {
     private const val EXTERNAL_CACHE_MS = 30_000L
+
+    private val APP_ALIASES = mapOf(
+      "qq" to "com.tencent.mobileqq",
+      "腾讯qq" to "com.tencent.mobileqq",
+      "微信" to "com.tencent.mm",
+      "wechat" to "com.tencent.mm",
+      "电话" to "com.android.dialer",
+      "拨号" to "com.android.dialer",
+      "联系人" to "com.android.contacts",
+      "短信" to "com.android.mms",
+      "设置" to "com.android.settings",
+    )
 
     @Volatile
     var instance: JoyAccessibilityService? = null

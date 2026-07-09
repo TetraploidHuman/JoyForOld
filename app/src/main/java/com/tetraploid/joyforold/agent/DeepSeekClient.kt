@@ -1,7 +1,10 @@
 package com.tetraploid.joyforold.agent
 
 import com.tetraploid.joyforold.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -9,49 +12,14 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
-
-data class AgentPlanRequest(
-    val apiKey: String,
-    val conversation: AgentConversationSession,
-    val pageContext: String,
-    val pageDiff: String,
-    val keyMemories: String,
-)
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class DeepSeekClient(
     private val httpClient: OkHttpClient = sharedClient,
 ) {
-    suspend fun planNextStep(request: AgentPlanRequest): JSONObject = withContext(Dispatchers.IO) {
-        if (request.apiKey.isBlank()) {
-            throw IllegalArgumentException("请先填写 DeepSeek API Key")
-        }
-
-        val systemPrompt = buildSystemPrompt(request.keyMemories)
-        request.conversation.seedSystem(systemPrompt)
-
-        val observation = buildString {
-            appendLine("【当前页面快览】")
-            append(request.pageContext)
-            appendLine()
-            appendLine("【页面变化】")
-            append(request.pageDiff)
-            appendLine()
-            appendLine("请根据以上观察决定**下一步**一个操作，只返回 JSON。")
-        }
-        request.conversation.addUser(observation)
-
-        val body = baseRequestBody().apply {
-            put("max_tokens", 384)
-            put("messages", request.conversation.toApiMessages())
-        }
-
-        val content = postChatRaw(request.apiKey, body)
-        request.conversation.addAssistant(content)
-        parseJsonObject(content)
-    }
-
-    /** 首次规划：注入用户原始指令 */
     suspend fun beginTask(
         apiKey: String,
         conversation: AgentConversationSession,
@@ -88,15 +56,17 @@ class DeepSeekClient(
         }
     }
 
-    /** 执行结果反馈后规划下一步 */
     suspend fun continueAfterStep(
         apiKey: String,
         conversation: AgentConversationSession,
         stepFeedback: String,
         pageContext: String,
         pageDiff: String,
+        keyMemories: String = "",
     ): JSONObject = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) throw IllegalArgumentException("请先填写 DeepSeek API Key")
+
+        ensureSystemSeeded(conversation, keyMemories)
 
         conversation.addUser(
             buildString {
@@ -154,6 +124,11 @@ class DeepSeekClient(
         }
     }
 
+    fun ensureSystemSeeded(conversation: AgentConversationSession, keyMemories: String) {
+        if (conversation.hasSystem()) return
+        conversation.seedSystem(buildSystemPrompt(keyMemories))
+    }
+
     private fun buildSystemPrompt(keyMemories: String): String = """
         你是手机操作 Agent，工作方式类似 Claude Code / Codex：观察页面 → 选一步工具 → 看结果 → 再观察。
         ${AgentToolRegistry.descriptionsForPrompt()}
@@ -164,9 +139,14 @@ class DeepSeekClient(
         【原则】
         - 每次只输出一个 action；基于页面快览和变化决策，禁止让用户描述页面。
         - 找联系人：优先可见列表模糊匹配（同音字、谐音、号码片段），直接 click；找不到先 scroll_down 或 swipe_down。
+        - 需要切换应用时用 open_app，且 target_text 只能填：QQ、微信、电话、联系人、短信、设置（禁止打开其他包名或系统组件）。
         - 不确定时用 find_on_page 搜索；结构复杂用 read_tree。
-        - 上一步失败时换策略，不要重复无效操作。
-        - 拨号/发消息给指定人/歧义联系人：finish + waiting_for_user:true。
+        - **上一步失败后禁止重复相同操作**；必须换策略（搜索/滚动/读树/换应用/询问用户）。
+        - **敏感操作必须先询问用户**（finish + waiting_for_user:true）：
+          · 拨打电话、点击拨打/通话按钮
+          · 发送消息（send 或点击发送）
+          · 给指定联系人发消息输入完成后
+          · 联系人歧义、QQ电话 vs 手机电话未明确
         - 任务完成：finish, finished:true；需用户回复：waiting_for_user:true。
     """.trimIndent()
 
@@ -180,21 +160,62 @@ class DeepSeekClient(
         }
     }
 
-    private fun postChatRaw(apiKey: String, body: JSONObject): String {
-        val request = Request.Builder()
-            .url("https://api.deepseek.com/chat/completions")
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
-            .post(body.toString().toRequestBody("application/json".toMediaType()))
-            .build()
-
-        httpClient.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw IllegalStateException("DeepSeek 请求失败 (${response.code}): ${responseBody.take(500)}")
+    private suspend fun postChatRaw(apiKey: String, body: JSONObject): String {
+        var lastError: Exception? = null
+        repeat(MAX_RETRIES) { attempt ->
+            try {
+                return postChatRawOnce(apiKey, body)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                lastError = error
+                if (!isRetryable(error) || attempt == MAX_RETRIES - 1) throw error
+                delay(RETRY_BASE_MS * (attempt + 1))
             }
-            return extractAssistantContent(responseBody)
         }
+        throw lastError ?: IllegalStateException("DeepSeek 请求失败")
+    }
+
+    private suspend fun postChatRawOnce(apiKey: String, body: JSONObject): String {
+        return suspendCancellableCoroutine { continuation ->
+            val request = Request.Builder()
+                .url("https://api.deepseek.com/chat/completions")
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val call = httpClient.newCall(request)
+            continuation.invokeOnCancellation { call.cancel() }
+
+            try {
+                call.execute().use { response ->
+                    val responseBody = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        continuation.resumeWithException(
+                            IllegalStateException(
+                                "DeepSeek 请求失败 (${response.code}): ${responseBody.take(500)}",
+                            ),
+                        )
+                        return@suspendCancellableCoroutine
+                    }
+                    continuation.resume(extractAssistantContent(responseBody))
+                }
+            } catch (error: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(error)
+            } catch (error: Exception) {
+                if (continuation.isActive) continuation.resumeWithException(error)
+            }
+        }
+    }
+
+    private fun isRetryable(error: Exception): Boolean {
+        val message = error.message.orEmpty()
+        return message.contains("(429)") ||
+            message.contains("(500)") ||
+            message.contains("(502)") ||
+            message.contains("(503)") ||
+            error is IOException
     }
 
     private fun extractAssistantContent(responseBody: String): String {
@@ -277,6 +298,9 @@ class DeepSeekClient(
     }
 
     companion object {
+        private const val MAX_RETRIES = 3
+        private const val RETRY_BASE_MS = 600L
+
         private val sharedClient: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(25, TimeUnit.SECONDS)

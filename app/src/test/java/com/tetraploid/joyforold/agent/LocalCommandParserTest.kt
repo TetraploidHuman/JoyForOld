@@ -1,0 +1,44 @@
+package com.tetraploid.joyforold.agent
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class LocalCommandParserTest {
+    @Test
+    fun parse_clickCommand() {
+        val steps = LocalCommandParser.parse("点击设置")
+        assertNotNull(steps)
+        assertEquals("click", steps!!.first().action)
+        assertEquals("设置", steps.first().targetText)
+    }
+
+    @Test
+    fun parse_backCommand() {
+        val steps = LocalCommandParser.parse("返回")
+        assertNotNull(steps)
+        assertEquals("back", steps!!.first().action)
+    }
+
+    @Test
+    fun parse_sendToPerson_waitsForUser() {
+        val steps = LocalCommandParser.parse("给张三发消息：你好")
+        assertNotNull(steps)
+        val finish = steps!!.last()
+        assertEquals("finish", finish.action)
+        assertTrue(finish.waitingForUser)
+    }
+
+    @Test
+    fun parse_unknownReturnsNull() {
+        assertNull(LocalCommandParser.parse("帮我查一下天气"))
+    }
+
+    @Test
+    fun isSendToSpecificPerson_detectsPattern() {
+        assertTrue(LocalCommandParser.isSendToSpecificPerson("给610发消息：测试"))
+        assertTrue(!LocalCommandParser.isSendToSpecificPerson("发送：你好"))
+    }
+}
