@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">JoyForOld</string>
+    <string name="accessibility_service_description">JoyForOld 需要无障碍权限来读取屏幕内容并帮老人执行点击、输入等操作。</string>
+    <string name="overlay_channel_name">JoyForOld 悬浮助手</string>
+    <string name="overlay_notification_title">JoyForOld 助手运行中</string>
+    <string name="overlay_notification_text">可在其他应用上使用 AI 辅助操作</string>
+</resources>
