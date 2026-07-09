@@ -3,8 +3,6 @@
 # cp local.properties.example local.properties   # macOS / Linux
 # copy local.properties.example local.properties # Windows
 
-sdk.dir=/path/to/Android/Sdk
-
 # DeepSeek（AI 操控）
 deepseek.api.key=
 deepseek.model=deepseek-v4-flash
@@ -21,3 +19,8 @@ volc.asr.access_token=
 # 资源 ID，按火山控制台开通的模型填写，例如：
 # volc.bigasr.sauc.duration  或  volc.seedasr.sauc.duration
 volc.asr.resource_id=volc.bigasr.sauc.duration
+
+# sdk.dir 无需填写：构建时会按以下顺序自动检测 Android SDK
+# 1. local.properties 里的 sdk.dir（若已填写）
+# 2. 环境变量 ANDROID_SDK_ROOT / ANDROID_HOME
+# 3. 系统默认路径（Windows / macOS / Linux 常见安装位置）

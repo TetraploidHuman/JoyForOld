@@ -19,6 +19,16 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveApiKey() = AgentRuntime.saveApiKey(getApplication())
 
+    fun updateAsrApiKey(value: String) = AgentRuntime.updateAsrApiKey(value)
+
+    fun updateAsrAppId(value: String) = AgentRuntime.updateAsrAppId(value)
+
+    fun updateAsrAccessToken(value: String) = AgentRuntime.updateAsrAccessToken(value)
+
+    fun updateAsrResourceId(value: String) = AgentRuntime.updateAsrResourceId(value)
+
+    fun saveAsrConfig() = AgentRuntime.saveAsrConfig(getApplication())
+
     fun updateCommand(value: String) = AgentRuntime.updateCommand(value)
 
     fun runAgent() = AgentRuntime.runAgent(getApplication())

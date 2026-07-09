@@ -1,7 +1,6 @@
 package com.tetraploid.joyforold.agent
 
 import android.app.Application
-import com.tetraploid.joyforold.BuildConfig
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.data.ApiKeyStore
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
@@ -20,6 +19,10 @@ import kotlinx.coroutines.launch
 data class AgentUiState(
     val apiKey: String = "",
     val modelName: String = "",
+    val asrApiKey: String = "",
+    val asrAppId: String = "",
+    val asrAccessToken: String = "",
+    val asrResourceId: String = "",
     val command: String = "",
     val speechText: String = "",
     val logs: List<String> = emptyList(),
@@ -42,6 +45,7 @@ object AgentRuntime {
     private var memoryStore: AgentMemoryStore? = null
     private var sessionStore: AgentSessionStore? = null
     private var asrClient: DoubaoAsrClient? = null
+    private var cachedAsrParams: AsrParams? = null
     private var voiceConfirmReplyMode = false
     private var voiceReplyApplication: Application? = null
     private var agentJob: Job? = null
@@ -61,6 +65,10 @@ object AgentRuntime {
                 it.copy(
                     apiKey = apiKeyStore!!.getApiKey(),
                     modelName = apiKeyStore!!.getModel(),
+                    asrApiKey = apiKeyStore!!.getAsrApiKey(),
+                    asrAppId = apiKeyStore!!.getAsrAppId(),
+                    asrAccessToken = apiKeyStore!!.getAsrAccessToken(),
+                    asrResourceId = apiKeyStore!!.getAsrResourceId(),
                 )
             }
         }
@@ -93,7 +101,37 @@ object AgentRuntime {
     fun saveApiKey(application: Application) {
         initIfNeeded(application)
         apiKeyStore?.saveApiKey(_state.value.apiKey)
-        appendLog("API Key 已保存")
+        appendLog("DeepSeek API Key 已保存")
+    }
+
+    fun updateAsrApiKey(value: String) {
+        _state.update { it.copy(asrApiKey = value) }
+    }
+
+    fun updateAsrAppId(value: String) {
+        _state.update { it.copy(asrAppId = value) }
+    }
+
+    fun updateAsrAccessToken(value: String) {
+        _state.update { it.copy(asrAccessToken = value) }
+    }
+
+    fun updateAsrResourceId(value: String) {
+        _state.update { it.copy(asrResourceId = value) }
+    }
+
+    fun saveAsrConfig(application: Application) {
+        initIfNeeded(application)
+        val current = _state.value
+        apiKeyStore?.saveAsrConfig(
+            apiKey = current.asrApiKey,
+            appId = current.asrAppId,
+            accessToken = current.asrAccessToken,
+            resourceId = current.asrResourceId,
+        )
+        asrClient = null
+        cachedAsrParams = null
+        appendLog("豆包语音识别配置已保存")
     }
 
     fun updateCommand(value: String) {
@@ -150,7 +188,7 @@ object AgentRuntime {
         if (_state.value.isListening) return
         val client = ensureAsrClient()
         if (client == null) {
-            appendLog("语音识别未配置：请在 local.properties 设置 volc.asr.api_key")
+            appendLog("语音识别未配置：请在下方填写豆包 ASR 配置，或写入 local.properties")
             return
         }
         voiceConfirmReplyMode = confirmReplyMode
@@ -334,17 +372,35 @@ object AgentRuntime {
     }
 
     private fun ensureAsrClient(): DoubaoAsrClient? {
-        if (asrClient != null) return asrClient
-        val hasNewApiKey = BuildConfig.VOLC_ASR_API_KEY.isNotBlank()
-        val hasLegacyAuth = BuildConfig.VOLC_ASR_APP_ID.isNotBlank() &&
-            BuildConfig.VOLC_ASR_ACCESS_TOKEN.isNotBlank()
-        if (!hasNewApiKey && !hasLegacyAuth) return null
+        val params = resolveAsrParams() ?: return null
+        if (asrClient != null && cachedAsrParams == params) return asrClient
         asrClient = DoubaoAsrClient(
-            apiKey = BuildConfig.VOLC_ASR_API_KEY,
-            appId = BuildConfig.VOLC_ASR_APP_ID,
-            accessToken = BuildConfig.VOLC_ASR_ACCESS_TOKEN,
-            resourceId = BuildConfig.VOLC_ASR_RESOURCE_ID,
+            apiKey = params.apiKey,
+            appId = params.appId,
+            accessToken = params.accessToken,
+            resourceId = params.resourceId,
         )
+        cachedAsrParams = params
         return asrClient
     }
+
+    private fun resolveAsrParams(): AsrParams? {
+        val current = _state.value
+        val store = apiKeyStore
+        val apiKey = current.asrApiKey.ifBlank { store?.getAsrApiKey().orEmpty() }.orEmpty()
+        val appId = current.asrAppId.ifBlank { store?.getAsrAppId().orEmpty() }.orEmpty()
+        val accessToken = current.asrAccessToken.ifBlank { store?.getAsrAccessToken().orEmpty() }.orEmpty()
+        val resourceId = current.asrResourceId.ifBlank { store?.getAsrResourceId().orEmpty() }.orEmpty()
+        val hasNewApiKey = apiKey.isNotBlank()
+        val hasLegacyAuth = appId.isNotBlank() && accessToken.isNotBlank()
+        if (!hasNewApiKey && !hasLegacyAuth) return null
+        return AsrParams(apiKey, appId, accessToken, resourceId)
+    }
+
+    private data class AsrParams(
+        val apiKey: String,
+        val appId: String,
+        val accessToken: String,
+        val resourceId: String,
+    )
 }

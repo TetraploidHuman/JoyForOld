@@ -24,7 +24,7 @@ copy local.properties.example local.properties   # Windows
 # cp local.properties.example local.properties # macOS / Linux
 ```
 
-编辑 `local.properties`，填入你自己的密钥（**不要提交此文件**）：
+编辑 `local.properties`，填入你自己的密钥（**不要提交此文件**）。**`sdk.dir` 无需填写**，Gradle 会自动检测 Android SDK（环境变量 `ANDROID_SDK_ROOT` / `ANDROID_HOME`，或系统默认安装路径）。
 
 | 配置项 | 说明 |
 |--------|------|
@@ -34,7 +34,7 @@ copy local.properties.example local.properties   # Windows
 | `volc.asr.app_id` / `volc.asr.access_token` | 豆包 ASR 旧版鉴权 |
 | `volc.asr.resource_id` | ASR 资源 ID，按控制台开通的模型填写 |
 
-也可在 App 内「DeepSeek API Key」输入框保存 DeepSeek 密钥（存于本机 SharedPreferences，不会随仓库分发）。
+也可在 App 内「API 配置」区域填写并保存 DeepSeek / 豆包语音识别密钥（存于本机 SharedPreferences，不会随仓库分发）。
 
 3. 构建并安装：
 

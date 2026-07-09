@@ -179,13 +179,14 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 },
             )
 
-            Text("本页内测试区", style = MaterialTheme.typography.titleMedium)
+            Text("API 配置", style = MaterialTheme.typography.titleMedium)
             Text(
-                "API 密钥请在 local.properties 配置（见仓库内 local.properties.example），也可在下方保存 DeepSeek Key。",
+                "可在下方填写并保存，也可复制 local.properties.example 为 local.properties 后配置。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
+            Text("DeepSeek", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(
                 value = uiState.apiKey,
                 onValueChange = viewModel::updateApiKey,
@@ -194,8 +195,52 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 singleLine = true,
             )
             OutlinedButton(onClick = viewModel::saveApiKey) {
-                Text("保存 API Key")
+                Text("保存 DeepSeek 配置")
             }
+
+            HorizontalDivider()
+
+            Text("豆包语音识别", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "新版填 API Key；旧版填 App ID + Access Token（二选一）。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = uiState.asrApiKey,
+                onValueChange = viewModel::updateAsrApiKey,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("ASR API Key（新版）") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = uiState.asrAppId,
+                onValueChange = viewModel::updateAsrAppId,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("ASR App ID（旧版）") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = uiState.asrAccessToken,
+                onValueChange = viewModel::updateAsrAccessToken,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("ASR Access Token（旧版）") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = uiState.asrResourceId,
+                onValueChange = viewModel::updateAsrResourceId,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("ASR Resource ID") },
+                placeholder = { Text("例如 volc.bigasr.sauc.duration") },
+                singleLine = true,
+            )
+            OutlinedButton(onClick = viewModel::saveAsrConfig) {
+                Text("保存语音识别配置")
+            }
+
+            HorizontalDivider()
+            Text("指令测试", style = MaterialTheme.typography.titleMedium)
 
             OutlinedTextField(
                 value = uiState.command,
