@@ -179,8 +179,12 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 },
             )
 
-            HorizontalDivider()
             Text("本页内测试区", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "API 密钥请在 local.properties 配置（见仓库内 local.properties.example），也可在下方保存 DeepSeek Key。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             OutlinedTextField(
                 value = uiState.apiKey,

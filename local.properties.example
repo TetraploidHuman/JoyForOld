@@ -1,0 +1,23 @@
+# 复制本文件为 local.properties 后填入自己的密钥（local.properties 已在 .gitignore 中，不会提交）
+#
+# cp local.properties.example local.properties   # macOS / Linux
+# copy local.properties.example local.properties # Windows
+
+sdk.dir=/path/to/Android/Sdk
+
+# DeepSeek（AI 操控）
+deepseek.api.key=
+deepseek.model=deepseek-v4-flash
+
+# 豆包 / 火山引擎 语音识别（二选一鉴权方式）
+#
+# 新版：只填 api_key
+volc.asr.api_key=
+
+# 旧版：填 app_id + access_token（此时 api_key 留空）
+volc.asr.app_id=
+volc.asr.access_token=
+
+# 资源 ID，按火山控制台开通的模型填写，例如：
+# volc.bigasr.sauc.duration  或  volc.seedasr.sauc.duration
+volc.asr.resource_id=volc.bigasr.sauc.duration
