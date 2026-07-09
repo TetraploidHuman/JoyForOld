@@ -7,7 +7,16 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Android 11+ 包可见性：否则 queryIntentActivities 只能看到极少应用 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
             android:allowBackup="true"
@@ -46,6 +55,15 @@
             <property
                     android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                     android:value="elderly_ai_voice_confirm" />
+        </service>
+
+        <service
+                android:name=".wakeword.WakeWordService"
+                android:exported="false"
+                android:foregroundServiceType="microphone|specialUse">
+            <property
+                    android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                    android:value="elderly_ai_wakeword" />
         </service>
 
         <service

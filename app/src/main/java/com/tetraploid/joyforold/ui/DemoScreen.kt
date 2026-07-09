@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -71,20 +72,6 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
             pendingVoiceAfterPermission = false
         },
     )
-
-    LaunchedEffect(uiState.waitingForUserConfirm, uiState.confirmPrompt) {
-        if (!uiState.waitingForUserConfirm || uiState.isListening || uiState.isRunning) return@LaunchedEffect
-        val granted = ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.RECORD_AUDIO,
-        ) == PackageManager.PERMISSION_GRANTED
-        if (granted) {
-            viewModel.startVoiceReplyToConfirm()
-        } else {
-            pendingVoiceAfterPermission = true
-            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-        }
-    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -240,6 +227,76 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
             }
 
             HorizontalDivider()
+            Text("本地语音唤醒（Sherpa KWS + VAD）", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "模型版本：${uiState.wakeWordModelVersion}（开发模式会自动预下载）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Switch(
+                    checked = uiState.wakeWordEnabled,
+                    onCheckedChange = viewModel::setWakeWordEnabled,
+                )
+                Text(
+                    if (uiState.wakeWordRunning) "已运行" else "未运行",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (uiState.wakeWordRunning) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            uiState.wakeWordTestHint?.let { hint ->
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            uiState.lastWakeWordAtMs?.let { ts ->
+                val keyword = uiState.lastWakeWordKeyword.orEmpty()
+                Text(
+                    text = "上次唤醒：$keyword（$ts）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            OutlinedTextField(
+                value = uiState.wakeWordPhrase,
+                onValueChange = viewModel::updateWakeWordPhrase,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("唤醒词") },
+                placeholder = { Text("例如：老头乐") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = uiState.wakeWordKeywordScore.toString(),
+                onValueChange = viewModel::updateWakeWordKeywordScore,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("命中分数 keywordsScore") },
+                placeholder = { Text("默认 3.0，越高越灵敏") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = uiState.wakeWordKeywordThreshold.toString(),
+                onValueChange = viewModel::updateWakeWordKeywordThreshold,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("命中阈值 keywordsThreshold") },
+                placeholder = { Text("默认 0.02，越低越灵敏") },
+                singleLine = true,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = viewModel::saveWakeWordConfig, modifier = Modifier.weight(1f)) {
+                    Text("保存唤醒词")
+                }
+                Button(onClick = viewModel::testWakeWord, modifier = Modifier.weight(1f)) {
+                    Text("测试唤醒词")
+                }
+            }
+
+            HorizontalDivider()
             Text("指令测试", style = MaterialTheme.typography.titleMedium)
 
             OutlinedTextField(
@@ -284,10 +341,16 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                     Text("填入识别结果")
                 }
             }
-            if (uiState.speechText.isNotBlank()) {
+            if (uiState.isListening || uiState.speechText.isNotBlank()) {
                 Text(
-                    text = "识别文本：${uiState.speechText}",
+                    text = if (uiState.isListening) {
+                        if (uiState.speechText.isNotBlank()) "识别中：${uiState.speechText}"
+                        else "正在聆听（流式识别）..."
+                    } else {
+                        "识别文本：${uiState.speechText}"
+                    },
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
 

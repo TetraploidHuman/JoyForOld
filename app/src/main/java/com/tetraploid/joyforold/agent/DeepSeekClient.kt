@@ -28,8 +28,7 @@ class DeepSeekClient(
         pageDiff: String,
         keyMemories: String,
     ): JSONObject {
-        val systemPrompt = buildSystemPrompt(keyMemories)
-        conversation.seedSystem(systemPrompt)
+        conversation.seedSystem(buildSystemPrompt(keyMemories))
         conversation.addUser(
             buildString {
                 appendLine("【用户指令】$userCommand")
@@ -47,7 +46,7 @@ class DeepSeekClient(
         return withContext(Dispatchers.IO) {
             if (apiKey.isBlank()) throw IllegalArgumentException("请先填写 DeepSeek API Key")
             val body = baseRequestBody().apply {
-                put("max_tokens", 384)
+                put("max_tokens", 512)
                 put("messages", conversation.toApiMessages())
             }
             val content = postChatRaw(apiKey, body)
@@ -83,7 +82,7 @@ class DeepSeekClient(
         )
 
         val body = baseRequestBody().apply {
-            put("max_tokens", 384)
+            put("max_tokens", 512)
             put("messages", conversation.toApiMessages())
         }
         val content = postChatRaw(apiKey, body)
@@ -105,7 +104,9 @@ class DeepSeekClient(
                     put(
                         JSONObject().put("role", "system").put(
                             "content",
-                            "从手机助手任务记录中提取一条简短关键记忆（1句话，30字内），供以后类似任务参考。只返回纯文本，不要 JSON。",
+                            "从手机助手任务记录中提取一条可复用的用户偏好/联系人信息（1句话，30字内），" +
+                                "例如常用联系人、默认打电话方式、常用应用。不要复述本次具体任务步骤。" +
+                                "若无可复用信息，只返回空字符串。只返回纯文本，不要 JSON。",
                         ),
                     )
                     put(JSONObject().put("role", "user").put("content", sessionSummary))
@@ -124,7 +125,10 @@ class DeepSeekClient(
         }
     }
 
-    fun ensureSystemSeeded(conversation: AgentConversationSession, keyMemories: String) {
+    fun ensureSystemSeeded(
+        conversation: AgentConversationSession,
+        keyMemories: String,
+    ) {
         if (conversation.hasSystem()) return
         conversation.seedSystem(buildSystemPrompt(keyMemories))
     }
@@ -133,14 +137,21 @@ class DeepSeekClient(
         你是手机操作 Agent，工作方式类似 Claude Code / Codex：观察页面 → 选一步工具 → 看结果 → 再观察。
         ${AgentToolRegistry.descriptionsForPrompt()}
 
-        【历史关键记忆】
+        【历史关键记忆（仅供参考）】
         $keyMemories
 
         【原则】
+        - **必须以本轮【用户指令】为唯一目标**；历史记忆只能辅助，禁止擅自继续上一轮未提及的任务。
         - 每次只输出一个 action；基于页面快览和变化决策，禁止让用户描述页面。
         - 找联系人：优先可见列表模糊匹配（同音字、谐音、号码片段），直接 click；找不到先 scroll_down 或 swipe_down。
-        - 需要切换应用时用 open_app，且 target_text 只能填：QQ、微信、电话、联系人、短信、设置（禁止打开其他包名或系统组件）。
+        - 需要切换应用时：不确定应用名先 list_apps（可带 target_text 筛选），再用 open_app；target_text **必须**与 list_apps 返回的名称逐字一致，禁止猜测。
+        - 若 open_app 失败，先 list_apps 核对名称，或根据失败提示中的「你可能想找」换用准确名称，不要重复同一错误名称。
         - 不确定时用 find_on_page 搜索；结构复杂用 read_tree。
+        - **完成判定（通用）**：
+          · finish 前必须用【当前页面快览】和【页面变化】验证用户目标已达成；message **不得描述页面上看不到的状态**
+          · type / find_on_page 通常只是中间步骤；若用户要对某对象进行操作（听/看/打开/选/买/发等），还必须 click 目标项或对应按钮
+          · open_app 后继续在应用内操作，不要打开就立刻 finish
+          · 若不确定是否完成，用 find_on_page 或 read_tree 确认，或 finish+waiting_for_user 询问用户
         - **上一步失败后禁止重复相同操作**；必须换策略（搜索/滚动/读树/换应用/询问用户）。
         - **敏感操作必须先询问用户**（finish + waiting_for_user:true）：
           · 拨打电话、点击拨打/通话按钮

@@ -19,6 +19,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://jitpack.io")
+        maven("https://xdcobra.github.io/maven/")
     }
 }
 

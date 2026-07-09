@@ -42,6 +42,8 @@ class DoubaoAsrClient(
     private var connectId: String = ""
     private var lastAudioFrame: ByteArray? = null
     private var finalText: String = ""
+    private val pendingAudioFrames = ArrayDeque<ByteArray>()
+    private val pendingAudioLock = Any()
     @Volatile
     private var opened = false
 
@@ -64,6 +66,7 @@ class DoubaoAsrClient(
         finalText = ""
         lastAsrErrorDetail = null
         opened = false
+        synchronized(pendingAudioLock) { pendingAudioFrames.clear() }
 
         val requestBuilder = Request.Builder()
             .url(ASR_URL)
@@ -86,6 +89,7 @@ class DoubaoAsrClient(
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     opened = true
                     sendFullClientRequest(webSocket)
+                    flushPendingAudioFrames()
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
@@ -129,8 +133,11 @@ class DoubaoAsrClient(
                     if (read <= 0) continue
                     chunkCount++
                     if (chunkCount >= maxChunks) break
-                    if (!opened) continue
                     val payload = if (read == chunk.size) chunk else chunk.copyOf(read)
+                    if (!opened) {
+                        enqueuePendingAudio(payload)
+                        continue
+                    }
 
                     if (chunkHasSpeech(payload)) {
                         heardSpeech = true
@@ -256,12 +263,12 @@ class DoubaoAsrClient(
                 "request",
                 JSONObject()
                     .put("model_name", "bigmodel")
-                    // bigmodel_async 需要 enable_nonstream；seed streaming200 对应 ssd_version="200"
-                    .put("enable_nonstream", true)
-                    .put("ssd_version", "200")
+                    // 关闭二遍识别：边说边返回 partial，不等到整句 VAD 判停才上屏
+                    .put("enable_nonstream", false)
                     .put("enable_itn", true)
                     .put("enable_punc", true)
                     .put("enable_ddc", false)
+                    .put("show_utterances", true)
                     .put("result_type", "full"),
             )
         }.toString().toByteArray(Charsets.UTF_8)
@@ -302,6 +309,22 @@ class DoubaoAsrClient(
     @Volatile
     private var lastAsrErrorDetail: String? = null
 
+    private fun enqueuePendingAudio(audio: ByteArray) {
+        synchronized(pendingAudioLock) {
+            pendingAudioFrames.addLast(audio.copyOf())
+            while (pendingAudioFrames.size > MAX_PENDING_AUDIO_FRAMES) {
+                pendingAudioFrames.removeFirst()
+            }
+        }
+    }
+
+    private fun flushPendingAudioFrames() {
+        val frames = synchronized(pendingAudioLock) {
+            pendingAudioFrames.toList().also { pendingAudioFrames.clear() }
+        }
+        frames.forEach { frame -> sendAudioFrame(frame, isLast = false) }
+    }
+
     private fun handleServerBinaryFrame(
         raw: ByteArray,
         onPartialText: (String) -> Unit,
@@ -330,10 +353,24 @@ class DoubaoAsrClient(
     }
 
     private fun extractTextFromResponse(json: JSONObject): String {
-        return json.optJSONObject("result")
-            ?.optString("text")
-            ?.trim()
-            .orEmpty()
+        val result = json.optJSONObject("result") ?: return ""
+
+        val utterances = result.optJSONArray("utterances")
+        if (utterances != null && utterances.length() > 0) {
+            val parts = buildList {
+                for (i in 0 until utterances.length()) {
+                    val utterance = utterances.optJSONObject(i) ?: continue
+                    val text = utterance.optString("text").trim()
+                    if (text.isNotBlank()) add(text)
+                }
+            }
+            if (parts.isNotEmpty()) {
+                // 流式返回时优先用分句拼接；若仅一条则是当前 partial。
+                return parts.joinToString("")
+            }
+        }
+
+        return result.optString("text").trim()
     }
 
     companion object {
@@ -348,6 +385,7 @@ class DoubaoAsrClient(
         private const val MAX_RECORD_CHUNKS_SHORT = 50
         private const val SPEECH_RMS_THRESHOLD = 450.0
         private const val FINAL_RESULT_WAIT_MS = 700L
+        private const val MAX_PENDING_AUDIO_FRAMES = 40
 
         private const val MESSAGE_TYPE_FULL_SERVER_RESPONSE = 0b1001
         private const val MESSAGE_TYPE_ERROR = 0b1111

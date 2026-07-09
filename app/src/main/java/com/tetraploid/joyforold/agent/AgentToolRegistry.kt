@@ -5,7 +5,7 @@ import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 object AgentToolRegistry {
     val toolNames: List<String> = listOf(
         "click", "type", "send", "scroll_down", "scroll_up", "back", "home", "wait",
-        "find_on_page", "read_tree", "swipe_down", "open_app", "finish",
+        "find_on_page", "read_tree", "swipe_down", "list_apps", "open_app", "finish",
     )
 
     fun descriptionsForPrompt(): String = """
@@ -15,7 +15,8 @@ object AgentToolRegistry {
         - send: 点击发送按钮
         - scroll_down / scroll_up: 在列表内滚动
         - swipe_down: 全屏下滑手势（列表滚不动时用）
-        - open_app: 打开应用，target_text 填 QQ、微信、电话 等
+        - list_apps: 读取本机已安装可打开应用；不确定应用名时先调用。target_text 可选，用于按关键词筛选
+        - open_app: 打开应用，target_text 填应用中文名（须与 list_apps 返回的名称逐字一致）
         - back / home: 系统返回/桌面
         - wait: 等待界面刷新
         - find_on_page: 仅搜索不点击，target_text 为关键词，结果在下一步反馈里
@@ -32,6 +33,7 @@ object AgentToolRegistry {
         return when (action.action.lowercase()) {
             "find_on_page" -> service.findOnPage(action.targetText)
             "read_tree" -> service.readTreeSnippet()
+            "list_apps" -> service.listAppsResult(action.targetText)
             "swipe_down" -> {
                 val msg = service.swipeDown()
                 ActionExecutionResult(

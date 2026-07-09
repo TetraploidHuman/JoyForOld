@@ -15,17 +15,23 @@ data class StructuredPageSnapshot(
     val sendButtons: List<String>,
     val fingerprint: String,
 ) {
-    fun toCompactSummary(): String = buildString {
-        appendLine("=== 页面快览 ===")
-        if (appHint.isNotBlank()) appendLine(appHint)
-        appendLine("package: $packageName")
-        appendLine("可点击(${clickables.size}): ${clickables.take(80).joinToString(" | ")}")
-        if (sendButtons.isNotEmpty()) {
-            appendLine("发送相关(${sendButtons.size}): ${sendButtons.joinToString(" | ")}")
-        }
-        appendLine("可输入(${editables.size}): ${editables.take(30).joinToString(" | ")}")
-        appendLine("可见文字(${visibleTexts.size}): ${visibleTexts.take(80).joinToString(" | ")}")
-    }.trimEnd()
+    fun toCompactSummary(): String {
+        val snap = this
+        return buildString {
+            appendLine("=== 页面快览 ===")
+            if (snap.appHint.isNotBlank()) appendLine(snap.appHint)
+            appendLine("package: ${snap.packageName}")
+            appendLine("可点击(${snap.clickables.size}): ${snap.clickables.take(80).joinToString(" | ")}")
+            PageSnapshotHints.linesFor(snap).forEach { hint ->
+                appendLine(hint)
+            }
+            if (snap.sendButtons.isNotEmpty()) {
+                appendLine("发送相关(${snap.sendButtons.size}): ${snap.sendButtons.joinToString(" | ")}")
+            }
+            appendLine("可输入(${snap.editables.size}): ${snap.editables.take(30).joinToString(" | ")}")
+            appendLine("可见文字(${snap.visibleTexts.size}): ${snap.visibleTexts.take(80).joinToString(" | ")}")
+        }.trimEnd()
+    }
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("package_name", packageName)

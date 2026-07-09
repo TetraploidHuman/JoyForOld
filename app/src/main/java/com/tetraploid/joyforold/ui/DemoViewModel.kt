@@ -29,6 +29,18 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveAsrConfig() = AgentRuntime.saveAsrConfig(getApplication())
 
+    fun updateWakeWordPhrase(value: String) = AgentRuntime.updateWakeWordPhrase(value)
+
+    fun updateWakeWordKeywordScore(value: String) = AgentRuntime.updateWakeWordKeywordScore(value)
+
+    fun updateWakeWordKeywordThreshold(value: String) = AgentRuntime.updateWakeWordKeywordThreshold(value)
+
+    fun saveWakeWordConfig() = AgentRuntime.saveWakeWordConfig(getApplication())
+
+    fun setWakeWordEnabled(enabled: Boolean) = AgentRuntime.setWakeWordEnabled(getApplication(), enabled)
+
+    fun testWakeWord() = AgentRuntime.testWakeWord(getApplication())
+
     fun updateCommand(value: String) = AgentRuntime.updateCommand(value)
 
     fun runAgent() = AgentRuntime.runAgent(getApplication())

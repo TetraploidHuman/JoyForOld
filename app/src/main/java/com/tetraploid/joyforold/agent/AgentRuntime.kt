@@ -1,11 +1,15 @@
 package com.tetraploid.joyforold.agent
 
 import android.app.Application
+import com.tetraploid.joyforold.BuildConfig
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.data.ApiKeyStore
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.VoiceConfirmOverlayService
 import com.tetraploid.joyforold.speech.DoubaoAsrClient
+import com.tetraploid.joyforold.wakeword.SherpaOnnxModelManager
+import com.tetraploid.joyforold.wakeword.WakeWordConfigStore
+import com.tetraploid.joyforold.wakeword.WakeWordService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,12 +41,22 @@ data class AgentUiState(
     val statusMessage: String = "",
     val sessionId: String? = null,
     val recentMemories: List<String> = emptyList(),
+    val wakeWordEnabled: Boolean = false,
+    val wakeWordPhrase: String = "",
+    val wakeWordRunning: Boolean = false,
+    val lastWakeWordAtMs: Long? = null,
+    val lastWakeWordKeyword: String? = null,
+    val wakeWordTestHint: String? = null,
+    val wakeWordKeywordScore: Float = WakeWordConfigStore.DEFAULT_KEYWORD_SCORE,
+    val wakeWordKeywordThreshold: Float = WakeWordConfigStore.DEFAULT_KEYWORD_THRESHOLD,
+    val wakeWordModelVersion: String = SherpaOnnxModelManager.MODEL_VERSION,
 )
 
 object AgentRuntime {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val orchestrator = AgentOrchestrator()
     private var apiKeyStore: ApiKeyStore? = null
+    private var wakeWordStore: WakeWordConfigStore? = null
     private var memoryStore: AgentMemoryStore? = null
     private var sessionStore: AgentSessionStore? = null
     private var asrClient: DoubaoAsrClient? = null
@@ -60,6 +74,7 @@ object AgentRuntime {
         this.application = application.applicationContext as Application
         if (apiKeyStore == null) {
             apiKeyStore = ApiKeyStore(application)
+            wakeWordStore = WakeWordConfigStore(application)
             memoryStore = AgentMemoryStore(application).also { orchestrator.bindMemoryStore(it) }
             sessionStore = AgentSessionStore(application).also { orchestrator.bindSessionStore(it) }
             refreshMemories()
@@ -72,13 +87,26 @@ object AgentRuntime {
                     asrAppId = apiKeyStore!!.getAsrAppId(),
                     asrAccessToken = apiKeyStore!!.getAsrAccessToken(),
                     asrResourceId = apiKeyStore!!.getAsrResourceId(),
+                    wakeWordEnabled = wakeWordStore!!.isEnabled(),
+                    wakeWordPhrase = wakeWordStore!!.getPhrase(),
+                    wakeWordRunning = wakeWordStore!!.isEnabled() && WakeWordService.isRunning,
+                    wakeWordKeywordScore = wakeWordStore!!.getKeywordScore(),
+                    wakeWordKeywordThreshold = wakeWordStore!!.getKeywordThreshold(),
+                    wakeWordModelVersion = SherpaOnnxModelManager.MODEL_VERSION,
                 )
             }
+            preloadWakeWordModelIfNeeded()
+            syncWakeWordService()
         }
     }
 
     fun refreshAccessibilityState() {
-        _state.update { it.copy(accessibilityEnabled = JoyAccessibilityService.instance != null) }
+        _state.update {
+            it.copy(
+                accessibilityEnabled = JoyAccessibilityService.instance != null,
+                wakeWordRunning = it.wakeWordEnabled && WakeWordService.isRunning,
+            )
+        }
     }
 
     private fun refreshMemories() {
@@ -138,6 +166,67 @@ object AgentRuntime {
         appendLog("豆包语音识别配置已保存")
     }
 
+    fun updateWakeWordPhrase(value: String) {
+        _state.update { it.copy(wakeWordPhrase = value) }
+    }
+
+    fun saveWakeWordConfig(application: Application) {
+        initIfNeeded(application)
+        val current = _state.value
+        val phrase = current.wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE }
+        val score = current.wakeWordKeywordScore
+        val threshold = current.wakeWordKeywordThreshold
+        wakeWordStore?.savePhrase(phrase)
+        wakeWordStore?.saveKeywordScore(score)
+        wakeWordStore?.saveKeywordThreshold(threshold)
+        _state.update {
+            it.copy(
+                wakeWordPhrase = phrase,
+                wakeWordKeywordScore = score,
+                wakeWordKeywordThreshold = threshold,
+            )
+        }
+        // 唤醒词变化时重启常听服务，让 keyword 文件生效
+        syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
+        appendLog("唤醒配置已保存：$phrase，score=$score，threshold=$threshold")
+    }
+
+    fun updateWakeWordKeywordScore(value: String) {
+        val parsed = value.toFloatOrNull() ?: return
+        _state.update { it.copy(wakeWordKeywordScore = parsed.coerceIn(0.1f, 10f)) }
+    }
+
+    fun updateWakeWordKeywordThreshold(value: String) {
+        val parsed = value.toFloatOrNull() ?: return
+        _state.update { it.copy(wakeWordKeywordThreshold = parsed.coerceIn(0.01f, 5f)) }
+    }
+
+    fun setWakeWordEnabled(application: Application, enabled: Boolean) {
+        initIfNeeded(application)
+        wakeWordStore?.saveEnabled(enabled)
+        _state.update { it.copy(wakeWordEnabled = enabled, wakeWordRunning = enabled) }
+        syncWakeWordService()
+        appendLog(if (enabled) "本地语音唤醒已开启" else "本地语音唤醒已关闭")
+    }
+
+    fun testWakeWord(application: Application) {
+        initIfNeeded(application)
+        val phrase = _state.value.wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE }
+        if (!_state.value.wakeWordEnabled) {
+            wakeWordStore?.saveEnabled(true)
+            _state.update { it.copy(wakeWordEnabled = true, wakeWordRunning = true) }
+        }
+        _state.update {
+            it.copy(
+                lastWakeWordAtMs = null,
+                lastWakeWordKeyword = null,
+                wakeWordTestHint = "请说唤醒词：$phrase",
+            )
+        }
+        syncWakeWordService()
+        appendLog("开始测试唤醒词：请说「$phrase」")
+    }
+
     fun updateCommand(value: String) {
         _state.update { it.copy(command = value) }
     }
@@ -161,6 +250,7 @@ object AgentRuntime {
             )
         }
         appendLog("Agent 已停止")
+        ensureWakeWordServiceRunning()
     }
 
     fun pauseAgent() {
@@ -195,13 +285,17 @@ object AgentRuntime {
             appendLog("语音识别未配置：请在下方填写豆包 ASR 配置，或写入 local.properties")
             return
         }
+        if (_state.value.wakeWordEnabled) {
+            pauseWakeWordForMicSharing()
+        }
         voiceConfirmReplyMode = confirmReplyMode
         voiceReplyApplication = application
         _state.update { it.copy(isListening = true, speechText = "") }
         appendLog(if (confirmReplyMode) "请用语音回答..." else "开始语音识别...")
         client.start(
             onPartialText = { text ->
-                scope.launch {
+                if (text.isBlank()) return@start
+                scope.launch(Dispatchers.Main.immediate) {
                     _state.update { it.copy(speechText = text, command = text) }
                 }
             },
@@ -216,6 +310,7 @@ object AgentRuntime {
                     voiceConfirmReplyMode = false
                     voiceReplyApplication = null
                     _state.update { it.copy(isListening = false) }
+                    ensureWakeWordServiceRunning()
                 }
             },
             shortUtterance = confirmReplyMode,
@@ -268,26 +363,32 @@ object AgentRuntime {
             if (isConfirmReply && app != null && _state.value.waitingForUserConfirm) {
                 appendLog("未听清，请再说一次")
                 startVoiceReplyToConfirm(app)
+            } else {
+                ensureWakeWordServiceRunning()
             }
             return
         }
 
-        if (app == null) return
-
-        if (forceRun || isConfirmReply) {
-            appendLog("继续执行：$merged")
-            runAgent(app)
+        if (app == null) {
+            ensureWakeWordServiceRunning()
+            return
         }
+        // 用户要求：无论是否由唤醒触发，只要识别到命令就默认执行。
+        // confirmReplyMode 仍然会走“继续执行”分支，但这里统一执行即可。
+        appendLog("继续执行：$merged")
+        val resumePending = isConfirmReply && _state.value.waitingForUserConfirm
+        runAgent(app, resumePendingConfirm = resumePending)
     }
 
     fun appendLog(message: String) {
         _state.update { it.copy(logs = (it.logs + message).takeLast(100)) }
     }
 
-    fun runAgent(application: Application) {
+    fun runAgent(application: Application, resumePendingConfirm: Boolean? = null) {
         initIfNeeded(application)
         val current = _state.value
         if (current.isRunning) return
+        val shouldResumePending = resumePendingConfirm ?: current.waitingForUserConfirm
 
         val context = AgentRunContext()
         runContext = context
@@ -313,6 +414,7 @@ object AgentRuntime {
                     userCommand = current.command,
                     apiKey = current.apiKey.ifBlank { apiKeyStore?.getApiKey().orEmpty() },
                     runContext = context,
+                    resumePendingConfirm = shouldResumePending,
                     onProgress = { step, message ->
                         _state.update {
                             it.copy(currentStep = step, statusMessage = message, sessionId = it.sessionId)
@@ -353,6 +455,7 @@ object AgentRuntime {
             } finally {
                 agentJob = null
                 runContext = null
+                ensureWakeWordServiceRunning()
             }
         }
     }
@@ -364,6 +467,65 @@ object AgentRuntime {
         if (_state.value.isListening) stopVoiceInput()
         _state.update { it.copy(waitingForUserConfirm = false, confirmPrompt = null) }
         syncConfirmOverlay()
+    }
+
+    private fun syncWakeWordService(forceRestart: Boolean = false) {
+        val app = application ?: return
+        val enabled = _state.value.wakeWordEnabled
+        if (!enabled) {
+            WakeWordService.stop(app)
+            _state.update { it.copy(wakeWordRunning = false) }
+            return
+        }
+        if (forceRestart) {
+            WakeWordService.stop(app)
+            WakeWordService.start(app)
+        } else if (!WakeWordService.isRunning) {
+            WakeWordService.start(app)
+        }
+        _state.update { it.copy(wakeWordRunning = WakeWordService.isRunning) }
+    }
+
+    private fun pauseWakeWordForMicSharing() {
+        val app = application ?: return
+        if (!_state.value.wakeWordEnabled) return
+        WakeWordService.stop(app)
+        _state.update { it.copy(wakeWordRunning = false) }
+    }
+
+    private fun ensureWakeWordServiceRunning() {
+        syncWakeWordService(forceRestart = false)
+    }
+
+    private fun preloadWakeWordModelIfNeeded() {
+        if (!BuildConfig.DEBUG) return
+        val app = application ?: return
+        scope.launch(Dispatchers.IO) {
+            appendLog("开发模式：开始预下载本地唤醒模型（${SherpaOnnxModelManager.MODEL_VERSION}）")
+            val ok = SherpaOnnxModelManager(app).preloadModelIfNeeded()
+            appendLog(if (ok) "本地唤醒模型预下载完成" else "本地唤醒模型预下载失败，请检查网络后重试")
+        }
+    }
+
+    fun onWakeWordDetected() {
+        onWakeWordDetectedInternal(keyword = _state.value.wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE })
+    }
+
+    fun onWakeWordDetectedInternal(keyword: String) {
+        val app = application ?: return
+        if (!_state.value.wakeWordEnabled) return
+        if (_state.value.isRunning || _state.value.isListening) return
+        _state.update {
+            it.copy(
+                lastWakeWordAtMs = System.currentTimeMillis(),
+                lastWakeWordKeyword = keyword,
+                wakeWordTestHint = null,
+            )
+        }
+        appendLog("检测到唤醒词，开始语音指令识别")
+        scope.launch(Dispatchers.Main.immediate) {
+            startVoiceInputInternal(confirmReplyMode = false, application = app)
+        }
     }
 
     private fun syncConfirmOverlay() {

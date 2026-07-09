@@ -41,6 +41,7 @@ class AgentOrchestrator(
         apiKey: String,
         runContext: AgentRunContext = AgentRunContext(),
         onProgress: ((Int, String) -> Unit)? = null,
+        resumePendingConfirm: Boolean = false,
     ): AgentRunResult {
         val command = userCommand.trim()
         if (command.isEmpty()) {
@@ -50,7 +51,12 @@ class AgentOrchestrator(
         val service = JoyAccessibilityService.instance
             ?: return AgentRunResult(false, "请先开启无障碍服务", emptyList())
 
-        pendingState?.let { pending ->
+        // 新一轮指令默认开启全新会话；只有“确认续跑”才复用 pending session。
+        if (!resumePendingConfirm && pendingState != null) {
+            clearPendingUserReply()
+        }
+
+        if (resumePendingConfirm) pendingState?.let { pending ->
             val userReply = command.trim()
             pending.session.recordConfirmAnswer(pending.aiPrompt, userReply)
             val enriched = ConfirmResumeBuilder.buildEnrichedResume(
@@ -107,8 +113,9 @@ class AgentOrchestrator(
             rootCommand = extractRootCommand(rootCommand),
         )
         val memories = memoryStore?.loadRecentMemories().orEmpty()
-        val memoryPrompt = memoryStore?.formatMemoriesForPrompt(memories).orEmpty()
-
+        val memoryPrompt = memoryStore
+            ?.formatMemoriesForPrompt(memories, currentCommand = extractRootCommand(rootCommand))
+            .orEmpty()
         var previousSnapshot: StructuredPageSnapshot? = initialSnapshot
         var stepNo = session.stepRecords.size
 
@@ -166,6 +173,37 @@ class AgentOrchestrator(
                 }
 
                 if (action.action.equals("finish", ignoreCase = true) || action.finished) {
+                    val currentSnapshot = service.mergeSnapshots(service.captureStructuredSnapshots())
+                        ?: previousSnapshot
+                    AgentFinishGuard.prematureFinishReason(
+                        session = session,
+                        action = action,
+                        snapshot = currentSnapshot,
+                        rootCommand = session.rootCommand,
+                    )?.let { blockReason ->
+                        logs += AgentStepLog(
+                            step = stepNo,
+                            action = action,
+                            success = false,
+                            detail = "[Agent] $blockReason",
+                        )
+                        session.recordStep(
+                            stepNo,
+                            action,
+                            ActionExecutionResult(false, "过早结束", detail = blockReason),
+                            "",
+                        )
+                        val (pageContext, pageDiff) = captureObservation()
+                        json = deepSeekClient.continueAfterStep(
+                            apiKey = apiKey,
+                            conversation = session,
+                            stepFeedback = "【系统阻止过早结束】\n$blockReason",
+                            pageContext = pageContext,
+                            pageDiff = pageDiff,
+                            keyMemories = memoryPrompt,
+                        )
+                        return@repeat
+                    }
                     return finishAndPersist(
                         action = action,
                         userCommand = extractRootCommand(rootCommand),
@@ -232,6 +270,16 @@ class AgentOrchestrator(
                             action.inputText?.let { " input=\"$it\"" }.orEmpty(),
                     )
                     append(result.toAgentFeedback())
+                    AgentStepAdvisor.postStepHint(
+                        session = session,
+                        action = action,
+                        result = result,
+                        rootCommand = session.rootCommand,
+                        snapshot = previousSnapshot,
+                    )?.let { hint ->
+                        appendLine()
+                        append(hint)
+                    }
                 }
 
                 coroutineContext.ensureActive()
@@ -378,6 +426,7 @@ class AgentOrchestrator(
         var stepNo = 0
         val memoryPrompt = memoryStore?.formatMemoriesForPrompt(
             memoryStore?.loadRecentMemories().orEmpty(),
+            currentCommand = userCommand,
         ).orEmpty()
         val localSession = AgentConversationSession(rootCommand = userCommand)
 

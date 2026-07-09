@@ -7,4 +7,7 @@
     <string name="confirm_overlay_channel_name">JoyForOld 确认弹窗</string>
     <string name="confirm_overlay_notification_title">等待您的确认</string>
     <string name="confirm_overlay_notification_text">请用语音回答助手的确认问题</string>
+    <string name="wakeword_channel_name">JoyForOld 本地唤醒</string>
+    <string name="wakeword_notification_title">本地语音唤醒运行中</string>
+    <string name="wakeword_notification_text">持续监听唤醒词，听到后自动开始语音输入</string>
 </resources>

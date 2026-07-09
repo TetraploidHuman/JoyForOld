@@ -9,6 +9,7 @@ import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import com.tetraploid.joyforold.app.InstalledAppResolver
 import com.tetraploid.joyforold.agent.ActionExecutionResult
 import com.tetraploid.joyforold.agent.AgentAction
 import com.tetraploid.joyforold.agent.AgentToolRegistry
@@ -121,6 +122,7 @@ class JoyAccessibilityService : AccessibilityService() {
       "back" -> globalResult(AccessibilityService.GLOBAL_ACTION_BACK, "已执行返回", "返回失败")
       "home" -> globalResult(AccessibilityService.GLOBAL_ACTION_HOME, "已回到桌面", "回桌面失败")
       "open_app" -> openAppResult(action.targetText)
+      "list_apps" -> listAppsResult(action.targetText)
       "wait" -> ActionExecutionResult(true, "等待界面刷新")
       "finish" -> ActionExecutionResult(true, action.message ?: "任务结束")
       else -> ActionExecutionResult(
@@ -247,14 +249,24 @@ class JoyAccessibilityService : AccessibilityService() {
       return ActionExecutionResult(false, "打开失败", detail = "缺少 target_text（如 QQ、微信、电话）")
     }
 
-    val packageName = resolveAppPackage(query)
+    val packageName = InstalledAppResolver.resolvePackage(applicationContext, query)
     if (packageName == null) {
+      val suggestions = InstalledAppResolver.suggestMatches(applicationContext, query, limit = 6)
+          .joinToString("、") { it.label }
+      val samples = InstalledAppResolver.getLaunchableApps(applicationContext)
+          .take(8)
+          .joinToString("、") { it.label }
       return ActionExecutionResult(
         success = false,
         summary = "未识别应用：$query",
+        detail = buildString {
+          append("请使用【本机可打开应用】列表中的中文名称（与桌面图标一致）。")
+          if (suggestions.isNotBlank()) append("\n你可能想找：$suggestions")
+          append("\n示例：$samples")
+        },
         suggestions = listOf(
-            "仅支持：QQ、微信、电话、联系人、短信、设置",
-            "不要用包名或系统组件名",
+          "open_app 的 target_text 必须与列表名称完全一致",
+          "用 read_tree 或回到桌面后重试",
         ),
       )
     }
@@ -263,8 +275,8 @@ class JoyAccessibilityService : AccessibilityService() {
       ?: return ActionExecutionResult(
         success = false,
         summary = "无法打开：$query",
-        detail = "应用 $packageName 没有桌面启动入口（可能是系统后台组件，不能打开）",
-        suggestions = listOf("改用 QQ、微信、电话 等常用应用名"),
+        detail = "应用 $packageName 没有桌面启动入口",
+        suggestions = listOf("换一个已安装应用名称重试"),
       )
 
     launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -276,12 +288,28 @@ class JoyAccessibilityService : AccessibilityService() {
     }
   }
 
-  private fun resolveAppPackage(query: String): String? {
-    val normalized = query.trim().lowercase()
-    APP_ALIASES[normalized]?.let { return it }
-    return APP_ALIASES.entries.firstOrNull { (alias, _) ->
-        normalized.contains(alias)
-    }?.value
+  fun listAppsResult(query: String?): ActionExecutionResult {
+    InstalledAppResolver.invalidateCache()
+    val apps = InstalledAppResolver.getLaunchableApps(applicationContext)
+    if (apps.isEmpty()) {
+      return ActionExecutionResult(
+        success = false,
+        summary = "无法读取已安装应用列表",
+        detail = "请检查系统「查询已安装应用」权限或无障碍服务是否正常",
+      )
+    }
+    val keyword = query?.trim().orEmpty()
+    val detail = if (keyword.isBlank()) {
+      InstalledAppResolver.formatForPrompt(applicationContext, limit = 150)
+    } else {
+      InstalledAppResolver.formatSearchMatches(applicationContext, keyword, limit = 20)
+    }
+    val summary = if (keyword.isBlank()) {
+      "已读取 ${apps.size} 个可打开应用"
+    } else {
+      "已按「$keyword」筛选应用"
+    }
+    return ActionExecutionResult(success = true, summary = summary, detail = detail)
   }
 
   private fun clickByTextResult(targetText: String?): ActionExecutionResult {
@@ -516,18 +544,6 @@ class JoyAccessibilityService : AccessibilityService() {
 
   companion object {
     private const val EXTERNAL_CACHE_MS = 30_000L
-
-    private val APP_ALIASES = mapOf(
-      "qq" to "com.tencent.mobileqq",
-      "腾讯qq" to "com.tencent.mobileqq",
-      "微信" to "com.tencent.mm",
-      "wechat" to "com.tencent.mm",
-      "电话" to "com.android.dialer",
-      "拨号" to "com.android.dialer",
-      "联系人" to "com.android.contacts",
-      "短信" to "com.android.mms",
-      "设置" to "com.android.settings",
-    )
 
     @Volatile
     var instance: JoyAccessibilityService? = null

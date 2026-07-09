@@ -25,7 +25,8 @@ object AgentActionGuard {
     fun blockedRepeatReason(session: AgentConversationSession, action: AgentAction): String? {
         if (action.action.equals("finish", ignoreCase = true)) return null
         if (action.action.equals("find_on_page", ignoreCase = true) ||
-            action.action.equals("read_tree", ignoreCase = true)
+            action.action.equals("read_tree", ignoreCase = true) ||
+            action.action.equals("list_apps", ignoreCase = true)
         ) {
             return null
         }

@@ -55,11 +55,50 @@ class AgentMemoryStore(context: Context) {
         }
     }
 
-    fun formatMemoriesForPrompt(memories: List<KeyMemory>): String {
+    fun formatMemoriesForPrompt(
+        memories: List<KeyMemory>,
+        currentCommand: String = "",
+    ): String {
         if (memories.isEmpty()) return "（暂无历史记忆）"
-        return memories.take(12).joinToString("\n") { memory ->
-            "- [${memory.outcome}] ${memory.summary}（指令：${memory.userCommand.take(40)}）"
+        val selected = selectRelevantMemories(memories, currentCommand)
+        if (selected.isEmpty()) return "（暂无与当前指令相关的历史记忆）"
+        return selected.joinToString("\n") { memory ->
+            "- [${memory.outcome}] ${memory.summary}"
         }
+    }
+
+    /** 只注入与当前指令相关的少量记忆，避免上一轮任务污染新指令。 */
+    fun selectRelevantMemories(
+        memories: List<KeyMemory>,
+        currentCommand: String,
+        limit: Int = 4,
+    ): List<KeyMemory> {
+        val command = currentCommand.trim().lowercase()
+        if (command.isBlank()) return memories.take(2)
+
+        val scored = memories.map { memory ->
+            val memoryText = "${memory.summary} ${memory.userCommand} ${memory.tags.joinToString(" ")}"
+                .lowercase()
+            var score = 0
+            memory.tags.forEach { tag ->
+                if (command.contains(tag.lowercase())) score += 3
+            }
+            command.split(Regex("\\s+|[，,。；;：:]"))
+                .map { it.trim() }
+                .filter { it.length >= 2 }
+                .forEach { token ->
+                    if (memoryText.contains(token)) score += 2
+                }
+            if (memory.outcome == "成功" && score > 0) score += 1
+            score to memory
+        }
+
+        return scored
+            .filter { it.first > 0 }
+            .sortedByDescending { it.first }
+            .map { it.second }
+            .distinctBy { it.id }
+            .take(limit)
     }
 
     fun saveKeyMemory(memory: KeyMemory) {
