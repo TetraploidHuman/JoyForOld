@@ -21,7 +21,7 @@ class PinyinKeywordEncoderTest {
     fun encodeLaotoule_includesRelaxedVariant() {
         val lines = PinyinKeywordEncoder.encodeKeywordVariants("老头乐")
         assertTrue(lines.size >= 2)
-        assertTrue(lines.any { it.contains(" t ou ") && it.contains(" l e @老头乐") })
+        assertTrue(lines.any { it.contains(" t ou ") && it.contains(" l e ") && it.contains("@老头乐") })
         assertFalse(lines.any { it.contains(" l ao ") })
     }
 }

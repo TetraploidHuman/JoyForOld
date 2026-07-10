@@ -21,7 +21,7 @@ class SileroVadGate(
     init {
         val modelPath = SileroVadModelManager(context).ensureReadyBlocking()
         vad = Vad(
-            context.assets,
+            null,
             VadModelConfig(
                 sileroVadModelConfig = SileroVadModelConfig(
                     model = modelPath,

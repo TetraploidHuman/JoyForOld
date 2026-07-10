@@ -44,10 +44,7 @@ class SherpaOnnxWakeWordDetector(
             modelFiles = files
             keywordSpotter = createSpotter(files, keywordThreshold)
             stream = keywordSpotter?.createStream("")
-            verifyKeywordSpotter = createSpotter(files, stage2Threshold)
-            verifyStream = verifyKeywordSpotter?.createStream("")
-            ready = keywordSpotter != null && stream != null &&
-                verifyKeywordSpotter != null && verifyStream != null
+            ready = keywordSpotter != null && stream != null
             ready
         }.onFailure {
             Log.e(logTag, "prepare failed: ${it.message}", it)
@@ -91,8 +88,9 @@ class SherpaOnnxWakeWordDetector(
                 onlineStream = stream ?: return false
             }
             threshold == stage2Threshold -> {
-                spotter = verifyKeywordSpotter ?: return false
-                onlineStream = verifyStream ?: return false
+                val verify = verifySpotterForStage2() ?: return false
+                spotter = verify.first
+                onlineStream = verify.second
             }
             else -> {
                 spotter = calibratorSpotterFor(threshold) ?: return false
@@ -156,6 +154,18 @@ class SherpaOnnxWakeWordDetector(
         ready = false
     }
 
+    private fun verifySpotterForStage2(): Pair<KeywordSpotter, OnlineStream>? {
+        verifyKeywordSpotter?.let { spotter ->
+            verifyStream?.let { return spotter to it }
+        }
+        val files = modelFiles ?: return null
+        verifyKeywordSpotter = createSpotter(files, stage2Threshold)
+        verifyStream = verifyKeywordSpotter?.createStream("")
+        val spotter = verifyKeywordSpotter ?: return null
+        val onlineStream = verifyStream ?: return null
+        return spotter to onlineStream
+    }
+
     private fun calibratorSpotterFor(threshold: Float): KeywordSpotter? {
         if (threshold == calibratorSpotterThreshold) {
             return calibratorSpotter
@@ -195,7 +205,9 @@ class SherpaOnnxWakeWordDetector(
     }
 
     private fun matchesKeyword(detected: String): Boolean {
+        val label = keyword.trim().replace(' ', '_')
         return detected.contains(keyword) ||
+            detected.contains("@$label", ignoreCase = true) ||
             detected.contains("@$keyword", ignoreCase = true) ||
             detected.equals(keyword, ignoreCase = true)
     }

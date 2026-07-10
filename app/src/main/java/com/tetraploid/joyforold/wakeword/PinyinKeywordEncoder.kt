@@ -80,10 +80,8 @@ object PinyinKeywordEncoder {
         keywordScore: Float,
         keywordThreshold: Float,
     ): String {
-        return tokens.joinToString(
-            " ",
-            postfix = " @$keyword :$keywordScore #$keywordThreshold",
-        )
+        return tokens.joinToString(" ") +
+            " :$keywordScore #$keywordThreshold @${keyword.trim().replace(' ', '_')}"
     }
 
     private fun encodeTokens(keyword: String, relaxedFinals: Boolean): List<String> {
