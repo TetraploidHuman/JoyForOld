@@ -42,8 +42,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
-import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
+import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.OverlayPermission
+import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 
 import androidx.lifecycle.viewmodel.compose.viewModel
 
@@ -227,7 +228,7 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
             }
 
             HorizontalDivider()
-            Text("本地语音唤醒（Sherpa KWS + VAD）", style = MaterialTheme.typography.titleSmall)
+            Text("本地语音唤醒（Sherpa KWS + Silero VAD）", style = MaterialTheme.typography.titleSmall)
             Text(
                 "模型版本：${uiState.wakeWordModelVersion}（开发模式会自动预下载）",
                 style = MaterialTheme.typography.bodySmall,
@@ -286,10 +287,12 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            OutlinedTextField(
+                value = uiState.wakeWordPhrase,
                 onValueChange = viewModel::updateWakeWordPhrase,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("唤醒词") },
-                placeholder = { Text("例如：老头乐") },
+                placeholder = { Text("例如：Hey,Cortana") },
                 singleLine = true,
             )
             OutlinedTextField(
@@ -314,6 +317,35 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 }
                 Button(onClick = viewModel::testWakeWord, modifier = Modifier.weight(1f)) {
                     Text("测试唤醒词")
+                }
+            }
+            uiState.wakeWordCalibrationHint?.let { hint ->
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = viewModel::startWakeWordCalibration,
+                    modifier = Modifier.weight(1f),
+                    enabled = !uiState.wakeWordCalibrationRunning,
+                ) {
+                    Text("开始标定")
+                }
+                Button(
+                    onClick = viewModel::recordCalibrationStep,
+                    modifier = Modifier.weight(1f),
+                    enabled = uiState.wakeWordCalibrationRunning,
+                ) {
+                    Text(
+                        when (uiState.wakeWordCalibrationStep) {
+                            0, 1, 2 -> "录制样本 ${uiState.wakeWordCalibrationStep + 1}/3"
+                            3 -> "录制环境音"
+                            else -> "完成标定"
+                        },
+                    )
                 }
             }
 

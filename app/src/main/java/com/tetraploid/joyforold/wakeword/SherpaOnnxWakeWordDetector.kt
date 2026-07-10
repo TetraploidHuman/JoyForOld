@@ -1,13 +1,13 @@
 package com.tetraploid.joyforold.wakeword
 
 import android.content.Context
+import android.util.Log
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.KeywordSpotter
 import com.k2fsa.sherpa.onnx.KeywordSpotterConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -22,6 +22,7 @@ class SherpaOnnxWakeWordDetector(
     private val modelManager = SherpaOnnxModelManager(appContext)
     private var keywordSpotter: KeywordSpotter? = null
     private var stream: OnlineStream? = null
+    private var verifyStream: OnlineStream? = null
     private var ready = false
 
     fun isReady(): Boolean = ready
@@ -53,10 +54,10 @@ class SherpaOnnxWakeWordDetector(
                 numTrailingBlanks = 2,
             )
             release()
-            // 使用绝对路径加载文件时，assetManager 必须为 null，否则 sherpa-onnx 会直接 abort。
             keywordSpotter = KeywordSpotter(null, config)
             stream = keywordSpotter?.createStream("")
-            ready = keywordSpotter != null && stream != null
+            verifyStream = keywordSpotter?.createStream("")
+            ready = keywordSpotter != null && stream != null && verifyStream != null
             ready
         }.onFailure {
             Log.e(logTag, "prepare failed: ${it.message}", it)
@@ -68,6 +69,70 @@ class SherpaOnnxWakeWordDetector(
         if (!ready) return false
         val spotter = keywordSpotter ?: return false
         val onlineStream = stream ?: return false
+        val samples = pcmToFloat(pcm16le, len)
+        onlineStream.acceptWaveform(samples, 16000)
+        while (spotter.isReady(onlineStream)) {
+            spotter.decode(onlineStream)
+        }
+        val result = spotter.getResult(onlineStream)
+        val detected = result.keyword?.trim().orEmpty()
+        if (detected.isBlank()) return false
+        val hit = matchesKeyword(detected)
+        if (hit) {
+            Log.d(logTag, "wake candidate: $detected")
+            spotter.reset(onlineStream)
+            return true
+        }
+        Log.d(logTag, "wake miss: $detected (expect $keyword)")
+        return false
+    }
+
+    fun verifyBuffered(
+        pcm16le: ByteArray,
+        len: Int,
+        threshold: Float = keywordThreshold * SECOND_STAGE_THRESHOLD_RATIO,
+    ): Boolean {
+        if (!ready) return false
+        val spotter = keywordSpotter ?: return false
+        val onlineStream = verifyStream ?: return false
+        spotter.reset(onlineStream)
+        val samples = pcmToFloat(pcm16le, len)
+        onlineStream.acceptWaveform(samples, 16000)
+        while (spotter.isReady(onlineStream)) {
+            spotter.decode(onlineStream)
+        }
+        val result = spotter.getResult(onlineStream)
+        val detected = result.keyword?.trim().orEmpty()
+        if (detected.isBlank()) return false
+        val hit = matchesKeyword(detected)
+        if (!hit) return false
+        val tokenCount = result.tokens?.size ?: 0
+        val hasTiming = result.timestamps?.isNotEmpty() == true
+        Log.d(
+            logTag,
+            "second-stage hit: $detected tokens=$tokenCount timing=$hasTiming threshold=$threshold",
+        )
+        spotter.reset(onlineStream)
+        return true
+    }
+
+    fun release() {
+        runCatching { stream?.release() }
+        runCatching { verifyStream?.release() }
+        runCatching { keywordSpotter?.release() }
+        stream = null
+        verifyStream = null
+        keywordSpotter = null
+        ready = false
+    }
+
+    private fun matchesKeyword(detected: String): Boolean {
+        return detected.contains(keyword) ||
+            detected.contains("@$keyword", ignoreCase = true) ||
+            detected.equals(keyword, ignoreCase = true)
+    }
+
+    private fun pcmToFloat(pcm16le: ByteArray, len: Int): FloatArray {
         val samples = FloatArray(len / 2)
         var idx = 0
         var i = 0
@@ -77,31 +142,10 @@ class SherpaOnnxWakeWordDetector(
             samples[idx++] = signed / 32768f
             i += 2
         }
-        onlineStream.acceptWaveform(samples, 16000)
-        while (spotter.isReady(onlineStream)) {
-            spotter.decode(onlineStream)
-        }
-        val result = spotter.getResult(onlineStream)
-        val detected = result.keyword?.trim().orEmpty()
-        if (detected.isBlank()) return false
-        // 只要命中当前唤醒词（含变体行里的 @标签）即触发。
-        val hit = detected.contains(keyword) ||
-            detected.contains("@$keyword", ignoreCase = true) ||
-            detected.equals(keyword, ignoreCase = true)
-        if (hit) {
-            Log.d(logTag, "wake hit: $detected")
-            spotter.reset(onlineStream)
-            return true
-        }
-        Log.d(logTag, "wake miss: $detected (expect $keyword)")
-        return false
+        return if (idx == samples.size) samples else samples.copyOf(idx)
     }
 
-    fun release() {
-        runCatching { stream?.release() }
-        runCatching { keywordSpotter?.release() }
-        stream = null
-        keywordSpotter = null
-        ready = false
+    companion object {
+        const val SECOND_STAGE_THRESHOLD_RATIO = 0.65f
     }
 }

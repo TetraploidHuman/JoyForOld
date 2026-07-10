@@ -41,6 +41,24 @@ class WakeWordConfigStore(context: Context) {
         prefs.edit().putBoolean(KEY_VAD_GATE, enabled).apply()
     }
 
+    fun isSileroVadEnabled(): Boolean = prefs.getBoolean(KEY_SILERO_VAD, DEFAULT_SILERO_VAD)
+
+    fun saveSileroVadEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SILERO_VAD, enabled).apply()
+    }
+
+    fun isSecondStageEnabled(): Boolean = prefs.getBoolean(KEY_SECOND_STAGE, DEFAULT_SECOND_STAGE)
+
+    fun saveSecondStageEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SECOND_STAGE, enabled).apply()
+    }
+
+    fun isCalibrated(): Boolean = prefs.getBoolean(KEY_CALIBRATED, false)
+
+    fun saveCalibrated(calibrated: Boolean) {
+        prefs.edit().putBoolean(KEY_CALIBRATED, calibrated).apply()
+    }
+
     fun getPreset(): WakeWordSensitivityPreset =
         WakeWordSensitivityPreset.fromId(prefs.getString(KEY_PRESET, WakeWordSensitivityPreset.BALANCED.name))
 
@@ -64,11 +82,16 @@ class WakeWordConfigStore(context: Context) {
         private const val KEY_KEYWORD_THRESHOLD = "wake_word_keyword_threshold"
         private const val KEY_CONFIRM_HITS = "wake_word_confirm_hits"
         private const val KEY_VAD_GATE = "wake_word_vad_gate"
+        private const val KEY_SILERO_VAD = "wake_word_silero_vad"
+        private const val KEY_SECOND_STAGE = "wake_word_second_stage"
+        private const val KEY_CALIBRATED = "wake_word_calibrated"
         private const val KEY_PRESET = "wake_word_preset"
-        const val DEFAULT_PHRASE = "老头乐"
-        const val DEFAULT_KEYWORD_SCORE = WakeWordSensitivityPreset.BALANCED.keywordScore
-        const val DEFAULT_KEYWORD_THRESHOLD = WakeWordSensitivityPreset.BALANCED.keywordThreshold
-        const val DEFAULT_CONFIRM_HITS = WakeWordSensitivityPreset.BALANCED.confirmHits
+        const val DEFAULT_PHRASE = "Hey,Cortana"
+        val DEFAULT_KEYWORD_SCORE = WakeWordSensitivityPreset.BALANCED.keywordScore
+        val DEFAULT_KEYWORD_THRESHOLD = WakeWordSensitivityPreset.BALANCED.keywordThreshold
+        val DEFAULT_CONFIRM_HITS = WakeWordSensitivityPreset.BALANCED.confirmHits
         const val DEFAULT_VAD_GATE = true
+        const val DEFAULT_SILERO_VAD = true
+        const val DEFAULT_SECOND_STAGE = true
     }
 }

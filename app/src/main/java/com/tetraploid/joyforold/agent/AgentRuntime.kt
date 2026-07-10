@@ -8,6 +8,8 @@ import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.VoiceConfirmOverlayService
 import com.tetraploid.joyforold.speech.DoubaoAsrClient
 import com.tetraploid.joyforold.wakeword.SherpaOnnxModelManager
+import com.tetraploid.joyforold.wakeword.SileroVadModelManager
+import com.tetraploid.joyforold.wakeword.WakeWordCalibrationSession
 import com.tetraploid.joyforold.wakeword.WakeWordConfigStore
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 import com.tetraploid.joyforold.wakeword.WakeWordService
@@ -53,6 +55,10 @@ data class AgentUiState(
     val wakeWordConfirmHits: Int = WakeWordConfigStore.DEFAULT_CONFIRM_HITS,
     val wakeWordPreset: WakeWordSensitivityPreset = WakeWordSensitivityPreset.BALANCED,
     val wakeWordModelVersion: String = SherpaOnnxModelManager.MODEL_VERSION,
+    val wakeWordCalibrationRunning: Boolean = false,
+    val wakeWordCalibrationStep: Int = 0,
+    val wakeWordCalibrationHint: String? = null,
+    val wakeWordCalibrated: Boolean = false,
 )
 
 object AgentRuntime {
@@ -69,6 +75,8 @@ object AgentRuntime {
     private var agentJob: Job? = null
     private var runContext: AgentRunContext? = null
     private var application: Application? = null
+    private var calibrationSession: WakeWordCalibrationSession? = null
+    private var calibrationJob: Job? = null
 
     private val _state = MutableStateFlow(AgentUiState())
     val state: StateFlow<AgentUiState> = _state.asStateFlow()
@@ -98,6 +106,7 @@ object AgentRuntime {
                     wakeWordConfirmHits = wakeWordStore!!.getConfirmHitCount(),
                     wakeWordPreset = wakeWordStore!!.getPreset(),
                     wakeWordModelVersion = SherpaOnnxModelManager.MODEL_VERSION,
+                    wakeWordCalibrated = wakeWordStore!!.isCalibrated(),
                 )
             }
             preloadWakeWordModelIfNeeded()
@@ -254,6 +263,120 @@ object AgentRuntime {
         }
         syncWakeWordService()
         appendLog("开始测试唤醒词：请说「$phrase」")
+    }
+
+    fun startWakeWordCalibration(application: Application) {
+        initIfNeeded(application)
+        calibrationJob?.cancel()
+        calibrationSession?.release()
+        val phrase = _state.value.wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE }
+        val score = _state.value.wakeWordKeywordScore
+        val threshold = _state.value.wakeWordKeywordThreshold
+        pauseWakeWordForMicSharing()
+        calibrationSession = WakeWordCalibrationSession(application, phrase, score, threshold)
+        _state.update {
+            it.copy(
+                wakeWordCalibrationRunning = true,
+                wakeWordCalibrationStep = 0,
+                wakeWordCalibrationHint = "标定步骤 1/4：请清晰说出「$phrase」后点「录制样本」",
+            )
+        }
+        calibrationJob = scope.launch(Dispatchers.IO) {
+            val ready = calibrationSession?.prepare() == true
+            if (!ready) {
+                appendLog("唤醒标定初始化失败，请检查模型是否已下载")
+                finishCalibration(resetOnly = true)
+            } else {
+                appendLog("唤醒标定已开始：需录制 3 次唤醒样本 + 1 次环境音")
+            }
+        }
+    }
+
+    fun recordCalibrationStep(application: Application) {
+        initIfNeeded(application)
+        val session = calibrationSession ?: return
+        if (!_state.value.wakeWordCalibrationRunning) return
+        val step = _state.value.wakeWordCalibrationStep
+        calibrationJob?.cancel()
+        calibrationJob = scope.launch(Dispatchers.IO) {
+            val phrase = _state.value.wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE }
+            when {
+                step < WakeWordCalibrationSession.POSITIVE_TARGET -> {
+                    appendLog("正在录制唤醒样本 ${step + 1}/${WakeWordCalibrationSession.POSITIVE_TARGET}…")
+                    val ok = session.recordPositiveSample()
+                    if (!ok) {
+                        appendLog("录制失败，请检查麦克风权限")
+                        return@launch
+                    }
+                    val next = step + 1
+                    _state.update {
+                        it.copy(
+                            wakeWordCalibrationStep = next,
+                            wakeWordCalibrationHint = if (next < WakeWordCalibrationSession.POSITIVE_TARGET) {
+                                "标定步骤 ${next + 1}/4：再说一次「$phrase」"
+                            } else {
+                                "标定步骤 4/4：保持安静 5 秒，点「录制环境音」"
+                            },
+                        )
+                    }
+                    appendLog("已保存唤醒样本 $next/${WakeWordCalibrationSession.POSITIVE_TARGET}")
+                }
+                step == WakeWordCalibrationSession.POSITIVE_TARGET -> {
+                    appendLog("正在录制环境音（约 5 秒）…")
+                    val ok = session.recordNegativeSample()
+                    if (!ok) {
+                        appendLog("环境音录制失败")
+                        return@launch
+                    }
+                    val result = session.calibrate()
+                    if (result == null) {
+                        appendLog("标定失败：样本不足或无法命中，请重试")
+                        finishCalibration(resetOnly = true)
+                        return@launch
+                    }
+                    wakeWordStore?.saveKeywordThreshold(result.recommendedThreshold)
+                    wakeWordStore?.saveKeywordScore(result.recommendedScore)
+                    wakeWordStore?.saveCalibrated(true)
+                    _state.update {
+                        it.copy(
+                            wakeWordKeywordThreshold = result.recommendedThreshold,
+                            wakeWordKeywordScore = result.recommendedScore,
+                            wakeWordCalibrated = true,
+                            wakeWordCalibrationStep = WakeWordCalibrationSession.POSITIVE_TARGET + 1,
+                            wakeWordCalibrationHint =
+                                "标定完成：threshold=${result.recommendedThreshold}，" +
+                                    "正样本命中率=${"%.0f".format(result.positiveHitRate * 100)}%，" +
+                                    "环境误触=${"%.0f".format(result.negativeHitRate * 100)}%",
+                        )
+                    }
+                    appendLog(
+                        "唤醒标定完成：threshold=${result.recommendedThreshold}，" +
+                            "正样本 ${result.positiveHitRate}，环境误触 ${result.negativeHitRate}",
+                    )
+                    finishCalibration(resetOnly = false)
+                    syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
+                }
+                else -> finishCalibration(resetOnly = false)
+            }
+        }
+    }
+
+    private fun finishCalibration(resetOnly: Boolean) {
+        calibrationJob?.cancel()
+        calibrationSession?.release()
+        calibrationSession = null
+        if (resetOnly) {
+            _state.update {
+                it.copy(
+                    wakeWordCalibrationRunning = false,
+                    wakeWordCalibrationStep = 0,
+                    wakeWordCalibrationHint = null,
+                )
+            }
+            ensureWakeWordServiceRunning()
+        } else {
+            _state.update { it.copy(wakeWordCalibrationRunning = false) }
+        }
     }
 
     fun updateCommand(value: String) {
@@ -531,8 +654,15 @@ object AgentRuntime {
         val app = application ?: return
         scope.launch(Dispatchers.IO) {
             appendLog("开发模式：开始预下载本地唤醒模型（${SherpaOnnxModelManager.MODEL_VERSION}）")
-            val ok = SherpaOnnxModelManager(app).preloadModelIfNeeded()
-            appendLog(if (ok) "本地唤醒模型预下载完成" else "本地唤醒模型预下载失败，请检查网络后重试")
+            val kwsOk = SherpaOnnxModelManager(app).preloadModelIfNeeded()
+            val vadOk = runCatching { SileroVadModelManager(app).ensureReady(); true }.getOrDefault(false)
+            appendLog(
+                when {
+                    kwsOk && vadOk -> "本地唤醒模型与 Silero VAD 预下载完成"
+                    kwsOk -> "KWS 模型已就绪，Silero VAD 预下载失败"
+                    else -> "本地唤醒模型预下载失败，请检查网络后重试"
+                },
+            )
         }
     }
 

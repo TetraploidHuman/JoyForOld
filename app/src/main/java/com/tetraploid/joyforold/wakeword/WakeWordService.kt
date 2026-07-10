@@ -75,21 +75,32 @@ class WakeWordService : Service() {
         val keywordThreshold = store.getKeywordThreshold()
         val confirmHits = store.getConfirmHitCount()
         val vadGateEnabled = store.isVadGateEnabled()
-        val speechGate = if (vadGateEnabled) SpeechActivityGate() else null
+        val useSileroVad = store.isSileroVadEnabled()
+        val secondStageEnabled = store.isSecondStageEnabled()
+        val sileroGate = if (vadGateEnabled && useSileroVad) {
+            runCatching { SileroVadGate(applicationContext) }.getOrNull()
+        } else {
+            null
+        }
+        val rmsGate = if (vadGateEnabled && sileroGate == null) SpeechActivityGate() else null
         val hitConfirmer = WakeWordHitConfirmer(requiredHits = confirmHits)
+        val ringBuffer = WakeWordAudioRingBuffer()
         val detector = SherpaOnnxWakeWordDetector(
             context = applicationContext,
             keyword = phrase,
             keywordScore = keywordScore,
             keywordThreshold = keywordThreshold,
         )
+        val secondStage = if (secondStageEnabled) WakeWordSecondStageVerifier(detector) else null
         if (!detector.prepare()) {
             AgentRuntime.appendLog("本地唤醒模型初始化失败：${detector.modelHint()}")
+            sileroGate?.release()
             return false
         }
         AgentRuntime.appendLog(
             "本地唤醒已就绪：$phrase，score=$keywordScore，threshold=$keywordThreshold，" +
-                "confirm=$confirmHits，vad=${if (vadGateEnabled) "开" else "关"}",
+                "confirm=$confirmHits，vad=${vadLabel(vadGateEnabled, useSileroVad, sileroGate != null)}，" +
+                "二阶段=${if (secondStageEnabled) "开" else "关"}",
         )
         val min = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
@@ -104,6 +115,7 @@ class WakeWordService : Service() {
                 AgentRuntime.appendLog("本地唤醒录音启动失败：${it.message}")
                 Log.w(logTag, "audio start failed", it)
                 detector.release()
+                sileroGate?.release()
                 releaseRecorder()
                 return false
             }
@@ -121,21 +133,36 @@ class WakeWordService : Service() {
                 frameCount++
                 val now = System.currentTimeMillis()
                 val boostedLen = WakeWordAudioNormalizer.boostIfQuiet(buf, n)
-                if (speechGate != null && !speechGate.shouldProcess(buf, boostedLen, now)) {
+                ringBuffer.append(buf, boostedLen)
+                val vadAllows = when {
+                    sileroGate != null -> sileroGate.shouldProcess(buf, boostedLen, now)
+                    rmsGate != null -> rmsGate.shouldProcess(buf, boostedLen, now)
+                    else -> true
+                }
+                if (!vadAllows) {
                     lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
                     continue
                 }
-                if (speechGate?.hasSpeech(buf, boostedLen) == true) vadPassCount++
+                if (sileroGate?.hasSpeech(buf, boostedLen) == true ||
+                    rmsGate?.hasSpeech(buf, boostedLen) == true
+                ) {
+                    vadPassCount++
+                }
                 if (now - serviceStartedAtMs < STARTUP_GRACE_MS) {
                     lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
                     continue
                 }
                 if (detector.feed(buf, boostedLen)) {
                     if (now - lastHitAt < WAKE_COOLDOWN_MS) continue
+                    if (secondStage != null && !secondStage.verify(ringBuffer)) {
+                        AgentRuntime.appendLog("唤醒候选未通过二阶段校验")
+                        continue
+                    }
                     if (!hitConfirmer.onCandidateHit(now)) continue
                     hitConfirmer.reset()
                     lastHitAt = now
                     hitCount++
+                    ringBuffer.clear()
                     AgentRuntime.appendLog("唤醒命中：$phrase (#$hitCount)")
                     AgentRuntime.onWakeWordDetected()
                 }
@@ -143,9 +170,19 @@ class WakeWordService : Service() {
             }
         } finally {
             detector.release()
+            sileroGate?.release()
             releaseRecorder()
         }
         return true
+    }
+
+    private fun vadLabel(enabled: Boolean, useSilero: Boolean, sileroReady: Boolean): String {
+        if (!enabled) return "关"
+        return if (useSilero) {
+            if (sileroReady) "Silero" else "RMS(回退)"
+        } else {
+            "RMS"
+        }
     }
 
     private fun createAudioRecord(bufferSize: Int): AudioRecord {
@@ -240,4 +277,3 @@ class WakeWordService : Service() {
         }
     }
 }
-

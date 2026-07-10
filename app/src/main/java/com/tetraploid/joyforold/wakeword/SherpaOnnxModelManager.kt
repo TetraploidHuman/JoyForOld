@@ -98,6 +98,14 @@ class SherpaOnnxModelManager(
             runCatching { tmpDir.deleteRecursively() }
             return false
         }
+        val hasCurrentModel = tmpDir.listFiles().orEmpty().any { file ->
+            file.name.contains("encoder-epoch-13") || file.name.contains("zh-en-3M-2025")
+        }
+        if (!hasCurrentModel) {
+            Log.i(logTag, "bundled model is outdated ($MODEL_VERSION), will download")
+            runCatching { tmpDir.deleteRecursively() }
+            return false
+        }
 
         if (modelDir.exists()) modelDir.deleteRecursively()
         if (!tmpDir.renameTo(modelDir)) {
@@ -138,14 +146,30 @@ class SherpaOnnxModelManager(
     private fun writeKeywordsFile(keyword: String, keywordScore: Float, keywordThreshold: Float) {
         modelDir.mkdirs()
         val modelTokens = loadModelTokens()
-        val lines = PinyinKeywordEncoder.encodeKeywordVariants(keyword, keywordScore, keywordThreshold)
-            .filter { PinyinKeywordEncoder.validateTokens(it, modelTokens) }
+        val lexicon = EnglishPhoneLexicon(File(modelDir, LEXICON_FILE_NAME))
+        val lines = SherpaKeywordEncoder.encodeKeywordVariants(
+            keyword = keyword,
+            lexicon = lexicon,
+            keywordScore = keywordScore,
+            keywordThreshold = keywordThreshold,
+        ).filter { SherpaKeywordEncoder.validateTokens(it, modelTokens) }
         require(lines.isNotEmpty()) { "唤醒词编码失败：没有可用 token 变体" }
+        val primary = lines.first()
+        referenceAssetForPhrase(keyword)?.let { assetPath ->
+            KeywordTokenValidator.logReferenceMismatch(appContext, primary, assetPath, keyword)
+        }
         File(modelDir, "keywords.txt").writeText(
             lines.joinToString("\n") + "\n",
             Charsets.UTF_8,
         )
         Log.i(logTag, "keywords updated: ${lines.size} variants for $keyword")
+    }
+
+    private fun referenceAssetForPhrase(keyword: String): String? {
+        return when (keyword.trim().equals(DEFAULT_REFERENCE_PHRASE, ignoreCase = true)) {
+            true -> TEXT2TOKEN_REFERENCE_HEY_CORTANA
+            else -> null
+        }
     }
 
     private fun loadModelTokens(): Set<String> {
@@ -265,10 +289,14 @@ class SherpaOnnxModelManager(
     )
 
     companion object {
-        const val MODEL_VERSION = "kws-3.3M-2024-01-01-mobile-v1"
+        const val MODEL_VERSION = "kws-zh-en-3M-2025-12-20-v1"
         private const val MODEL_DIR_NAME = "wakeword-sherpa"
-        private const val MODEL_FOLDER_NAME = "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile"
-        private const val MODEL_ARCHIVE_NAME = "sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01-mobile.tar.bz2"
+        private const val MODEL_FOLDER_NAME = "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20"
+        private const val MODEL_ARCHIVE_NAME = "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2"
+        private const val LEXICON_FILE_NAME = "en.phone"
+        private const val DEFAULT_REFERENCE_PHRASE = "Hey,Cortana"
+        private const val TEXT2TOKEN_REFERENCE_HEY_CORTANA =
+            "wakeword-sherpa/text2token-reference/hey-cortana.txt"
         private const val MODEL_URL =
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/" +
                 MODEL_ARCHIVE_NAME

@@ -3,6 +3,7 @@ package com.tetraploid.joyforold.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
+import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.agent.AgentUiState
 import kotlinx.coroutines.flow.StateFlow
 
@@ -43,6 +44,10 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
     fun setWakeWordEnabled(enabled: Boolean) = AgentRuntime.setWakeWordEnabled(getApplication(), enabled)
 
     fun testWakeWord() = AgentRuntime.testWakeWord(getApplication())
+
+    fun startWakeWordCalibration() = AgentRuntime.startWakeWordCalibration(getApplication())
+
+    fun recordCalibrationStep() = AgentRuntime.recordCalibrationStep(getApplication())
 
     fun updateCommand(value: String) = AgentRuntime.updateCommand(value)
 
