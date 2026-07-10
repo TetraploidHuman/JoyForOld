@@ -48,6 +48,8 @@ class DoubaoAsrClient(
     @Volatile
     private var shortUtteranceMode = false
     private var endpointStopTracker: AsrEndpointStopTracker? = null
+    @Volatile
+    private var errorReported = false
 
     fun start(
         onPartialText: (String) -> Unit,
@@ -67,6 +69,7 @@ class DoubaoAsrClient(
         connectId = UUID.randomUUID().toString()
         finalText = ""
         lastAsrErrorDetail = null
+        errorReported = false
         opened = false
         shortUtteranceMode = shortUtterance
         endpointStopTracker = createEndpointStopTracker(shortUtterance).also {
@@ -103,9 +106,11 @@ class DoubaoAsrClient(
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    val code = response?.code
-                    val msg = t.message ?: "unknown"
-                    onError("语音识别连接失败：HTTP ${code ?: "?"}，${msg}")
+                    // OkHttp 可能在正常 close 或网络抖动时触发 onFailure。
+                    // 若本轮已经拿到识别文本，就不要再对 UI 报“失败”，避免误导。
+                    if (finalText.isNotBlank() || errorReported) return
+                    errorReported = true
+                    onError(formatConnectionError(t, response))
                 }
             },
         )
@@ -176,6 +181,7 @@ class DoubaoAsrClient(
             lastAudioFrame = null
         }
         if (finalText.isBlank() && !lastAsrErrorDetail.isNullOrBlank()) {
+            if (!errorReported) errorReported = true
             onError("语音识别失败：$lastAsrErrorDetail")
             lastAsrErrorDetail = null
             return
@@ -428,8 +434,31 @@ class DoubaoAsrClient(
 
         private val sharedClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(0, TimeUnit.MILLISECONDS)
+                .retryOnConnectionFailure(true)
                 .build()
+        }
+
+        internal fun formatConnectionError(t: Throwable, response: Response?): String {
+            val code = response?.code
+            val msg = t.message.orEmpty()
+            if (code == 401 || code == 403) {
+                return "豆包 ASR 鉴权失败（HTTP $code），请检查 API Key 与 Resource ID 是否与火山控制台一致"
+            }
+            if (msg.contains("Failed to connect", ignoreCase = true) ||
+                msg.contains("ENETUNREACH", ignoreCase = true) ||
+                msg.contains("Network is unreachable", ignoreCase = true)
+            ) {
+                return "无法连接豆包语音服务器（openspeech.bytedance.com）。" +
+                    "请检查：①手机能否正常上网；②系统设置里是否允许本应用使用 WiFi/流量；" +
+                    "③关闭异常 VPN/代理后重试"
+            }
+            if (msg.contains("timeout", ignoreCase = true) || msg.contains("timed out", ignoreCase = true)) {
+                return "连接豆包语音服务器超时，请检查网络后重试"
+            }
+            return "语音识别连接失败：HTTP ${code ?: "?"}，${msg.ifBlank { "unknown" }}"
         }
 
         private fun gzip(bytes: ByteArray): ByteArray {

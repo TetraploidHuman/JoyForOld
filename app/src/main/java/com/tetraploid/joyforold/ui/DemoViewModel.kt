@@ -16,6 +16,9 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshAccessibilityState() = AgentRuntime.refreshAccessibilityState()
 
+    fun onRecordAudioPermissionResult(granted: Boolean) =
+        AgentRuntime.onRecordAudioPermissionResult(getApplication(), granted)
+
     fun updateApiKey(value: String) = AgentRuntime.updateApiKey(value)
 
     fun saveApiKey() = AgentRuntime.saveApiKey(getApplication())

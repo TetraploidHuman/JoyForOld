@@ -31,6 +31,8 @@ class JoyAccessibilityService : AccessibilityService() {
   override fun onDestroy() {
     if (instance === this) {
       instance = null
+      lastExternalRoot?.recycle()
+      lastExternalRoot = null
     }
     super.onDestroy()
   }
@@ -40,16 +42,16 @@ class JoyAccessibilityService : AccessibilityService() {
     val packageName = event.packageName?.toString() ?: return
     if (packageName == applicationContext.packageName) return
 
-  when (event.eventType) {
+    when (event.eventType) {
       AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
       AccessibilityEvent.TYPE_WINDOWS_CHANGED,
       AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-        val root = findExternalRoot() ?: return
+        val freshRoot = queryFreshExternalRoot() ?: return
         lastExternalPackage = packageName
         lastExternalRoot?.recycle()
-        lastExternalRoot = AccessibilityNodeInfo.obtain(root)
+        lastExternalRoot = AccessibilityNodeInfo.obtain(freshRoot)
         lastExternalUpdatedAt = System.currentTimeMillis()
-        root.recycle()
+        freshRoot.recycle()
       }
     }
   }
@@ -222,13 +224,7 @@ class JoyAccessibilityService : AccessibilityService() {
     return results
   }
 
-  private fun findExternalRoot(): AccessibilityNodeInfo? {
-    lastExternalRoot?.let { cached ->
-      if (System.currentTimeMillis() - lastExternalUpdatedAt <= EXTERNAL_CACHE_MS) {
-        return cached
-      }
-    }
-
+  private fun queryFreshExternalRoot(): AccessibilityNodeInfo? {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
       windows?.forEach { window ->
         if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) return@forEach
@@ -241,6 +237,15 @@ class JoyAccessibilityService : AccessibilityService() {
       }
     }
     return null
+  }
+
+  private fun findExternalRoot(): AccessibilityNodeInfo? {
+    lastExternalRoot?.let { cached ->
+      if (System.currentTimeMillis() - lastExternalUpdatedAt <= EXTERNAL_CACHE_MS) {
+        return AccessibilityNodeInfo.obtain(cached)
+      }
+    }
+    return queryFreshExternalRoot()
   }
 
   private fun openAppResult(targetText: String?): ActionExecutionResult {

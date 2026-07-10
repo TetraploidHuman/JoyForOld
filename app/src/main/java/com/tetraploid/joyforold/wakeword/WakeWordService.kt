@@ -1,5 +1,6 @@
 package com.tetraploid.joyforold.wakeword
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -13,6 +14,8 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
 import com.tetraploid.joyforold.MainActivity
 import com.tetraploid.joyforold.R
@@ -40,6 +43,11 @@ class WakeWordService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, createNotification())
+        if (!hasRecordAudioPermission()) {
+            AgentRuntime.appendLog("本地唤醒启动失败：缺少麦克风权限")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startListenLoop()
         return START_STICKY
     }
@@ -224,6 +232,13 @@ class WakeWordService : Service() {
             release()
         }
         record = null
+    }
+
+    private fun hasRecordAudioPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun createNotification(): Notification {

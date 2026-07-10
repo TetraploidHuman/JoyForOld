@@ -5,13 +5,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 data class PresetCommand(
-    val phrase: String,
+    val name: String,
+    val aliases: List<String>,
     val action: String,
     val target: String = "",
     val extra: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
-        put("phrase", phrase)
+        put("name", name)
+        put("aliases", JSONArray(aliases))
         put("action", action)
         put("target", target)
         put("extra", extra)
@@ -19,7 +21,12 @@ data class PresetCommand(
 
     companion object {
         fun fromJson(json: JSONObject): PresetCommand = PresetCommand(
-            phrase = json.optString("phrase"),
+            name = json.optString("name").ifBlank { json.optString("phrase") },
+            aliases = json.optJSONArray("aliases")?.let { arr ->
+                buildList {
+                    for (i in 0 until arr.length()) add(arr.optString(i))
+                }
+            } ?: listOf(json.optString("phrase")).filter { it.isNotBlank() },
             action = json.optString("action"),
             target = json.optString("target"),
             extra = json.optString("extra"),
@@ -45,20 +52,22 @@ class PresetCommandStore(context: Context) {
                 for (i in 0 until arr.length()) {
                     add(PresetCommand.fromJson(arr.getJSONObject(i)))
                 }
-            }.filter { it.phrase.isNotBlank() && it.action.isNotBlank() }
+            }.filter { it.aliases.isNotEmpty() && it.action.isNotBlank() }
         }.getOrDefault(DEFAULT_PRESETS)
     }
 
     fun savePresets(presets: List<PresetCommand>) {
         val arr = JSONArray()
-        presets.filter { it.phrase.isNotBlank() && it.action.isNotBlank() }.forEach { arr.put(it.toJson()) }
+        presets.filter { it.aliases.isNotEmpty() && it.action.isNotBlank() }.forEach { arr.put(it.toJson()) }
         prefs.edit().putString(KEY_PRESETS, arr.toString()).apply()
     }
 
     fun findByPhrase(command: String): PresetCommand? {
-        val normalized = command.trim()
+        val normalized = PresetTextNormalizer.normalize(command)
         if (normalized.isBlank()) return null
-        return loadPresets().firstOrNull { it.phrase.equals(normalized, ignoreCase = true) }
+        return loadPresets().firstOrNull { preset ->
+            preset.aliases.any { PresetTextNormalizer.normalize(it) == normalized }
+        }
     }
 
     companion object {
@@ -66,7 +75,11 @@ class PresetCommandStore(context: Context) {
         private const val KEY_PRESETS = "preset_commands"
 
         val DEFAULT_PRESETS = listOf(
-            PresetCommand(phrase = "我要回家", action = "navigate_home"),
+            PresetCommand(
+                name = "回家导航",
+                aliases = listOf("我要回家", "导航回家", "送我回家"),
+                action = "navigate_home",
+            ),
         )
     }
 }

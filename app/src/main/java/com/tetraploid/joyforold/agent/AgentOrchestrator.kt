@@ -79,6 +79,15 @@ class AgentOrchestrator(
             )
         }
 
+        // 1) 先尝试用 AI 在少量预设意图中分类，比如「回家」「求助家人」「紧急呼救」等。
+        PresetIntentResolver.resolve(command, apiKey, deepSeekClient)?.let { intentSteps ->
+            val intentResult = executeLocalSteps(service, intentSteps, command, runContext)
+            if (intentResult.success || intentResult.waitingForUserConfirm) {
+                return intentResult
+            }
+        }
+
+        // 2) 命中失败时再尝试纯规则的老人高频模板。
         ElderTaskTemplateMatcher.match(command)?.let { templateSteps ->
             val templateResult = executeLocalSteps(service, templateSteps, command, runContext)
             if (templateResult.success || templateResult.waitingForUserConfirm) {

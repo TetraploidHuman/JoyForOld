@@ -137,6 +137,59 @@ class DeepSeekClient(
         conversation.seedSystem(buildSystemPrompt(keyMemories))
     }
 
+    suspend fun classifyPresetIntent(
+        apiKey: String,
+        utterance: String,
+    ): Pair<String, Double>? = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext null
+        val trimmed = utterance.trim()
+        if (trimmed.isBlank()) return@withContext null
+
+        val body = baseRequestBody().apply {
+            put("max_tokens", 60)
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(
+                        JSONObject().put("role", "system").put(
+                            "content",
+                            """
+                            你是老年手机助手的「指令分类器」。
+                            任务：只从下列意图中选择一项（或 none），并给出 0~1 置信度：
+                            - navigate_home: 用户希望回到家/住所/家里/屋里
+                            - ask_family_for_help: 用户希望联系家人帮忙，但不是紧急求救
+                            - emergency_help: 用户有强烈紧急求助/危险信号
+                            - open_payment_code: 用户希望打开付款码/收款码
+                            - open_health_code: 用户希望打开健康码/健康码相关页面
+                            - none: 不属于以上任何意图
+
+                            严格按照下列 JSON 返回，不要输出多余文字：
+                            {"intent":"navigate_home|ask_family_for_help|emergency_help|open_payment_code|open_health_code|none","confidence":0.0~1.0}
+                            """.trimIndent(),
+                        ),
+                    )
+                    put(
+                        JSONObject().put("role", "user").put(
+                            "content",
+                            "用户原话：$trimmed",
+                        ),
+                    )
+                },
+            )
+        }
+
+        val content = try {
+            postChatRaw(apiKey, body)
+        } catch (_: Exception) {
+            return@withContext null
+        }
+
+        val json = runCatching { JSONObject(content) }.getOrNull() ?: return@withContext null
+        val intent = json.optString("intent").ifBlank { "none" }
+        val confidence = json.optDouble("confidence", 0.0)
+        intent to confidence
+    }
+
     private fun buildSystemPrompt(keyMemories: String): String = """
         你是手机操作 Agent，工作方式类似 Claude Code / Codex：观察页面 → 选一步工具 → 看结果 → 再观察。
         ${AgentToolRegistry.descriptionsForPrompt()}

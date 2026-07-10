@@ -1,6 +1,8 @@
 package com.tetraploid.joyforold.agent
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
 import com.tetraploid.joyforold.BuildConfig
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
@@ -9,14 +11,17 @@ import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.VoiceConfirmOverlayService
 import com.tetraploid.joyforold.preset.PresetCommand
 import com.tetraploid.joyforold.preset.PresetCommandStore
+import com.tetraploid.joyforold.preset.PresetTextNormalizer
 import com.tetraploid.joyforold.speech.DoubaoAsrClient
 import com.tetraploid.joyforold.speech.JoyTtsSpeaker
+import com.tetraploid.joyforold.util.NetworkStatus
 import com.tetraploid.joyforold.wakeword.SherpaOnnxModelManager
 import com.tetraploid.joyforold.wakeword.SileroVadModelManager
 import com.tetraploid.joyforold.wakeword.WakeWordCalibrationSession
 import com.tetraploid.joyforold.wakeword.WakeWordConfigStore
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 import com.tetraploid.joyforold.wakeword.WakeWordService
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +47,7 @@ data class AgentUiState(
     val isListening: Boolean = false,
     val isPaused: Boolean = false,
     val accessibilityEnabled: Boolean = false,
+    val recordAudioGranted: Boolean = false,
     val waitingForUserConfirm: Boolean = false,
     val confirmPrompt: String? = null,
     val currentStep: Int = 0,
@@ -70,7 +76,7 @@ data class AgentUiState(
     val emergencyPhone: String = "",
     val emergencyMessage: String = "",
     val homeAddress: String = "",
-    val presetPhraseGoHome: String = "我要回家",
+    val presetPhraseGoHome: String = "我要回家, 导航回家, 送我回家",
 )
 
 object AgentRuntime {
@@ -137,7 +143,8 @@ object AgentRuntime {
                     emergencyPhone = emergency?.phoneNumber.orEmpty(),
                     emergencyMessage = caregiverStore!!.loadEmergencyMessage(),
                     homeAddress = caregiverStore!!.loadHomeAddress(),
-                    presetPhraseGoHome = goHomePreset?.phrase ?: "我要回家",
+                    presetPhraseGoHome = goHomePreset?.aliases?.joinToString(", ") ?: "我要回家, 导航回家, 送我回家",
+                    recordAudioGranted = hasRecordAudioPermission(application),
                 )
             }
             preloadWakeWordModelIfNeeded()
@@ -147,11 +154,26 @@ object AgentRuntime {
     }
 
     fun refreshAccessibilityState() {
+        val app = application
         _state.update {
             it.copy(
                 accessibilityEnabled = JoyAccessibilityService.instance != null,
                 wakeWordRunning = it.wakeWordEnabled && WakeWordService.isRunning,
+                recordAudioGranted = app?.let { ctx -> hasRecordAudioPermission(ctx) } ?: it.recordAudioGranted,
             )
+        }
+    }
+
+    fun onRecordAudioPermissionResult(application: Application, granted: Boolean) {
+        initIfNeeded(application)
+        _state.update { it.copy(recordAudioGranted = granted) }
+        if (granted) {
+            appendLog("麦克风权限已授予")
+            syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
+        } else {
+            appendLog("麦克风权限被拒绝，语音识别与本地唤醒不可用")
+            WakeWordService.stop(application)
+            _state.update { it.copy(wakeWordRunning = false) }
         }
     }
 
@@ -298,6 +320,7 @@ object AgentRuntime {
     fun saveCaregiverSettings(application: Application) {
         initIfNeeded(application)
         val current = _state.value
+        val goHomeAliases = PresetTextNormalizer.splitAliases(current.presetPhraseGoHome)
         caregiverStore?.saveFamilyContacts(
             listOf(
                 com.tetraploid.joyforold.caregiver.FamilyContact(alias = "女儿", phoneNumber = current.daughterPhone.trim()),
@@ -310,7 +333,8 @@ object AgentRuntime {
         presetStore?.savePresets(
             listOf(
                 PresetCommand(
-                    phrase = current.presetPhraseGoHome.trim().ifBlank { "我要回家" },
+                    name = "回家导航",
+                    aliases = if (goHomeAliases.isEmpty()) listOf("我要回家", "导航回家", "送我回家") else goHomeAliases,
                     action = "navigate_home",
                 ),
             ),
@@ -320,6 +344,12 @@ object AgentRuntime {
 
     fun setWakeWordEnabled(application: Application, enabled: Boolean) {
         initIfNeeded(application)
+        if (enabled && !hasRecordAudioPermission(application)) {
+            wakeWordStore?.saveEnabled(false)
+            _state.update { it.copy(wakeWordEnabled = false, wakeWordRunning = false) }
+            appendLog("无法开启本地唤醒：请先授予麦克风权限")
+            return
+        }
         wakeWordStore?.saveEnabled(enabled)
         _state.update { it.copy(wakeWordEnabled = enabled, wakeWordRunning = enabled) }
         syncWakeWordService()
@@ -344,6 +374,10 @@ object AgentRuntime {
 
     fun testWakeWord(application: Application) {
         initIfNeeded(application)
+        if (!hasRecordAudioPermission(application)) {
+            appendLog("无法测试唤醒词：请先授予麦克风权限")
+            return
+        }
         val phrase = _state.value.wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE }
         if (!_state.value.wakeWordEnabled) {
             wakeWordStore?.saveEnabled(true)
@@ -362,6 +396,10 @@ object AgentRuntime {
 
     fun startWakeWordCalibration(application: Application) {
         initIfNeeded(application)
+        if (!hasRecordAudioPermission(application)) {
+            appendLog("无法开始唤醒标定：请先授予麦克风权限")
+            return
+        }
         calibrationJob?.cancel()
         calibrationSession?.release()
         val phrase = _state.value.wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE }
@@ -527,6 +565,14 @@ object AgentRuntime {
 
     private fun startVoiceInputInternal(confirmReplyMode: Boolean, application: Application?) {
         if (_state.value.isListening) return
+        val app = application ?: this.application
+        app?.let { ctx ->
+            NetworkStatus.offlineHint(ctx)?.let { hint ->
+                appendLog(hint)
+                speakStatus("网络不可用，请检查 WiFi 或流量")
+                return
+            }
+        }
         val client = ensureAsrClient()
         if (client == null) {
             appendLog("语音识别未配置：请在下方填写豆包 ASR 配置，或写入 local.properties")
@@ -641,6 +687,13 @@ object AgentRuntime {
         ttsSpeaker?.speak(concise, flush = flush)
     }
 
+    private fun hasRecordAudioPermission(application: Application): Boolean {
+        return ContextCompat.checkSelfPermission(
+            application,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
     private fun resolvePresetCommand(command: String): String {
         val preset = presetStore?.findByPhrase(command) ?: return command
         return when (preset.action) {
@@ -753,6 +806,13 @@ object AgentRuntime {
         if (!enabled) {
             WakeWordService.stop(app)
             _state.update { it.copy(wakeWordRunning = false) }
+            return
+        }
+        if (!hasRecordAudioPermission(app)) {
+            WakeWordService.stop(app)
+            _state.update { it.copy(wakeWordRunning = false, wakeWordEnabled = false) }
+            wakeWordStore?.saveEnabled(false)
+            appendLog("本地唤醒未启动：缺少麦克风权限")
             return
         }
         if (forceRestart) {

@@ -1,7 +1,7 @@
 package com.tetraploid.joyforold.ui
 
+import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.core.content.ContextCompat
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.OverlayPermission
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
@@ -56,21 +55,23 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
     var demoInput by remember { mutableStateOf("") }
     var demoStatus by remember { mutableStateOf("等待 AI 操作") }
     var pendingVoiceAfterPermission by remember { mutableStateOf(false) }
+    var pendingVoiceInputAfterPermission by remember { mutableStateOf(false) }
     val overlayRunning = remember { mutableStateOf(FloatingOverlayService.isRunning()) }
 
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { granted ->
+            viewModel.onRecordAudioPermissionResult(granted)
             if (granted) {
-                if (pendingVoiceAfterPermission) {
-                    viewModel.startVoiceReplyToConfirm()
-                } else {
-                    viewModel.startVoiceInput()
+                when {
+                    pendingVoiceAfterPermission -> viewModel.startVoiceReplyToConfirm()
+                    pendingVoiceInputAfterPermission -> viewModel.startVoiceInput()
                 }
-            } else {
+            } else if (pendingVoiceAfterPermission || pendingVoiceInputAfterPermission) {
                 viewModel.onVoicePermissionDenied()
             }
             pendingVoiceAfterPermission = false
+            pendingVoiceInputAfterPermission = false
         },
     )
 
@@ -110,6 +111,18 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                     MaterialTheme.colorScheme.error
                 },
             )
+            Text(
+                text = if (uiState.recordAudioGranted) {
+                    "麦克风权限：已授予"
+                } else {
+                    "麦克风权限：未授予（语音识别与本地唤醒需要）"
+                },
+                color = if (uiState.recordAudioGranted) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+            )
 
             OutlinedButton(
                 onClick = {
@@ -127,6 +140,22 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("2. 开启悬浮窗权限")
+            }
+
+            OutlinedButton(
+                onClick = {
+                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                },
+                enabled = !uiState.recordAudioGranted,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    if (uiState.recordAudioGranted) {
+                        "3. 麦克风权限已开启"
+                    } else {
+                        "3. 授予麦克风权限"
+                    },
+                )
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -274,12 +303,12 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 value = uiState.presetPhraseGoHome,
                 onValueChange = viewModel::updatePresetPhraseGoHome,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("回家预设口令") },
-                placeholder = { Text("例如：我要回家") },
-                singleLine = true,
+                label = { Text("回家预设说法（可多条）") },
+                placeholder = { Text("例如：我要回家, 导航回家, 送我回家") },
+                minLines = 2,
             )
             Text(
-                "识别到这句口令时，会优先走地图导航深链，不依赖页面点击。",
+                "这里保存的是整句别名，不是关键词。命中后会直接走地图导航深链，不依赖页面点击。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -455,14 +484,11 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                             }
                             return@Button
                         }
-                        val granted = ContextCompat.checkSelfPermission(
-                            context,
-                            android.Manifest.permission.RECORD_AUDIO,
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (granted) {
+                        if (uiState.recordAudioGranted) {
                             viewModel.startVoiceInput()
                         } else {
-                            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                            pendingVoiceInputAfterPermission = true
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     },
                     enabled = !uiState.isRunning,
