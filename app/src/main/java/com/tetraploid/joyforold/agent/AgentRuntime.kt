@@ -1,7 +1,6 @@
 package com.tetraploid.joyforold.agent
 
 import android.app.Application
-import com.tetraploid.joyforold.BuildConfig
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.data.ApiKeyStore
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
@@ -9,7 +8,6 @@ import com.tetraploid.joyforold.overlay.VoiceConfirmOverlayService
 import com.tetraploid.joyforold.speech.DoubaoAsrClient
 import com.tetraploid.joyforold.wakeword.SherpaOnnxModelManager
 import com.tetraploid.joyforold.wakeword.SherpaOnnxWakeWordDetector
-import com.tetraploid.joyforold.wakeword.SileroVadModelManager
 import com.tetraploid.joyforold.wakeword.WakeWordCalibrationSession
 import com.tetraploid.joyforold.wakeword.WakeWordConfigStore
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
@@ -112,7 +110,6 @@ object AgentRuntime {
                     wakeWordCalibrated = wakeWordStore!!.isCalibrated(),
                 )
             }
-            preloadWakeWordModelIfNeeded()
             syncWakeWordService()
         }
     }
@@ -264,9 +261,6 @@ object AgentRuntime {
         initIfNeeded(application)
         wakeWordStore?.saveEnabled(enabled)
         _state.update { it.copy(wakeWordEnabled = enabled, wakeWordRunning = enabled) }
-        if (enabled) {
-            preloadWakeWordAssets("开启唤醒：")
-        }
         syncWakeWordService()
         appendLog(if (enabled) "本地语音唤醒已开启" else "本地语音唤醒已关闭")
     }
@@ -308,7 +302,7 @@ object AgentRuntime {
         calibrationJob = scope.launch(Dispatchers.IO) {
             val ready = calibrationSession?.prepare() == true
             if (!ready) {
-                appendLog("唤醒标定初始化失败，请检查模型是否已下载")
+                appendLog("唤醒标定初始化失败，请检查内置模型是否完整")
                 finishCalibration(resetOnly = true)
             } else {
                 appendLog("唤醒标定已开始：需录制 3 次唤醒样本 + 1 次环境音")
@@ -680,27 +674,6 @@ object AgentRuntime {
 
     private fun ensureWakeWordServiceRunning() {
         syncWakeWordService(forceRestart = false)
-    }
-
-    private fun preloadWakeWordAssets(logPrefix: String) {
-        val app = application ?: return
-        scope.launch(Dispatchers.IO) {
-            appendLog("${logPrefix}开始预下载本地唤醒模型（${SherpaOnnxModelManager.MODEL_VERSION}）")
-            val kwsOk = SherpaOnnxModelManager(app).preloadModelIfNeeded()
-            val vadOk = runCatching { SileroVadModelManager(app).ensureReady(); true }.getOrDefault(false)
-            appendLog(
-                when {
-                    kwsOk && vadOk -> "本地唤醒模型与 Silero VAD 已就绪"
-                    kwsOk -> "KWS 模型已就绪，Silero VAD 预下载失败（将回退 RMS VAD）"
-                    else -> "本地唤醒模型预下载失败，请检查网络后重试"
-                },
-            )
-        }
-    }
-
-    private fun preloadWakeWordModelIfNeeded() {
-        if (!BuildConfig.DEBUG) return
-        preloadWakeWordAssets("开发模式：")
     }
 
     fun onWakeWordDetected() {

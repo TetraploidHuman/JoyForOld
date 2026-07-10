@@ -230,7 +230,7 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
             HorizontalDivider()
             Text("本地语音唤醒（Sherpa KWS + Silero VAD）", style = MaterialTheme.typography.titleSmall)
             Text(
-                "模型版本：${uiState.wakeWordModelVersion}（开发模式会自动预下载）",
+                "模型版本：${uiState.wakeWordModelVersion}（已内置，无需联网下载）",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
