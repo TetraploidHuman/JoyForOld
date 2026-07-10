@@ -36,6 +36,8 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateWakeWordKeywordThreshold(value: String) = AgentRuntime.updateWakeWordKeywordThreshold(value)
 
+    fun updateWakeWordSecondStageThreshold(value: String) = AgentRuntime.updateWakeWordSecondStageThreshold(value)
+
     fun applyWakeWordPreset(preset: WakeWordSensitivityPreset) =
         AgentRuntime.applyWakeWordPreset(getApplication(), preset)
 

@@ -42,6 +42,6 @@ class WakeWordAudioRingBuffer(
     companion object {
         private const val SAMPLE_RATE = 16000
         private const val BYTES_PER_SAMPLE = 2
-        private const val BUFFER_SECONDS = 2
+        private const val BUFFER_SECONDS = 1
     }
 }

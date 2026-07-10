@@ -8,6 +8,7 @@ import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.VoiceConfirmOverlayService
 import com.tetraploid.joyforold.speech.DoubaoAsrClient
 import com.tetraploid.joyforold.wakeword.SherpaOnnxModelManager
+import com.tetraploid.joyforold.wakeword.SherpaOnnxWakeWordDetector
 import com.tetraploid.joyforold.wakeword.SileroVadModelManager
 import com.tetraploid.joyforold.wakeword.WakeWordCalibrationSession
 import com.tetraploid.joyforold.wakeword.WakeWordConfigStore
@@ -52,6 +53,7 @@ data class AgentUiState(
     val wakeWordTestHint: String? = null,
     val wakeWordKeywordScore: Float = WakeWordConfigStore.DEFAULT_KEYWORD_SCORE,
     val wakeWordKeywordThreshold: Float = WakeWordConfigStore.DEFAULT_KEYWORD_THRESHOLD,
+    val wakeWordSecondStageThreshold: Float = WakeWordConfigStore.DEFAULT_SECOND_STAGE_THRESHOLD,
     val wakeWordConfirmHits: Int = WakeWordConfigStore.DEFAULT_CONFIRM_HITS,
     val wakeWordPreset: WakeWordSensitivityPreset = WakeWordSensitivityPreset.BALANCED,
     val wakeWordModelVersion: String = SherpaOnnxModelManager.MODEL_VERSION,
@@ -103,6 +105,7 @@ object AgentRuntime {
                     wakeWordRunning = wakeWordStore!!.isEnabled() && WakeWordService.isRunning,
                     wakeWordKeywordScore = wakeWordStore!!.getKeywordScore(),
                     wakeWordKeywordThreshold = wakeWordStore!!.getKeywordThreshold(),
+                    wakeWordSecondStageThreshold = wakeWordStore!!.getSecondStageThreshold(),
                     wakeWordConfirmHits = wakeWordStore!!.getConfirmHitCount(),
                     wakeWordPreset = wakeWordStore!!.getPreset(),
                     wakeWordModelVersion = SherpaOnnxModelManager.MODEL_VERSION,
@@ -190,10 +193,12 @@ object AgentRuntime {
         val phrase = current.wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE }
         val score = current.wakeWordKeywordScore
         val threshold = current.wakeWordKeywordThreshold
+        val secondStageThreshold = current.wakeWordSecondStageThreshold
         val confirmHits = current.wakeWordConfirmHits
         wakeWordStore?.savePhrase(phrase)
         wakeWordStore?.saveKeywordScore(score)
         wakeWordStore?.saveKeywordThreshold(threshold)
+        wakeWordStore?.saveSecondStageThreshold(secondStageThreshold)
         wakeWordStore?.saveConfirmHitCount(confirmHits)
         wakeWordStore?.savePreset(current.wakeWordPreset)
         _state.update {
@@ -201,12 +206,14 @@ object AgentRuntime {
                 wakeWordPhrase = phrase,
                 wakeWordKeywordScore = score,
                 wakeWordKeywordThreshold = threshold,
+                wakeWordSecondStageThreshold = secondStageThreshold,
                 wakeWordConfirmHits = confirmHits,
             )
         }
         syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
         appendLog(
-            "唤醒配置已保存：$phrase，score=$score，threshold=$threshold，confirm=$confirmHits，" +
+            "唤醒配置已保存：$phrase，score=$score，threshold=$threshold，" +
+                "二阶段=$secondStageThreshold，confirm=$confirmHits，" +
                 "预设=${current.wakeWordPreset.label}",
         )
     }
@@ -219,13 +226,15 @@ object AgentRuntime {
                 wakeWordPreset = preset,
                 wakeWordKeywordScore = preset.keywordScore,
                 wakeWordKeywordThreshold = preset.keywordThreshold,
+                wakeWordSecondStageThreshold = preset.secondStageThreshold,
                 wakeWordConfirmHits = preset.confirmHits,
             )
         }
         syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
         appendLog(
             "已切换唤醒预设「${preset.label}」：score=${preset.keywordScore}，" +
-                "threshold=${preset.keywordThreshold}，二次确认=${preset.confirmHits}次",
+                "threshold=${preset.keywordThreshold}，二阶段=${preset.secondStageThreshold}，" +
+                "二次确认=${preset.confirmHits}次",
         )
     }
 
@@ -236,13 +245,28 @@ object AgentRuntime {
 
     fun updateWakeWordKeywordThreshold(value: String) {
         val parsed = value.toFloatOrNull() ?: return
-        _state.update { it.copy(wakeWordKeywordThreshold = parsed.coerceIn(0.01f, 5f)) }
+        _state.update {
+            it.copy(
+                wakeWordKeywordThreshold = parsed.coerceIn(0.005f, 5f),
+                wakeWordSecondStageThreshold = SherpaOnnxWakeWordDetector.defaultSecondStageThreshold(
+                    parsed.coerceIn(0.005f, 5f),
+                ),
+            )
+        }
+    }
+
+    fun updateWakeWordSecondStageThreshold(value: String) {
+        val parsed = value.toFloatOrNull() ?: return
+        _state.update { it.copy(wakeWordSecondStageThreshold = parsed.coerceIn(0.005f, 5f)) }
     }
 
     fun setWakeWordEnabled(application: Application, enabled: Boolean) {
         initIfNeeded(application)
         wakeWordStore?.saveEnabled(enabled)
         _state.update { it.copy(wakeWordEnabled = enabled, wakeWordRunning = enabled) }
+        if (enabled) {
+            preloadWakeWordAssets("开启唤醒：")
+        }
         syncWakeWordService()
         appendLog(if (enabled) "本地语音唤醒已开启" else "本地语音唤醒已关闭")
     }
@@ -303,10 +327,16 @@ object AgentRuntime {
             when {
                 step < WakeWordCalibrationSession.POSITIVE_TARGET -> {
                     appendLog("正在录制唤醒样本 ${step + 1}/${WakeWordCalibrationSession.POSITIVE_TARGET}…")
-                    val ok = session.recordPositiveSample()
-                    if (!ok) {
-                        appendLog("录制失败，请检查麦克风权限")
-                        return@launch
+                    when (session.recordPositiveSample()) {
+                        WakeWordCalibrationSession.SampleResult.OK -> Unit
+                        WakeWordCalibrationSession.SampleResult.TOO_QUIET -> {
+                            appendLog("样本音量过低：请靠近麦克风、清晰说出唤醒词后重试")
+                            return@launch
+                        }
+                        WakeWordCalibrationSession.SampleResult.RECORD_FAILED -> {
+                            appendLog("录制失败：请检查麦克风权限后重试")
+                            return@launch
+                        }
                     }
                     val next = step + 1
                     _state.update {
@@ -336,11 +366,14 @@ object AgentRuntime {
                     }
                     wakeWordStore?.saveKeywordThreshold(result.recommendedThreshold)
                     wakeWordStore?.saveKeywordScore(result.recommendedScore)
+                    val stage2 = SherpaOnnxWakeWordDetector.defaultSecondStageThreshold(result.recommendedThreshold)
+                    wakeWordStore?.saveSecondStageThreshold(stage2)
                     wakeWordStore?.saveCalibrated(true)
                     _state.update {
                         it.copy(
                             wakeWordKeywordThreshold = result.recommendedThreshold,
                             wakeWordKeywordScore = result.recommendedScore,
+                            wakeWordSecondStageThreshold = stage2,
                             wakeWordCalibrated = true,
                             wakeWordCalibrationStep = WakeWordCalibrationSession.POSITIVE_TARGET + 1,
                             wakeWordCalibrationHint =
@@ -649,21 +682,25 @@ object AgentRuntime {
         syncWakeWordService(forceRestart = false)
     }
 
-    private fun preloadWakeWordModelIfNeeded() {
-        if (!BuildConfig.DEBUG) return
+    private fun preloadWakeWordAssets(logPrefix: String) {
         val app = application ?: return
         scope.launch(Dispatchers.IO) {
-            appendLog("开发模式：开始预下载本地唤醒模型（${SherpaOnnxModelManager.MODEL_VERSION}）")
+            appendLog("${logPrefix}开始预下载本地唤醒模型（${SherpaOnnxModelManager.MODEL_VERSION}）")
             val kwsOk = SherpaOnnxModelManager(app).preloadModelIfNeeded()
             val vadOk = runCatching { SileroVadModelManager(app).ensureReady(); true }.getOrDefault(false)
             appendLog(
                 when {
-                    kwsOk && vadOk -> "本地唤醒模型与 Silero VAD 预下载完成"
-                    kwsOk -> "KWS 模型已就绪，Silero VAD 预下载失败"
+                    kwsOk && vadOk -> "本地唤醒模型与 Silero VAD 已就绪"
+                    kwsOk -> "KWS 模型已就绪，Silero VAD 预下载失败（将回退 RMS VAD）"
                     else -> "本地唤醒模型预下载失败，请检查网络后重试"
                 },
             )
         }
+    }
+
+    private fun preloadWakeWordModelIfNeeded() {
+        if (!BuildConfig.DEBUG) return
+        preloadWakeWordAssets("开发模式：")
     }
 
     fun onWakeWordDetected() {

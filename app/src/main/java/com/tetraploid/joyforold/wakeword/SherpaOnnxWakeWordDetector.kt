@@ -16,13 +16,21 @@ class SherpaOnnxWakeWordDetector(
     private val keyword: String,
     private val keywordScore: Float,
     private val keywordThreshold: Float,
+    secondStageThreshold: Float = defaultSecondStageThreshold(keywordThreshold),
 ) {
     private val logTag = "SherpaOnnxWakeWord"
     private val appContext = context.applicationContext
     private val modelManager = SherpaOnnxModelManager(appContext)
+    private val stage2Threshold = secondStageThreshold.coerceAtLeast(keywordThreshold)
+    private val expectedTokenCount = expectedModelingTokenCount(keyword)
     private var keywordSpotter: KeywordSpotter? = null
     private var stream: OnlineStream? = null
+    private var verifyKeywordSpotter: KeywordSpotter? = null
     private var verifyStream: OnlineStream? = null
+    private var calibratorSpotter: KeywordSpotter? = null
+    private var calibratorStream: OnlineStream? = null
+    private var calibratorSpotterThreshold: Float = Float.NaN
+    private var modelFiles: SherpaOnnxModelManager.ModelFiles? = null
     private var ready = false
 
     fun isReady(): Boolean = ready
@@ -32,32 +40,14 @@ class SherpaOnnxWakeWordDetector(
     suspend fun prepare(): Boolean = withContext(Dispatchers.IO) {
         runCatching {
             val files = modelManager.ensureReady(keyword, keywordScore, keywordThreshold)
-            val modelConfig = OnlineModelConfig(
-                transducer = OnlineTransducerModelConfig(
-                    encoder = files.encoder.absolutePath,
-                    decoder = files.decoder.absolutePath,
-                    joiner = files.joiner.absolutePath,
-                ),
-                tokens = files.tokens.absolutePath,
-                numThreads = 4,
-                debug = false,
-                provider = "cpu",
-                modelType = "zipformer2",
-            )
-            val config = KeywordSpotterConfig(
-                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80, dither = 0f),
-                modelConfig = modelConfig,
-                maxActivePaths = 16,
-                keywordsFile = files.keywords.absolutePath,
-                keywordsScore = keywordScore,
-                keywordsThreshold = keywordThreshold,
-                numTrailingBlanks = 2,
-            )
             release()
-            keywordSpotter = KeywordSpotter(null, config)
+            modelFiles = files
+            keywordSpotter = createSpotter(files, keywordThreshold)
             stream = keywordSpotter?.createStream("")
-            verifyStream = keywordSpotter?.createStream("")
-            ready = keywordSpotter != null && stream != null && verifyStream != null
+            verifyKeywordSpotter = createSpotter(files, stage2Threshold)
+            verifyStream = verifyKeywordSpotter?.createStream("")
+            ready = keywordSpotter != null && stream != null &&
+                verifyKeywordSpotter != null && verifyStream != null
             ready
         }.onFailure {
             Log.e(logTag, "prepare failed: ${it.message}", it)
@@ -75,7 +65,7 @@ class SherpaOnnxWakeWordDetector(
             spotter.decode(onlineStream)
         }
         val result = spotter.getResult(onlineStream)
-        val detected = result.keyword?.trim().orEmpty()
+        val detected = result.keyword.trim()
         if (detected.isBlank()) return false
         val hit = matchesKeyword(detected)
         if (hit) {
@@ -90,11 +80,35 @@ class SherpaOnnxWakeWordDetector(
     fun verifyBuffered(
         pcm16le: ByteArray,
         len: Int,
-        threshold: Float = keywordThreshold * SECOND_STAGE_THRESHOLD_RATIO,
+        threshold: Float = stage2Threshold,
     ): Boolean {
         if (!ready) return false
-        val spotter = keywordSpotter ?: return false
-        val onlineStream = verifyStream ?: return false
+        val spotter: KeywordSpotter
+        val onlineStream: OnlineStream
+        when {
+            threshold == keywordThreshold -> {
+                spotter = keywordSpotter ?: return false
+                onlineStream = stream ?: return false
+            }
+            threshold == stage2Threshold -> {
+                spotter = verifyKeywordSpotter ?: return false
+                onlineStream = verifyStream ?: return false
+            }
+            else -> {
+                spotter = calibratorSpotterFor(threshold) ?: return false
+                onlineStream = calibratorStream ?: return false
+            }
+        }
+        return runVerify(spotter, onlineStream, pcm16le, len, threshold)
+    }
+
+    private fun runVerify(
+        spotter: KeywordSpotter,
+        onlineStream: OnlineStream,
+        pcm16le: ByteArray,
+        len: Int,
+        threshold: Float,
+    ): Boolean {
         spotter.reset(onlineStream)
         val samples = pcmToFloat(pcm16le, len)
         onlineStream.acceptWaveform(samples, 16000)
@@ -102,15 +116,21 @@ class SherpaOnnxWakeWordDetector(
             spotter.decode(onlineStream)
         }
         val result = spotter.getResult(onlineStream)
-        val detected = result.keyword?.trim().orEmpty()
+        val detected = result.keyword.trim()
         if (detected.isBlank()) return false
-        val hit = matchesKeyword(detected)
-        if (!hit) return false
-        val tokenCount = result.tokens?.size ?: 0
-        val hasTiming = result.timestamps?.isNotEmpty() == true
+        if (!matchesKeyword(detected)) return false
+        val tokenCount = result.tokens.size
+        if (tokenCount < expectedTokenCount) {
+            Log.d(
+                logTag,
+                "second-stage reject: tokens=$tokenCount expected>=$expectedTokenCount threshold=$threshold",
+            )
+            spotter.reset(onlineStream)
+            return false
+        }
         Log.d(
             logTag,
-            "second-stage hit: $detected tokens=$tokenCount timing=$hasTiming threshold=$threshold",
+            "second-stage hit: $detected tokens=$tokenCount threshold=$threshold",
         )
         spotter.reset(onlineStream)
         return true
@@ -119,11 +139,59 @@ class SherpaOnnxWakeWordDetector(
     fun release() {
         runCatching { stream?.release() }
         runCatching { verifyStream?.release() }
+        runCatching { calibratorStream?.release() }
         runCatching { keywordSpotter?.release() }
+        if (verifyKeywordSpotter !== keywordSpotter) {
+            runCatching { verifyKeywordSpotter?.release() }
+        }
+        runCatching { calibratorSpotter?.release() }
         stream = null
         verifyStream = null
+        calibratorStream = null
         keywordSpotter = null
+        verifyKeywordSpotter = null
+        calibratorSpotter = null
+        calibratorSpotterThreshold = Float.NaN
+        modelFiles = null
         ready = false
+    }
+
+    private fun calibratorSpotterFor(threshold: Float): KeywordSpotter? {
+        if (threshold == calibratorSpotterThreshold) {
+            return calibratorSpotter
+        }
+        val files = modelFiles ?: return null
+        runCatching { calibratorStream?.release() }
+        runCatching { calibratorSpotter?.release() }
+        calibratorSpotter = createSpotter(files, threshold)
+        calibratorStream = calibratorSpotter?.createStream("")
+        calibratorSpotterThreshold = threshold
+        return calibratorSpotter
+    }
+
+    private fun createSpotter(files: SherpaOnnxModelManager.ModelFiles, threshold: Float): KeywordSpotter {
+        val modelConfig = OnlineModelConfig(
+            transducer = OnlineTransducerModelConfig(
+                encoder = files.encoder.absolutePath,
+                decoder = files.decoder.absolutePath,
+                joiner = files.joiner.absolutePath,
+            ),
+            tokens = files.tokens.absolutePath,
+            numThreads = 4,
+            debug = false,
+            provider = "cpu",
+            modelType = "zipformer2",
+        )
+        val config = KeywordSpotterConfig(
+            featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80, dither = 0f),
+            modelConfig = modelConfig,
+            maxActivePaths = 16,
+            keywordsFile = files.keywords.absolutePath,
+            keywordsScore = keywordScore,
+            keywordsThreshold = threshold,
+            numTrailingBlanks = 2,
+        )
+        return KeywordSpotter(null, config)
     }
 
     private fun matchesKeyword(detected: String): Boolean {
@@ -146,6 +214,18 @@ class SherpaOnnxWakeWordDetector(
     }
 
     companion object {
-        const val SECOND_STAGE_THRESHOLD_RATIO = 0.65f
+        const val SECOND_STAGE_STRICTNESS_MULTIPLIER = 1.65f
+
+        fun defaultSecondStageThreshold(stage1Threshold: Float): Float =
+            (stage1Threshold * SECOND_STAGE_STRICTNESS_MULTIPLIER).coerceAtMost(0.06f)
+
+        private fun expectedModelingTokenCount(keyword: String): Int {
+            val lexicon = EnglishPhoneLexicon(null)
+            val line = runCatching {
+                SherpaKeywordEncoder.encodeKeywordVariants(keyword, lexicon).first()
+            }.getOrNull().orEmpty()
+            val count = KeywordTokenValidator.modelingTokens(line).size
+            return count.coerceAtLeast(1)
+        }
     }
 }

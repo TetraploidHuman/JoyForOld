@@ -265,7 +265,7 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 )
             }
             Text(
-                "推荐用预设调参：平衡=灵敏检测+二次确认；灵敏=单次命中；防误触=高阈值+二次确认。",
+                "推荐用预设调参：一阶段灵敏检测 + 二阶段严格校验（默认 confirm=1）。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -282,8 +282,8 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 }
             }
             Text(
-                "当前：score=${uiState.wakeWordKeywordScore}，threshold=${uiState.wakeWordKeywordThreshold}，" +
-                    "二次确认=${uiState.wakeWordConfirmHits}次",
+                "当前：score=${uiState.wakeWordKeywordScore}，一阶段=${uiState.wakeWordKeywordThreshold}，" +
+                    "二阶段=${uiState.wakeWordSecondStageThreshold}，confirm=${uiState.wakeWordConfirmHits}次",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -307,8 +307,16 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 value = uiState.wakeWordKeywordThreshold.toString(),
                 onValueChange = viewModel::updateWakeWordKeywordThreshold,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("命中阈值 keywordsThreshold") },
-                placeholder = { Text("默认 0.018；越低越易误触") },
+                label = { Text("一阶段阈值 keywordsThreshold") },
+                placeholder = { Text("默认 0.012；越低越灵敏") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = uiState.wakeWordSecondStageThreshold.toString(),
+                onValueChange = viewModel::updateWakeWordSecondStageThreshold,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("二阶段阈值（严格校验）") },
+                placeholder = { Text("默认 0.020；应高于一阶段") },
                 singleLine = true,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
