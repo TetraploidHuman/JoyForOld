@@ -11,8 +11,8 @@ import com.k2fsa.sherpa.onnx.VadModelConfig
  */
 class SileroVadGate(
     context: Context,
-    private val hangoverMs: Long = 320L,
-    threshold: Float = 0.45f,
+    private val hangoverMs: Long = 500L,
+    threshold: Float = 0.32f,
 ) {
     private val vad: Vad
     private var speechActive = false
@@ -26,8 +26,8 @@ class SileroVadGate(
                 sileroVadModelConfig = SileroVadModelConfig(
                     model = modelPath,
                     threshold = threshold,
-                    minSilenceDuration = 0.25f,
-                    minSpeechDuration = 0.12f,
+                    minSilenceDuration = 0.35f,
+                    minSpeechDuration = 0.08f,
                     windowSize = 512,
                     maxSpeechDuration = 8f,
                 ),

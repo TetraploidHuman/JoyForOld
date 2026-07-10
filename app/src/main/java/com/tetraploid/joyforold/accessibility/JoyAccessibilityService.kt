@@ -175,7 +175,7 @@ class JoyAccessibilityService : AccessibilityService() {
     )
     return try {
       val tree = UiTreeSerializer.serialize(root)
-      val snippet = if (tree.length > 3500) tree.take(3500) + "\n...(已截断)" else tree
+      val snippet = if (tree.length > 1200) tree.take(1200) + "\n...(已截断)" else tree
       ActionExecutionResult(
         success = true,
         summary = "已读取结构树片段",
@@ -300,7 +300,7 @@ class JoyAccessibilityService : AccessibilityService() {
     }
     val keyword = query?.trim().orEmpty()
     val detail = if (keyword.isBlank()) {
-      InstalledAppResolver.formatForPrompt(applicationContext, limit = 150)
+      InstalledAppResolver.formatForPrompt(applicationContext, limit = 30)
     } else {
       InstalledAppResolver.formatSearchMatches(applicationContext, keyword, limit = 20)
     }

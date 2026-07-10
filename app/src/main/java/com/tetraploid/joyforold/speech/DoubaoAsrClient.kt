@@ -11,7 +11,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
-import kotlin.math.sqrt
+import kotlin.math.max
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -26,7 +26,6 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
-import kotlin.math.max
 
 class DoubaoAsrClient(
     private val apiKey: String,
@@ -46,6 +45,9 @@ class DoubaoAsrClient(
     private val pendingAudioLock = Any()
     @Volatile
     private var opened = false
+    @Volatile
+    private var shortUtteranceMode = false
+    private var endpointStopTracker: AsrEndpointStopTracker? = null
 
     fun start(
         onPartialText: (String) -> Unit,
@@ -66,6 +68,10 @@ class DoubaoAsrClient(
         finalText = ""
         lastAsrErrorDetail = null
         opened = false
+        shortUtteranceMode = shortUtterance
+        endpointStopTracker = createEndpointStopTracker(shortUtterance).also {
+            it.reset(System.currentTimeMillis())
+        }
         synchronized(pendingAudioLock) { pendingAudioFrames.clear() }
 
         val requestBuilder = Request.Builder()
@@ -123,9 +129,6 @@ class DoubaoAsrClient(
                 record.startRecording()
 
                 val chunk = ByteArray(CHUNK_BYTES_200MS)
-                var silenceChunks = 0
-                var heardSpeech = false
-                val silenceLimit = if (shortUtterance) AUTO_STOP_SILENCE_CHUNKS_SHORT else AUTO_STOP_SILENCE_CHUNKS
                 val maxChunks = if (shortUtterance) MAX_RECORD_CHUNKS_SHORT else MAX_RECORD_CHUNKS
                 var chunkCount = 0
                 while (isActive) {
@@ -139,15 +142,14 @@ class DoubaoAsrClient(
                         continue
                     }
 
-                    if (chunkHasSpeech(payload)) {
-                        heardSpeech = true
-                        silenceChunks = 0
-                    } else if (heardSpeech) {
-                        silenceChunks++
-                        if (silenceChunks >= silenceLimit) break
-                    }
-
                     sendAudioFrame(payload, isLast = false)
+
+                    val stopAction = endpointStopTracker?.onPartial(
+                        text = finalText,
+                        definite = false,
+                        nowMs = System.currentTimeMillis(),
+                    )
+                    if (stopAction == EndpointStopAction.Stop) break
                 }
 
                 finalizeSession(onFinalText, onError)
@@ -202,22 +204,6 @@ class DoubaoAsrClient(
         }.getOrNull()
     }
 
-    private fun chunkHasSpeech(payload: ByteArray): Boolean {
-        if (payload.size < 2) return false
-        var sumSquares = 0.0
-        var samples = 0
-        var i = 0
-        while (i + 1 < payload.size) {
-            val sample = (payload[i].toInt() and 0xFF) or (payload[i + 1].toInt() shl 8)
-            val signed = if (sample > 32767) sample - 65536 else sample
-            sumSquares += signed * signed.toDouble()
-            samples++
-            i += 2
-        }
-        if (samples == 0) return false
-        return sqrt(sumSquares / samples) > SPEECH_RMS_THRESHOLD
-    }
-
     suspend fun stop(onFinalText: (String) -> Unit) {
         streamingJob?.cancelAndJoin()
         streamingJob = null
@@ -247,6 +233,8 @@ class DoubaoAsrClient(
     }
 
     private fun sendFullClientRequest(socket: WebSocket) {
+        val endWindowSize = if (shortUtteranceMode) END_WINDOW_SIZE_SHORT_MS else END_WINDOW_SIZE_NORMAL_MS
+        val forceToSpeechTime = if (shortUtteranceMode) FORCE_TO_SPEECH_SHORT_MS else FORCE_TO_SPEECH_NORMAL_MS
         val body = JSONObject().apply {
             put("user", JSONObject().put("uid", connectId))
             put(
@@ -263,13 +251,15 @@ class DoubaoAsrClient(
                 "request",
                 JSONObject()
                     .put("model_name", "bigmodel")
-                    // 关闭二遍识别：边说边返回 partial，不等到整句 VAD 判停才上屏
-                    .put("enable_nonstream", false)
+                    // 开启二遍识别后，服务端会返回 definite 分句，用于可靠判停。
+                    .put("enable_nonstream", true)
                     .put("enable_itn", true)
                     .put("enable_punc", true)
                     .put("enable_ddc", false)
                     .put("show_utterances", true)
-                    .put("result_type", "full"),
+                    .put("result_type", "full")
+                    .put("end_window_size", endWindowSize)
+                    .put("force_to_speech_time", forceToSpeechTime),
             )
         }.toString().toByteArray(Charsets.UTF_8)
         val compressed = gzip(body)
@@ -344,34 +334,27 @@ class DoubaoAsrClient(
         if (payloadSize <= 0 || raw.size < 12 + payloadSize) return
         val payload = raw.copyOfRange(12, 12 + payloadSize)
         val decoded = if (compression == COMPRESSION_GZIP) gunzip(payload) else payload
-        val text = runCatching { extractTextFromResponse(JSONObject(String(decoded, Charsets.UTF_8))) }
-            .getOrElse { "" }
-        if (text.isNotBlank()) {
-            finalText = text
-            onPartialText(text)
+        val parsed = runCatching {
+            parseAsrResponse(JSONObject(String(decoded, Charsets.UTF_8)))
+        }.getOrElse { AsrParseResult("", false) }
+        if (parsed.text.isNotBlank()) {
+            finalText = parsed.text
+            onPartialText(parsed.text)
+        }
+        val stopAction = endpointStopTracker?.onPartial(
+            text = parsed.text,
+            definite = parsed.hasDefiniteUtterance,
+            nowMs = System.currentTimeMillis(),
+        )
+        if (stopAction == EndpointStopAction.Stop) {
+            streamingJob?.cancel()
         }
     }
 
-    private fun extractTextFromResponse(json: JSONObject): String {
-        val result = json.optJSONObject("result") ?: return ""
-
-        val utterances = result.optJSONArray("utterances")
-        if (utterances != null && utterances.length() > 0) {
-            val parts = buildList {
-                for (i in 0 until utterances.length()) {
-                    val utterance = utterances.optJSONObject(i) ?: continue
-                    val text = utterance.optString("text").trim()
-                    if (text.isNotBlank()) add(text)
-                }
-            }
-            if (parts.isNotEmpty()) {
-                // 流式返回时优先用分句拼接；若仅一条则是当前 partial。
-                return parts.joinToString("")
-            }
-        }
-
-        return result.optString("text").trim()
-    }
+    internal data class AsrParseResult(
+        val text: String,
+        val hasDefiniteUtterance: Boolean,
+    )
 
     companion object {
         private const val ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
@@ -379,13 +362,55 @@ class DoubaoAsrClient(
         private const val SAMPLE_RATE = 16_000
         private const val BYTES_PER_SAMPLE = 2
         private const val CHUNK_BYTES_200MS = SAMPLE_RATE * BYTES_PER_SAMPLE / 5
-        private const val AUTO_STOP_SILENCE_CHUNKS = 4
-        private const val AUTO_STOP_SILENCE_CHUNKS_SHORT = 3
+        private const val END_WINDOW_SIZE_NORMAL_MS = 4800
+        private const val END_WINDOW_SIZE_SHORT_MS = 1800
+        private const val FORCE_TO_SPEECH_NORMAL_MS = 1600
+        private const val FORCE_TO_SPEECH_SHORT_MS = 700
+        private const val END_DEBOUNCE_NORMAL_MS = 2600L
+        private const val END_DEBOUNCE_SHORT_MS = 1100L
+        private const val MIN_RECORD_BEFORE_STOP_NORMAL_MS = 1800L
+        private const val MIN_RECORD_BEFORE_STOP_SHORT_MS = 800L
+        private const val POST_ENDPOINT_TAIL_CHUNKS = 6
         private const val MAX_RECORD_CHUNKS = 150
         private const val MAX_RECORD_CHUNKS_SHORT = 50
-        private const val SPEECH_RMS_THRESHOLD = 450.0
-        private const val FINAL_RESULT_WAIT_MS = 700L
+        private const val FINAL_RESULT_WAIT_MS = 900L
         private const val MAX_PENDING_AUDIO_FRAMES = 40
+
+        internal fun createEndpointStopTracker(shortUtterance: Boolean): AsrEndpointStopTracker {
+            return AsrEndpointStopTracker(
+                debounceAfterDefiniteMs = if (shortUtterance) END_DEBOUNCE_SHORT_MS else END_DEBOUNCE_NORMAL_MS,
+                minRecordBeforeStopMs = if (shortUtterance) MIN_RECORD_BEFORE_STOP_SHORT_MS else MIN_RECORD_BEFORE_STOP_NORMAL_MS,
+                tailChunksRequired = POST_ENDPOINT_TAIL_CHUNKS,
+            )
+        }
+
+        internal fun parseAsrResponse(json: JSONObject): AsrParseResult {
+            val result = json.optJSONObject("result") ?: return AsrParseResult("", false)
+            var text = ""
+            var hasDefinite = false
+
+            val utterances = result.optJSONArray("utterances")
+            if (utterances != null && utterances.length() > 0) {
+                val parts = buildList {
+                    for (i in 0 until utterances.length()) {
+                        val utterance = utterances.optJSONObject(i) ?: continue
+                        val utteranceText = utterance.optString("text").trim()
+                        if (utteranceText.isNotBlank()) add(utteranceText)
+                        if (utterance.optBoolean("definite", false) && utteranceText.isNotBlank()) {
+                            hasDefinite = true
+                        }
+                    }
+                }
+                if (parts.isNotEmpty()) {
+                    text = parts.joinToString("")
+                }
+            }
+
+            if (text.isBlank()) {
+                text = result.optString("text").trim()
+            }
+            return AsrParseResult(text = text, hasDefiniteUtterance = hasDefinite)
+        }
 
         private const val MESSAGE_TYPE_FULL_SERVER_RESPONSE = 0b1001
         private const val MESSAGE_TYPE_ERROR = 0b1111

@@ -92,7 +92,7 @@ class AgentConversationSession(
     }
 
     /** 控制上下文长度：保留 system、首条用户指令、最近对话轮次 */
-    fun pruneForApi(maxTailMessages: Int = 22) {
+    fun pruneForApi(maxTailMessages: Int = 14) {
         if (messages.size <= maxTailMessages + 2) return
 
         val systemMsgs = messages.filter { it.role == "system" }
@@ -117,8 +117,9 @@ class AgentConversationSession(
 
     fun toApiMessages(): JSONArray {
         pruneForApi()
+        val apiMessages = AgentMessageCompactor.compactForApi(messages)
         return JSONArray().apply {
-            messages.forEach { msg ->
+            apiMessages.forEach { msg ->
                 put(JSONObject().put("role", msg.role).put("content", msg.content))
             }
         }

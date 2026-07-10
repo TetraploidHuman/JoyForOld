@@ -35,19 +35,10 @@ class WakeWordCalibrationSession(
 
     fun needsNegativeSample(): Boolean = positiveCount() >= POSITIVE_TARGET
 
-    suspend fun recordPositiveSample(): SampleResult {
-        val pcm = recordSample(POSITIVE_MS) ?: return SampleResult.RECORD_FAILED
-        if (!WakeWordAudioQuality.isUsablePositiveSample(pcm)) {
-            return SampleResult.TOO_QUIET
-        }
+    suspend fun recordPositiveSample(): Boolean {
+        val pcm = recordSample(POSITIVE_MS) ?: return false
         calibrator.addPositiveSample(pcm)
-        return SampleResult.OK
-    }
-
-    enum class SampleResult {
-        OK,
-        RECORD_FAILED,
-        TOO_QUIET,
+        return true
     }
 
     suspend fun recordNegativeSample(): Boolean {

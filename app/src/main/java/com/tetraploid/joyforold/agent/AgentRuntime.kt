@@ -1,13 +1,18 @@
 package com.tetraploid.joyforold.agent
 
 import android.app.Application
+import com.tetraploid.joyforold.BuildConfig
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
+import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
 import com.tetraploid.joyforold.data.ApiKeyStore
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.VoiceConfirmOverlayService
+import com.tetraploid.joyforold.preset.PresetCommand
+import com.tetraploid.joyforold.preset.PresetCommandStore
 import com.tetraploid.joyforold.speech.DoubaoAsrClient
+import com.tetraploid.joyforold.speech.JoyTtsSpeaker
 import com.tetraploid.joyforold.wakeword.SherpaOnnxModelManager
-import com.tetraploid.joyforold.wakeword.SherpaOnnxWakeWordDetector
+import com.tetraploid.joyforold.wakeword.SileroVadModelManager
 import com.tetraploid.joyforold.wakeword.WakeWordCalibrationSession
 import com.tetraploid.joyforold.wakeword.WakeWordConfigStore
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
@@ -51,7 +56,6 @@ data class AgentUiState(
     val wakeWordTestHint: String? = null,
     val wakeWordKeywordScore: Float = WakeWordConfigStore.DEFAULT_KEYWORD_SCORE,
     val wakeWordKeywordThreshold: Float = WakeWordConfigStore.DEFAULT_KEYWORD_THRESHOLD,
-    val wakeWordSecondStageThreshold: Float = WakeWordConfigStore.DEFAULT_SECOND_STAGE_THRESHOLD,
     val wakeWordConfirmHits: Int = WakeWordConfigStore.DEFAULT_CONFIRM_HITS,
     val wakeWordPreset: WakeWordSensitivityPreset = WakeWordSensitivityPreset.BALANCED,
     val wakeWordModelVersion: String = SherpaOnnxModelManager.MODEL_VERSION,
@@ -59,6 +63,14 @@ data class AgentUiState(
     val wakeWordCalibrationStep: Int = 0,
     val wakeWordCalibrationHint: String? = null,
     val wakeWordCalibrated: Boolean = false,
+    val wakeWordSileroVadEnabled: Boolean = WakeWordConfigStore.DEFAULT_SILERO_VAD,
+    val wakeWordSecondStageEnabled: Boolean = WakeWordConfigStore.DEFAULT_SECOND_STAGE,
+    val daughterPhone: String = "",
+    val sonPhone: String = "",
+    val emergencyPhone: String = "",
+    val emergencyMessage: String = "",
+    val homeAddress: String = "",
+    val presetPhraseGoHome: String = "我要回家",
 )
 
 object AgentRuntime {
@@ -77,6 +89,9 @@ object AgentRuntime {
     private var application: Application? = null
     private var calibrationSession: WakeWordCalibrationSession? = null
     private var calibrationJob: Job? = null
+    private var ttsSpeaker: JoyTtsSpeaker? = null
+    private var caregiverStore: CaregiverSupportStore? = null
+    private var presetStore: PresetCommandStore? = null
 
     private val _state = MutableStateFlow(AgentUiState())
     val state: StateFlow<AgentUiState> = _state.asStateFlow()
@@ -88,9 +103,17 @@ object AgentRuntime {
             wakeWordStore = WakeWordConfigStore(application)
             memoryStore = AgentMemoryStore(application).also { orchestrator.bindMemoryStore(it) }
             sessionStore = AgentSessionStore(application).also { orchestrator.bindSessionStore(it) }
+            ttsSpeaker = JoyTtsSpeaker(application).also { it.ensureReady() }
+            caregiverStore = CaregiverSupportStore(application).also { it.ensureSeededDefaults() }
+            presetStore = PresetCommandStore(application).also { it.ensureSeededDefaults() }
             refreshMemories()
             restorePendingUiIfNeeded()
             _state.update {
+                val contacts = caregiverStore!!.loadFamilyContacts()
+                val daughter = contacts.firstOrNull { it.alias == "女儿" }
+                val son = contacts.firstOrNull { it.alias == "儿子" }
+                val emergency = contacts.firstOrNull { it.alias == "紧急联系人" }
+                val goHomePreset = presetStore!!.loadPresets().firstOrNull { it.action == "navigate_home" }
                 it.copy(
                     apiKey = apiKeyStore!!.getApiKey(),
                     modelName = apiKeyStore!!.getModel(),
@@ -103,13 +126,22 @@ object AgentRuntime {
                     wakeWordRunning = wakeWordStore!!.isEnabled() && WakeWordService.isRunning,
                     wakeWordKeywordScore = wakeWordStore!!.getKeywordScore(),
                     wakeWordKeywordThreshold = wakeWordStore!!.getKeywordThreshold(),
-                    wakeWordSecondStageThreshold = wakeWordStore!!.getSecondStageThreshold(),
                     wakeWordConfirmHits = wakeWordStore!!.getConfirmHitCount(),
                     wakeWordPreset = wakeWordStore!!.getPreset(),
                     wakeWordModelVersion = SherpaOnnxModelManager.MODEL_VERSION,
                     wakeWordCalibrated = wakeWordStore!!.isCalibrated(),
+                    wakeWordSileroVadEnabled = wakeWordStore!!.isSileroVadEnabled(),
+                    wakeWordSecondStageEnabled = wakeWordStore!!.isSecondStageEnabled(),
+                    daughterPhone = daughter?.phoneNumber.orEmpty(),
+                    sonPhone = son?.phoneNumber.orEmpty(),
+                    emergencyPhone = emergency?.phoneNumber.orEmpty(),
+                    emergencyMessage = caregiverStore!!.loadEmergencyMessage(),
+                    homeAddress = caregiverStore!!.loadHomeAddress(),
+                    presetPhraseGoHome = goHomePreset?.phrase ?: "我要回家",
                 )
             }
+            preloadWakeWordModelIfNeeded()
+            migrateWakeWordDefaultsIfNeeded()
             syncWakeWordService()
         }
     }
@@ -190,12 +222,10 @@ object AgentRuntime {
         val phrase = current.wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE }
         val score = current.wakeWordKeywordScore
         val threshold = current.wakeWordKeywordThreshold
-        val secondStageThreshold = current.wakeWordSecondStageThreshold
         val confirmHits = current.wakeWordConfirmHits
         wakeWordStore?.savePhrase(phrase)
         wakeWordStore?.saveKeywordScore(score)
         wakeWordStore?.saveKeywordThreshold(threshold)
-        wakeWordStore?.saveSecondStageThreshold(secondStageThreshold)
         wakeWordStore?.saveConfirmHitCount(confirmHits)
         wakeWordStore?.savePreset(current.wakeWordPreset)
         _state.update {
@@ -203,14 +233,12 @@ object AgentRuntime {
                 wakeWordPhrase = phrase,
                 wakeWordKeywordScore = score,
                 wakeWordKeywordThreshold = threshold,
-                wakeWordSecondStageThreshold = secondStageThreshold,
                 wakeWordConfirmHits = confirmHits,
             )
         }
         syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
         appendLog(
-            "唤醒配置已保存：$phrase，score=$score，threshold=$threshold，" +
-                "二阶段=$secondStageThreshold，confirm=$confirmHits，" +
+            "唤醒配置已保存：$phrase，score=$score，threshold=$threshold，confirm=$confirmHits，" +
                 "预设=${current.wakeWordPreset.label}",
         )
     }
@@ -223,15 +251,13 @@ object AgentRuntime {
                 wakeWordPreset = preset,
                 wakeWordKeywordScore = preset.keywordScore,
                 wakeWordKeywordThreshold = preset.keywordThreshold,
-                wakeWordSecondStageThreshold = preset.secondStageThreshold,
                 wakeWordConfirmHits = preset.confirmHits,
             )
         }
         syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
         appendLog(
             "已切换唤醒预设「${preset.label}」：score=${preset.keywordScore}，" +
-                "threshold=${preset.keywordThreshold}，二阶段=${preset.secondStageThreshold}，" +
-                "二次确认=${preset.confirmHits}次",
+                "threshold=${preset.keywordThreshold}，二次确认=${preset.confirmHits}次",
         )
     }
 
@@ -242,19 +268,54 @@ object AgentRuntime {
 
     fun updateWakeWordKeywordThreshold(value: String) {
         val parsed = value.toFloatOrNull() ?: return
-        _state.update {
-            it.copy(
-                wakeWordKeywordThreshold = parsed.coerceIn(0.005f, 5f),
-                wakeWordSecondStageThreshold = SherpaOnnxWakeWordDetector.defaultSecondStageThreshold(
-                    parsed.coerceIn(0.005f, 5f),
-                ),
-            )
-        }
+        _state.update { it.copy(wakeWordKeywordThreshold = parsed.coerceIn(0.01f, 5f)) }
     }
 
-    fun updateWakeWordSecondStageThreshold(value: String) {
-        val parsed = value.toFloatOrNull() ?: return
-        _state.update { it.copy(wakeWordSecondStageThreshold = parsed.coerceIn(0.005f, 5f)) }
+    fun updateDaughterPhone(value: String) {
+        _state.update { it.copy(daughterPhone = value) }
+    }
+
+    fun updateSonPhone(value: String) {
+        _state.update { it.copy(sonPhone = value) }
+    }
+
+    fun updateEmergencyPhone(value: String) {
+        _state.update { it.copy(emergencyPhone = value) }
+    }
+
+    fun updateEmergencyMessage(value: String) {
+        _state.update { it.copy(emergencyMessage = value) }
+    }
+
+    fun updateHomeAddress(value: String) {
+        _state.update { it.copy(homeAddress = value) }
+    }
+
+    fun updatePresetPhraseGoHome(value: String) {
+        _state.update { it.copy(presetPhraseGoHome = value) }
+    }
+
+    fun saveCaregiverSettings(application: Application) {
+        initIfNeeded(application)
+        val current = _state.value
+        caregiverStore?.saveFamilyContacts(
+            listOf(
+                com.tetraploid.joyforold.caregiver.FamilyContact(alias = "女儿", phoneNumber = current.daughterPhone.trim()),
+                com.tetraploid.joyforold.caregiver.FamilyContact(alias = "儿子", phoneNumber = current.sonPhone.trim()),
+                com.tetraploid.joyforold.caregiver.FamilyContact(alias = "紧急联系人", phoneNumber = current.emergencyPhone.trim()),
+            ),
+        )
+        caregiverStore?.saveEmergencyMessage(current.emergencyMessage)
+        caregiverStore?.saveHomeAddress(current.homeAddress)
+        presetStore?.savePresets(
+            listOf(
+                PresetCommand(
+                    phrase = current.presetPhraseGoHome.trim().ifBlank { "我要回家" },
+                    action = "navigate_home",
+                ),
+            ),
+        )
+        appendLog("家人协助与预设指令已保存")
     }
 
     fun setWakeWordEnabled(application: Application, enabled: Boolean) {
@@ -263,6 +324,22 @@ object AgentRuntime {
         _state.update { it.copy(wakeWordEnabled = enabled, wakeWordRunning = enabled) }
         syncWakeWordService()
         appendLog(if (enabled) "本地语音唤醒已开启" else "本地语音唤醒已关闭")
+    }
+
+    fun setWakeWordSileroVadEnabled(application: Application, enabled: Boolean) {
+        initIfNeeded(application)
+        wakeWordStore?.saveSileroVadEnabled(enabled)
+        _state.update { it.copy(wakeWordSileroVadEnabled = enabled) }
+        syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
+        appendLog(if (enabled) "Silero VAD 已开启" else "Silero VAD 已关闭（回退 RMS）")
+    }
+
+    fun setWakeWordSecondStageEnabled(application: Application, enabled: Boolean) {
+        initIfNeeded(application)
+        wakeWordStore?.saveSecondStageEnabled(enabled)
+        _state.update { it.copy(wakeWordSecondStageEnabled = enabled) }
+        syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
+        appendLog(if (enabled) "二阶段唤醒已开启" else "二阶段唤醒已关闭")
     }
 
     fun testWakeWord(application: Application) {
@@ -302,7 +379,7 @@ object AgentRuntime {
         calibrationJob = scope.launch(Dispatchers.IO) {
             val ready = calibrationSession?.prepare() == true
             if (!ready) {
-                appendLog("唤醒标定初始化失败，请检查内置模型是否完整")
+                appendLog("唤醒标定初始化失败，请检查模型是否已下载")
                 finishCalibration(resetOnly = true)
             } else {
                 appendLog("唤醒标定已开始：需录制 3 次唤醒样本 + 1 次环境音")
@@ -321,16 +398,10 @@ object AgentRuntime {
             when {
                 step < WakeWordCalibrationSession.POSITIVE_TARGET -> {
                     appendLog("正在录制唤醒样本 ${step + 1}/${WakeWordCalibrationSession.POSITIVE_TARGET}…")
-                    when (session.recordPositiveSample()) {
-                        WakeWordCalibrationSession.SampleResult.OK -> Unit
-                        WakeWordCalibrationSession.SampleResult.TOO_QUIET -> {
-                            appendLog("样本音量过低：请靠近麦克风、清晰说出唤醒词后重试")
-                            return@launch
-                        }
-                        WakeWordCalibrationSession.SampleResult.RECORD_FAILED -> {
-                            appendLog("录制失败：请检查麦克风权限后重试")
-                            return@launch
-                        }
+                    val ok = session.recordPositiveSample()
+                    if (!ok) {
+                        appendLog("录制失败，请检查麦克风权限")
+                        return@launch
                     }
                     val next = step + 1
                     _state.update {
@@ -360,14 +431,11 @@ object AgentRuntime {
                     }
                     wakeWordStore?.saveKeywordThreshold(result.recommendedThreshold)
                     wakeWordStore?.saveKeywordScore(result.recommendedScore)
-                    val stage2 = SherpaOnnxWakeWordDetector.defaultSecondStageThreshold(result.recommendedThreshold)
-                    wakeWordStore?.saveSecondStageThreshold(stage2)
                     wakeWordStore?.saveCalibrated(true)
                     _state.update {
                         it.copy(
                             wakeWordKeywordThreshold = result.recommendedThreshold,
                             wakeWordKeywordScore = result.recommendedScore,
-                            wakeWordSecondStageThreshold = stage2,
                             wakeWordCalibrated = true,
                             wakeWordCalibrationStep = WakeWordCalibrationSession.POSITIVE_TARGET + 1,
                             wakeWordCalibrationHint =
@@ -471,6 +539,7 @@ object AgentRuntime {
         voiceReplyApplication = application
         _state.update { it.copy(isListening = true, speechText = "") }
         appendLog(if (confirmReplyMode) "请用语音回答..." else "开始语音识别...")
+        speakStatus(if (confirmReplyMode) "请回答确认问题" else "开始听您说话")
         client.start(
             onPartialText = { text ->
                 if (text.isBlank()) return@start
@@ -486,6 +555,7 @@ object AgentRuntime {
             onError = { error ->
                 scope.launch {
                     appendLog(error)
+                    speakStatus("语音识别失败，请重试")
                     voiceConfirmReplyMode = false
                     voiceReplyApplication = null
                     _state.update { it.copy(isListening = false) }
@@ -541,6 +611,7 @@ object AgentRuntime {
         if (merged.isBlank()) {
             if (isConfirmReply && app != null && _state.value.waitingForUserConfirm) {
                 appendLog("未听清，请再说一次")
+                speakStatus("没有听清，请再说一次")
                 startVoiceReplyToConfirm(app)
             } else {
                 ensureWakeWordServiceRunning()
@@ -555,6 +626,7 @@ object AgentRuntime {
         // 用户要求：无论是否由唤醒触发，只要识别到命令就默认执行。
         // confirmReplyMode 仍然会走“继续执行”分支，但这里统一执行即可。
         appendLog("继续执行：$merged")
+        speakStatus("好的，开始为您执行")
         val resumePending = isConfirmReply && _state.value.waitingForUserConfirm
         runAgent(app, resumePendingConfirm = resumePending)
     }
@@ -563,11 +635,26 @@ object AgentRuntime {
         _state.update { it.copy(logs = (it.logs + message).takeLast(100)) }
     }
 
+    private fun speakStatus(text: String, flush: Boolean = false) {
+        val concise = text.trim().take(120)
+        if (concise.isBlank()) return
+        ttsSpeaker?.speak(concise, flush = flush)
+    }
+
+    private fun resolvePresetCommand(command: String): String {
+        val preset = presetStore?.findByPhrase(command) ?: return command
+        return when (preset.action) {
+            "navigate_home" -> "导航回家"
+            else -> command
+        }
+    }
+
     fun runAgent(application: Application, resumePendingConfirm: Boolean? = null) {
         initIfNeeded(application)
         val current = _state.value
         if (current.isRunning) return
         val shouldResumePending = resumePendingConfirm ?: current.waitingForUserConfirm
+        val effectiveCommand = resolvePresetCommand(current.command)
 
         val context = AgentRunContext()
         runContext = context
@@ -586,11 +673,15 @@ object AgentRuntime {
             syncConfirmOverlay()
             FloatingOverlayService.collapsePanel()
             val startedAt = System.currentTimeMillis()
-            appendLog("开始执行：${current.command}")
+            if (effectiveCommand != current.command) {
+                appendLog("预设指令命中：${current.command} -> $effectiveCommand")
+            }
+            appendLog("开始执行：$effectiveCommand")
+            speakStatus("收到，正在执行")
 
             try {
                 val result = orchestrator.run(
-                    userCommand = current.command,
+                    userCommand = effectiveCommand,
                     apiKey = current.apiKey.ifBlank { apiKeyStore?.getApiKey().orEmpty() },
                     runContext = context,
                     resumePendingConfirm = shouldResumePending,
@@ -611,6 +702,14 @@ object AgentRuntime {
                 appendLog(
                     if (result.success) "完成（${elapsed}ms）：${result.summary}"
                     else "结束（${elapsed}ms）：${result.summary}",
+                )
+                speakStatus(
+                    if (result.waitingForUserConfirm) {
+                        result.confirmPrompt.orEmpty()
+                    } else {
+                        result.summary
+                    },
+                    flush = true,
                 )
                 refreshMemories()
                 _state.update {
@@ -674,6 +773,42 @@ object AgentRuntime {
 
     private fun ensureWakeWordServiceRunning() {
         syncWakeWordService(forceRestart = false)
+    }
+
+    private fun migrateWakeWordDefaultsIfNeeded() {
+        val store = wakeWordStore ?: return
+        val preset = store.getPreset()
+        if (preset != WakeWordSensitivityPreset.BALANCED) return
+        val isLegacyBalanced =
+            store.getKeywordScore() == 3.0f &&
+                store.getKeywordThreshold() == 0.015f &&
+                store.getConfirmHitCount() == 2
+        if (!isLegacyBalanced) return
+        store.applyPreset(WakeWordSensitivityPreset.BALANCED)
+        _state.update {
+            it.copy(
+                wakeWordKeywordScore = WakeWordSensitivityPreset.BALANCED.keywordScore,
+                wakeWordKeywordThreshold = WakeWordSensitivityPreset.BALANCED.keywordThreshold,
+                wakeWordConfirmHits = WakeWordSensitivityPreset.BALANCED.confirmHits,
+            )
+        }
+    }
+
+    private fun preloadWakeWordModelIfNeeded() {
+        if (!BuildConfig.DEBUG) return
+        val app = application ?: return
+        scope.launch(Dispatchers.IO) {
+            appendLog("开发模式：开始预下载本地唤醒模型（${SherpaOnnxModelManager.MODEL_VERSION}）")
+            val kwsOk = SherpaOnnxModelManager(app).preloadModelIfNeeded()
+            val vadOk = runCatching { SileroVadModelManager(app).ensureReady(); true }.getOrDefault(false)
+            appendLog(
+                when {
+                    kwsOk && vadOk -> "本地唤醒模型与 Silero VAD 预下载完成"
+                    kwsOk -> "KWS 模型已就绪，Silero VAD 预下载失败"
+                    else -> "本地唤醒模型预下载失败，请检查网络后重试"
+                },
+            )
+        }
     }
 
     fun onWakeWordDetected() {

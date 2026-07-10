@@ -15,22 +15,40 @@ data class StructuredPageSnapshot(
     val sendButtons: List<String>,
     val fingerprint: String,
 ) {
-    fun toCompactSummary(): String {
+    fun toCompactSummary(maxChars: Int = 2_400): String {
         val snap = this
-        return buildString {
+        val raw = buildString {
             appendLine("=== 页面快览 ===")
             if (snap.appHint.isNotBlank()) appendLine(snap.appHint)
             appendLine("package: ${snap.packageName}")
-            appendLine("可点击(${snap.clickables.size}): ${snap.clickables.take(80).joinToString(" | ")}")
+            appendLine("可点击(${snap.clickables.size}): ${snap.clickables.take(50).joinToString(" | ")}")
             PageSnapshotHints.linesFor(snap).forEach { hint ->
                 appendLine(hint)
             }
             if (snap.sendButtons.isNotEmpty()) {
                 appendLine("发送相关(${snap.sendButtons.size}): ${snap.sendButtons.joinToString(" | ")}")
             }
-            appendLine("可输入(${snap.editables.size}): ${snap.editables.take(30).joinToString(" | ")}")
-            appendLine("可见文字(${snap.visibleTexts.size}): ${snap.visibleTexts.take(80).joinToString(" | ")}")
+            appendLine("可输入(${snap.editables.size}): ${snap.editables.take(20).joinToString(" | ")}")
+            appendLine("可见文字(${snap.visibleTexts.size}): ${snap.visibleTexts.take(50).joinToString(" | ")}")
         }.trimEnd()
+        return if (raw.length <= maxChars) {
+            raw
+        } else {
+            raw.take(maxChars) + "\n...（页面快览已截断，共 ${raw.length} 字）"
+        }
+    }
+
+    fun toMinimalSummary(): String = buildString {
+        if (appHint.isNotBlank()) {
+            append(appHint)
+        } else {
+            append(packageName)
+        }
+        append(" | 可点击 ").append(clickables.size)
+        append(" | 可输入 ").append(editables.size)
+        if (sendButtons.isNotEmpty()) {
+            append(" | 发送相关 ").append(sendButtons.size)
+        }
     }
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -66,6 +84,7 @@ data class StructuredPageSnapshot(
 object PageObservation {
     private const val MAX_WALK_NODES = 1_500
     private const val MAX_DEPTH = 55
+    const val COMPACT_SUMMARY_MAX_CHARS = 2_400
 
     fun capture(root: AccessibilityNodeInfo): StructuredPageSnapshot {
         val screenHeight = UiNodeHeuristics.screenHeight(root)

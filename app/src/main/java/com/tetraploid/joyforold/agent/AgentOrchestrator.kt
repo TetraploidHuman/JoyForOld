@@ -79,6 +79,13 @@ class AgentOrchestrator(
             )
         }
 
+        ElderTaskTemplateMatcher.match(command)?.let { templateSteps ->
+            val templateResult = executeLocalSteps(service, templateSteps, command, runContext)
+            if (templateResult.success || templateResult.waitingForUserConfirm) {
+                return templateResult
+            }
+        }
+
         LocalCommandParser.parse(command)?.let { localSteps ->
             if (LocalCommandParser.isSendToSpecificPerson(command)) {
                 val pageContext = service.snapshotCompactForAgent()
@@ -119,22 +126,26 @@ class AgentOrchestrator(
         var previousSnapshot: StructuredPageSnapshot? = initialSnapshot
         var stepNo = session.stepRecords.size
 
-        suspend fun captureObservation(): Pair<String, String> {
+        suspend fun captureObservation(): Triple<String, String, String> {
             val snapshots = service.captureStructuredSnapshots()
             val merged = service.mergeSnapshots(snapshots)
             if (merged == null) {
-                return "无法读取页面，请切换到目标应用。" to "无法读取页面"
+                return Triple(
+                    "无法读取页面，请切换到目标应用。",
+                    "无法读取页面",
+                    "无法读取页面",
+                )
             }
             val pageContext = merged.toCompactSummary()
             val pageDiff = PageObservation.diff(previousSnapshot, merged)
             previousSnapshot = merged
-            return pageContext to pageDiff
+            return Triple(pageContext, pageDiff, merged.toMinimalSummary())
         }
 
         try {
             var json = if (resumeAfterUserReply) {
                 deepSeekClient.ensureSystemSeeded(session, memoryPrompt)
-                val (pageContext, pageDiff) = captureObservation()
+                val (pageContext, pageDiff, minimalPageContext) = captureObservation()
                 runContext.awaitContinuation()
                 deepSeekClient.continueAfterStep(
                     apiKey = apiKey,
@@ -143,9 +154,10 @@ class AgentOrchestrator(
                     pageContext = pageContext,
                     pageDiff = pageDiff,
                     keyMemories = memoryPrompt,
+                    minimalPageContext = minimalPageContext,
                 )
             } else {
-                val (pageContext, pageDiff) = captureObservation()
+                val (pageContext, pageDiff, minimalPageContext) = captureObservation()
                 val effectiveCommand = if (loopCommand != rootCommand) loopCommand else session.rootCommand
                 runContext.awaitContinuation()
                 deepSeekClient.beginTask(
@@ -155,6 +167,7 @@ class AgentOrchestrator(
                     pageContext = pageContext,
                     pageDiff = pageDiff,
                     keyMemories = memoryPrompt,
+                    minimalPageContext = minimalPageContext,
                 )
             }
 
@@ -193,7 +206,7 @@ class AgentOrchestrator(
                             ActionExecutionResult(false, "过早结束", detail = blockReason),
                             "",
                         )
-                        val (pageContext, pageDiff) = captureObservation()
+                        val (pageContext, pageDiff, minimalPageContext) = captureObservation()
                         json = deepSeekClient.continueAfterStep(
                             apiKey = apiKey,
                             conversation = session,
@@ -201,6 +214,7 @@ class AgentOrchestrator(
                             pageContext = pageContext,
                             pageDiff = pageDiff,
                             keyMemories = memoryPrompt,
+                            minimalPageContext = minimalPageContext,
                         )
                         return@repeat
                     }
@@ -233,7 +247,7 @@ class AgentOrchestrator(
                         detail = "[Agent] $blockReason",
                     )
                     session.recordStep(stepNo, action, blockResult, "")
-                    val (pageContext, pageDiff) = captureObservation()
+                    val (pageContext, pageDiff, minimalPageContext) = captureObservation()
                     json = deepSeekClient.continueAfterStep(
                         apiKey = apiKey,
                         conversation = session,
@@ -241,6 +255,7 @@ class AgentOrchestrator(
                         pageContext = pageContext,
                         pageDiff = pageDiff,
                         keyMemories = memoryPrompt,
+                        minimalPageContext = minimalPageContext,
                     )
                     return@repeat
                 }
@@ -253,7 +268,7 @@ class AgentOrchestrator(
                     delay(ACTION_DELAY_MS)
                 }
 
-                val (pageContext, pageDiff) = captureObservation()
+                val (pageContext, pageDiff, minimalPageContext) = captureObservation()
                 logs += AgentStepLog(
                     step = stepNo,
                     action = action,
@@ -292,6 +307,7 @@ class AgentOrchestrator(
                     pageContext = pageContext,
                     pageDiff = pageDiff,
                     keyMemories = memoryPrompt,
+                    minimalPageContext = minimalPageContext,
                 )
             }
 

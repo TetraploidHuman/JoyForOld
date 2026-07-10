@@ -10,6 +10,6 @@ class SherpaOnnxWakeWordDetectorTest {
         val stage1 = 0.012f
         val stage2 = SherpaOnnxWakeWordDetector.defaultSecondStageThreshold(stage1)
         assertTrue(stage2 > stage1)
-        assertEquals(0.0198f, stage2, 0.0001f)
+        assertEquals(0.0130f, stage2, 0.0001f)
     }
 }

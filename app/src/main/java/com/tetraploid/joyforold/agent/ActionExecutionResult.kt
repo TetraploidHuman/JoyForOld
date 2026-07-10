@@ -11,7 +11,9 @@ data class ActionExecutionResult(
         append(if (success) "成功" else "失败")
         append("：").append(summary)
         if (detail.isNotBlank() && detail != summary) {
-            append("（").append(detail).append("）")
+            append("（")
+            append(AgentMessageCompactor.truncateAgentFeedbackDetail(detail))
+            append("）")
         }
         if (matchedElements.isNotEmpty()) {
             appendLine()

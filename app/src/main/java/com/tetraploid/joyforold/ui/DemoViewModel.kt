@@ -2,9 +2,9 @@ package com.tetraploid.joyforold.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.agent.AgentUiState
+import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 import kotlinx.coroutines.flow.StateFlow
 
 class DemoViewModel(application: Application) : AndroidViewModel(application) {
@@ -36,7 +36,19 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateWakeWordKeywordThreshold(value: String) = AgentRuntime.updateWakeWordKeywordThreshold(value)
 
-    fun updateWakeWordSecondStageThreshold(value: String) = AgentRuntime.updateWakeWordSecondStageThreshold(value)
+    fun updateDaughterPhone(value: String) = AgentRuntime.updateDaughterPhone(value)
+
+    fun updateSonPhone(value: String) = AgentRuntime.updateSonPhone(value)
+
+    fun updateEmergencyPhone(value: String) = AgentRuntime.updateEmergencyPhone(value)
+
+    fun updateEmergencyMessage(value: String) = AgentRuntime.updateEmergencyMessage(value)
+
+    fun updateHomeAddress(value: String) = AgentRuntime.updateHomeAddress(value)
+
+    fun updatePresetPhraseGoHome(value: String) = AgentRuntime.updatePresetPhraseGoHome(value)
+
+    fun saveCaregiverSettings() = AgentRuntime.saveCaregiverSettings(getApplication())
 
     fun applyWakeWordPreset(preset: WakeWordSensitivityPreset) =
         AgentRuntime.applyWakeWordPreset(getApplication(), preset)
@@ -44,6 +56,12 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
     fun saveWakeWordConfig() = AgentRuntime.saveWakeWordConfig(getApplication())
 
     fun setWakeWordEnabled(enabled: Boolean) = AgentRuntime.setWakeWordEnabled(getApplication(), enabled)
+
+    fun setWakeWordSileroVadEnabled(enabled: Boolean) =
+        AgentRuntime.setWakeWordSileroVadEnabled(getApplication(), enabled)
+
+    fun setWakeWordSecondStageEnabled(enabled: Boolean) =
+        AgentRuntime.setWakeWordSecondStageEnabled(getApplication(), enabled)
 
     fun testWakeWord() = AgentRuntime.testWakeWord(getApplication())
 

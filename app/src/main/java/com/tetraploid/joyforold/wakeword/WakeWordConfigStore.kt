@@ -5,10 +5,6 @@ import android.content.Context
 class WakeWordConfigStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    init {
-        migrateIfNeeded()
-    }
-
     fun isEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, false)
 
     fun saveEnabled(enabled: Boolean) {
@@ -30,14 +26,7 @@ class WakeWordConfigStore(context: Context) {
     fun getKeywordThreshold(): Float = prefs.getFloat(KEY_KEYWORD_THRESHOLD, DEFAULT_KEYWORD_THRESHOLD)
 
     fun saveKeywordThreshold(value: Float) {
-        prefs.edit().putFloat(KEY_KEYWORD_THRESHOLD, value.coerceIn(0.005f, 5f)).apply()
-    }
-
-    fun getSecondStageThreshold(): Float =
-        prefs.getFloat(KEY_SECOND_STAGE_THRESHOLD, defaultSecondStageThreshold(getKeywordThreshold()))
-
-    fun saveSecondStageThreshold(value: Float) {
-        prefs.edit().putFloat(KEY_SECOND_STAGE_THRESHOLD, value.coerceIn(0.005f, 5f)).apply()
+        prefs.edit().putFloat(KEY_KEYWORD_THRESHOLD, value.coerceIn(0.01f, 5f)).apply()
     }
 
     fun getConfirmHitCount(): Int = prefs.getInt(KEY_CONFIRM_HITS, DEFAULT_CONFIRM_HITS)
@@ -78,7 +67,6 @@ class WakeWordConfigStore(context: Context) {
             .putString(KEY_PRESET, preset.name)
             .putFloat(KEY_KEYWORD_SCORE, preset.keywordScore)
             .putFloat(KEY_KEYWORD_THRESHOLD, preset.keywordThreshold)
-            .putFloat(KEY_SECOND_STAGE_THRESHOLD, preset.secondStageThreshold)
             .putInt(KEY_CONFIRM_HITS, preset.confirmHits)
             .putBoolean(KEY_VAD_GATE, preset.vadGateEnabled)
             .apply()
@@ -86,62 +74,24 @@ class WakeWordConfigStore(context: Context) {
 
     fun applyPreset(preset: WakeWordSensitivityPreset) = savePreset(preset)
 
-    fun effectiveConfirmHits(): Int {
-        if (isSecondStageEnabled()) return 1
-        return getConfirmHitCount()
-    }
-
-    private fun migrateIfNeeded() {
-        val version = prefs.getInt(KEY_CONFIG_VERSION, 1)
-        if (version >= CURRENT_CONFIG_VERSION) return
-
-        val phrase = prefs.getString(KEY_PHRASE, null).orEmpty().trim()
-        val editor = prefs.edit()
-        if (phrase.isBlank() || phrase in LEGACY_CHINESE_PHRASES) {
-            editor.putString(KEY_PHRASE, DEFAULT_PHRASE)
-        }
-        if (!prefs.getBoolean(KEY_CALIBRATED, false)) {
-            val preset = WakeWordSensitivityPreset.BALANCED
-            editor
-                .putString(KEY_PRESET, preset.name)
-                .putFloat(KEY_KEYWORD_SCORE, preset.keywordScore)
-                .putFloat(KEY_KEYWORD_THRESHOLD, preset.keywordThreshold)
-                .putFloat(KEY_SECOND_STAGE_THRESHOLD, preset.secondStageThreshold)
-                .putInt(KEY_CONFIRM_HITS, preset.confirmHits)
-                .putBoolean(KEY_VAD_GATE, preset.vadGateEnabled)
-                .putBoolean(KEY_SILERO_VAD, true)
-                .putBoolean(KEY_SECOND_STAGE, true)
-        }
-        editor.putInt(KEY_CONFIG_VERSION, CURRENT_CONFIG_VERSION).apply()
-    }
-
     companion object {
         private const val PREFS_NAME = "joy_for_old_prefs"
         private const val KEY_ENABLED = "wake_word_enabled"
         private const val KEY_PHRASE = "wake_word_phrase"
         private const val KEY_KEYWORD_SCORE = "wake_word_keyword_score"
         private const val KEY_KEYWORD_THRESHOLD = "wake_word_keyword_threshold"
-        private const val KEY_SECOND_STAGE_THRESHOLD = "wake_word_second_stage_threshold"
         private const val KEY_CONFIRM_HITS = "wake_word_confirm_hits"
         private const val KEY_VAD_GATE = "wake_word_vad_gate"
         private const val KEY_SILERO_VAD = "wake_word_silero_vad"
         private const val KEY_SECOND_STAGE = "wake_word_second_stage"
         private const val KEY_CALIBRATED = "wake_word_calibrated"
         private const val KEY_PRESET = "wake_word_preset"
-        private const val KEY_CONFIG_VERSION = "wake_word_config_version"
-        private const val CURRENT_CONFIG_VERSION = 2
-        private val LEGACY_CHINESE_PHRASES = setOf("老头乐", "小度小度", "小爱同学")
-
         const val DEFAULT_PHRASE = "Hey,Cortana"
         val DEFAULT_KEYWORD_SCORE = WakeWordSensitivityPreset.BALANCED.keywordScore
         val DEFAULT_KEYWORD_THRESHOLD = WakeWordSensitivityPreset.BALANCED.keywordThreshold
-        val DEFAULT_SECOND_STAGE_THRESHOLD = WakeWordSensitivityPreset.BALANCED.secondStageThreshold
         val DEFAULT_CONFIRM_HITS = WakeWordSensitivityPreset.BALANCED.confirmHits
         const val DEFAULT_VAD_GATE = true
         const val DEFAULT_SILERO_VAD = true
         const val DEFAULT_SECOND_STAGE = true
-
-        fun defaultSecondStageThreshold(stage1Threshold: Float): Float =
-            SherpaOnnxWakeWordDetector.defaultSecondStageThreshold(stage1Threshold)
     }
 }

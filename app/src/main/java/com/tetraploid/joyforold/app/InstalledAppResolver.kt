@@ -150,7 +150,7 @@ object InstalledAppResolver {
             .take(limit)
     }
 
-    fun formatForPrompt(context: Context, limit: Int = 150): String {
+    fun formatForPrompt(context: Context, limit: Int = 30): String {
         val apps = getLaunchableApps(context)
         if (apps.isEmpty()) {
             return "（未能读取已安装应用列表，请检查系统包可见性权限）"

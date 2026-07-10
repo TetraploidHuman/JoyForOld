@@ -27,17 +27,19 @@ class DeepSeekClient(
         pageContext: String,
         pageDiff: String,
         keyMemories: String,
+        minimalPageContext: String,
     ): JSONObject {
         conversation.seedSystem(buildSystemPrompt(keyMemories))
         conversation.addUser(
             buildString {
                 appendLine("【用户指令】$userCommand")
-                appendLine()
-                appendLine("【当前页面快览】")
-                append(pageContext)
-                appendLine()
-                appendLine("【页面变化】")
-                append(pageDiff)
+                append(
+                    AgentMessageCompactor.formatPageSection(
+                        pageContext = pageContext,
+                        pageDiff = pageDiff,
+                        minimalPageContext = minimalPageContext,
+                    ),
+                )
                 appendLine()
                 appendLine("请决定第一步操作，只返回 JSON。")
             },
@@ -62,6 +64,7 @@ class DeepSeekClient(
         pageContext: String,
         pageDiff: String,
         keyMemories: String = "",
+        minimalPageContext: String = "",
     ): JSONObject = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) throw IllegalArgumentException("请先填写 DeepSeek API Key")
 
@@ -70,12 +73,13 @@ class DeepSeekClient(
         conversation.addUser(
             buildString {
                 appendLine(stepFeedback)
-                appendLine()
-                appendLine("【当前页面快览】")
-                append(pageContext)
-                appendLine()
-                appendLine("【页面变化】")
-                append(pageDiff)
+                append(
+                    AgentMessageCompactor.formatPageSection(
+                        pageContext = pageContext,
+                        pageDiff = pageDiff,
+                        minimalPageContext = minimalPageContext,
+                    ),
+                )
                 appendLine()
                 appendLine("请决定下一步，只返回 JSON。")
             },
@@ -143,6 +147,7 @@ class DeepSeekClient(
         【原则】
         - **必须以本轮【用户指令】为唯一目标**；历史记忆只能辅助，禁止擅自继续上一轮未提及的任务。
         - 每次只输出一个 action；基于页面快览和变化决策，禁止让用户描述页面。
+        - 能走系统级动作时优先走系统动作（dial_contact/send_sms/set_alarm/add_calendar_event/open_*），避免纯 UI 点按。
         - 找联系人：优先可见列表模糊匹配（同音字、谐音、号码片段），直接 click；找不到先 scroll_down 或 swipe_down。
         - 需要切换应用时：不确定应用名先 list_apps（可带 target_text 筛选），再用 open_app；target_text **必须**与 list_apps 返回的名称逐字一致，禁止猜测。
         - 若 open_app 失败，先 list_apps 核对名称，或根据失败提示中的「你可能想找」换用准确名称，不要重复同一错误名称。

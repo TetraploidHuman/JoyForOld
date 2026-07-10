@@ -228,9 +228,69 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
             }
 
             HorizontalDivider()
+            Text("家人协助与预设指令", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "这里配置家人手机号、紧急求助话术、家的地址，以及像“我要回家”这样的固定口令。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = uiState.daughterPhone,
+                onValueChange = viewModel::updateDaughterPhone,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("女儿手机号") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = uiState.sonPhone,
+                onValueChange = viewModel::updateSonPhone,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("儿子手机号") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = uiState.emergencyPhone,
+                onValueChange = viewModel::updateEmergencyPhone,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("紧急联系人手机号") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = uiState.emergencyMessage,
+                onValueChange = viewModel::updateEmergencyMessage,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("紧急求助短信内容") },
+                minLines = 2,
+            )
+            OutlinedTextField(
+                value = uiState.homeAddress,
+                onValueChange = viewModel::updateHomeAddress,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("家的地址") },
+                placeholder = { Text("例如：深圳市南山区xx小区xx栋xx室") },
+                minLines = 2,
+            )
+            OutlinedTextField(
+                value = uiState.presetPhraseGoHome,
+                onValueChange = viewModel::updatePresetPhraseGoHome,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("回家预设口令") },
+                placeholder = { Text("例如：我要回家") },
+                singleLine = true,
+            )
+            Text(
+                "识别到这句口令时，会优先走地图导航深链，不依赖页面点击。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = viewModel::saveCaregiverSettings) {
+                Text("保存家人协助与预设")
+            }
+
+            HorizontalDivider()
             Text("本地语音唤醒（Sherpa KWS + Silero VAD）", style = MaterialTheme.typography.titleSmall)
             Text(
-                "模型版本：${uiState.wakeWordModelVersion}（已内置，无需联网下载）",
+                "模型版本：${uiState.wakeWordModelVersion}（开发模式会自动预下载）",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -265,7 +325,7 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 )
             }
             Text(
-                "推荐用预设调参：一阶段灵敏检测 + 二阶段严格校验（默认 confirm=1）。",
+                "推荐用预设调参：平衡=灵敏检测+二次确认；灵敏=单次命中；防误触=高阈值+二次确认。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -282,8 +342,32 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 }
             }
             Text(
-                "当前：score=${uiState.wakeWordKeywordScore}，一阶段=${uiState.wakeWordKeywordThreshold}，" +
-                    "二阶段=${uiState.wakeWordSecondStageThreshold}，confirm=${uiState.wakeWordConfirmHits}次",
+                "当前：score=${uiState.wakeWordKeywordScore}，threshold=${uiState.wakeWordKeywordThreshold}，" +
+                    "二次确认=${uiState.wakeWordConfirmHits}次",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Switch(
+                        checked = uiState.wakeWordSileroVadEnabled,
+                        onCheckedChange = viewModel::setWakeWordSileroVadEnabled,
+                    )
+                    Text("Silero VAD", style = MaterialTheme.typography.bodySmall)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Switch(
+                        checked = uiState.wakeWordSecondStageEnabled,
+                        onCheckedChange = viewModel::setWakeWordSecondStageEnabled,
+                    )
+                    Text("二阶段唤醒", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Text(
+                "Silero 过滤静音；二阶段在 ring buffer 上用更高阈值复检，降低误触。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -307,16 +391,8 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 value = uiState.wakeWordKeywordThreshold.toString(),
                 onValueChange = viewModel::updateWakeWordKeywordThreshold,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("一阶段阈值 keywordsThreshold") },
-                placeholder = { Text("默认 0.012；越低越灵敏") },
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = uiState.wakeWordSecondStageThreshold.toString(),
-                onValueChange = viewModel::updateWakeWordSecondStageThreshold,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("二阶段阈值（严格校验）") },
-                placeholder = { Text("默认 0.020；应高于一阶段") },
+                label = { Text("命中阈值 keywordsThreshold") },
+                placeholder = { Text("默认 0.018；越低越易误触") },
                 singleLine = true,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

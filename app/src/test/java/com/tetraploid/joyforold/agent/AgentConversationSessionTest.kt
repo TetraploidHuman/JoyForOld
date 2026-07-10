@@ -42,7 +42,7 @@ class AgentConversationSessionTest {
         }
 
         val apiMessages = session.toApiMessages()
-        assertTrue(apiMessages.length() <= 26)
+        assertTrue(apiMessages.length() <= 18)
         assertEquals("system", apiMessages.getJSONObject(0).getString("role"))
     }
 

@@ -8,8 +8,8 @@ object WakeWordAudioNormalizer {
     fun boostIfQuiet(
         pcm16le: ByteArray,
         len: Int,
-        targetRms: Double = 1500.0,
-        maxGain: Double = 4.0,
+        targetRms: Double = 1800.0,
+        maxGain: Double = 5.0,
     ): Int {
         if (len < 2) return len
         var sumSquares = 0.0

@@ -73,8 +73,7 @@ class WakeWordService : Service() {
         val phrase = store.getPhrase()
         val keywordScore = store.getKeywordScore()
         val keywordThreshold = store.getKeywordThreshold()
-        val secondStageThreshold = store.getSecondStageThreshold()
-        val confirmHits = store.effectiveConfirmHits()
+        val confirmHits = store.getConfirmHitCount()
         val vadGateEnabled = store.isVadGateEnabled()
         val useSileroVad = store.isSileroVadEnabled()
         val secondStageEnabled = store.isSecondStageEnabled()
@@ -91,7 +90,6 @@ class WakeWordService : Service() {
             keyword = phrase,
             keywordScore = keywordScore,
             keywordThreshold = keywordThreshold,
-            secondStageThreshold = secondStageThreshold,
         )
         val secondStage = if (secondStageEnabled) WakeWordSecondStageVerifier(detector) else null
         if (!detector.prepare()) {
@@ -101,8 +99,7 @@ class WakeWordService : Service() {
         }
         AgentRuntime.appendLog(
             "本地唤醒已就绪：$phrase，score=$keywordScore，threshold=$keywordThreshold，" +
-                "二阶段阈值=$secondStageThreshold，confirm=$confirmHits，" +
-                "vad=${vadLabel(vadGateEnabled, useSileroVad, sileroGate != null)}，" +
+                "confirm=$confirmHits，vad=${vadLabel(vadGateEnabled, useSileroVad, sileroGate != null)}，" +
                 "二阶段=${if (secondStageEnabled) "开" else "关"}",
         )
         val min = AudioRecord.getMinBufferSize(
@@ -127,7 +124,6 @@ class WakeWordService : Service() {
         var frameCount = 0L
         var vadPassCount = 0L
         var hitCount = 0L
-        var stage2RejectCount = 0L
         var lastStatsAt = System.currentTimeMillis()
         var lastHitAt = 0L
         try {
@@ -144,9 +140,7 @@ class WakeWordService : Service() {
                     else -> true
                 }
                 if (!vadAllows) {
-                    lastStatsAt = maybeReportStats(
-                        frameCount, vadPassCount, hitCount, stage2RejectCount, lastStatsAt,
-                    )
+                    lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
                     continue
                 }
                 if (sileroGate?.hasSpeech(buf, boostedLen) == true ||
@@ -155,15 +149,13 @@ class WakeWordService : Service() {
                     vadPassCount++
                 }
                 if (now - serviceStartedAtMs < STARTUP_GRACE_MS) {
-                    lastStatsAt = maybeReportStats(
-                        frameCount, vadPassCount, hitCount, stage2RejectCount, lastStatsAt,
-                    )
+                    lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
                     continue
                 }
                 if (detector.feed(buf, boostedLen)) {
                     if (now - lastHitAt < WAKE_COOLDOWN_MS) continue
                     if (secondStage != null && !secondStage.verify(ringBuffer)) {
-                        stage2RejectCount++
+                        AgentRuntime.appendLog("唤醒候选未通过二阶段校验")
                         continue
                     }
                     if (!hitConfirmer.onCandidateHit(now)) continue
@@ -174,9 +166,7 @@ class WakeWordService : Service() {
                     AgentRuntime.appendLog("唤醒命中：$phrase (#$hitCount)")
                     AgentRuntime.onWakeWordDetected()
                 }
-                lastStatsAt = maybeReportStats(
-                    frameCount, vadPassCount, hitCount, stage2RejectCount, lastStatsAt,
-                )
+                lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
             }
         } finally {
             detector.release()
@@ -218,14 +208,12 @@ class WakeWordService : Service() {
         frameCount: Long,
         vadPassCount: Long,
         hitCount: Long,
-        stage2RejectCount: Long,
         lastStatsAt: Long,
     ): Long {
         val now = System.currentTimeMillis()
         if (now - lastStatsAt < STATS_LOG_INTERVAL_MS) return lastStatsAt
         AgentRuntime.appendLog(
-            "唤醒监听统计：frames=$frameCount, vadPass=$vadPassCount, " +
-                "stage2Reject=$stage2RejectCount, hits=$hitCount",
+            "唤醒监听统计：frames=$frameCount, vadPass=$vadPassCount, hits=$hitCount",
         )
         return now
     }
