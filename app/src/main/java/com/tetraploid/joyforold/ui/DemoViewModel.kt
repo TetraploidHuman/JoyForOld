@@ -2,7 +2,7 @@ package com.tetraploid.joyforold.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import com.tetraploid.joyforold.agent.AgentRuntime
+import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 import com.tetraploid.joyforold.agent.AgentUiState
 import kotlinx.coroutines.flow.StateFlow
 
@@ -34,6 +34,9 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
     fun updateWakeWordKeywordScore(value: String) = AgentRuntime.updateWakeWordKeywordScore(value)
 
     fun updateWakeWordKeywordThreshold(value: String) = AgentRuntime.updateWakeWordKeywordThreshold(value)
+
+    fun applyWakeWordPreset(preset: WakeWordSensitivityPreset) =
+        AgentRuntime.applyWakeWordPreset(getApplication(), preset)
 
     fun saveWakeWordConfig() = AgentRuntime.saveWakeWordConfig(getApplication())
 

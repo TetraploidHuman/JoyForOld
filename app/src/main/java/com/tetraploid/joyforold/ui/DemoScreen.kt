@@ -42,7 +42,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
-import com.tetraploid.joyforold.overlay.FloatingOverlayService
+import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 import com.tetraploid.joyforold.overlay.OverlayPermission
 
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -263,8 +263,29 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedTextField(
-                value = uiState.wakeWordPhrase,
+            Text(
+                "推荐用预设调参：平衡=灵敏检测+二次确认；灵敏=单次命中；防误触=高阈值+二次确认。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                WakeWordSensitivityPreset.entries.forEach { preset ->
+                    val selected = uiState.wakeWordPreset == preset
+                    OutlinedButton(
+                        onClick = { viewModel.applyWakeWordPreset(preset) },
+                        modifier = Modifier.weight(1f),
+                        enabled = !selected,
+                    ) {
+                        Text(if (selected) "${preset.label}✓" else preset.label)
+                    }
+                }
+            }
+            Text(
+                "当前：score=${uiState.wakeWordKeywordScore}，threshold=${uiState.wakeWordKeywordThreshold}，" +
+                    "二次确认=${uiState.wakeWordConfirmHits}次",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
                 onValueChange = viewModel::updateWakeWordPhrase,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("唤醒词") },
@@ -276,7 +297,7 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 onValueChange = viewModel::updateWakeWordKeywordScore,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("命中分数 keywordsScore") },
-                placeholder = { Text("默认 3.0，越高越灵敏") },
+                placeholder = { Text("默认 3.0；预设「平衡」会自动设置") },
                 singleLine = true,
             )
             OutlinedTextField(
@@ -284,7 +305,7 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 onValueChange = viewModel::updateWakeWordKeywordThreshold,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("命中阈值 keywordsThreshold") },
-                placeholder = { Text("默认 0.02，越低越灵敏") },
+                placeholder = { Text("默认 0.018；越低越易误触") },
                 singleLine = true,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

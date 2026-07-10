@@ -69,11 +69,14 @@ class WakeWordService : Service() {
     }
 
     private suspend fun runListenSession(): Boolean {
-        val gate = SimpleVadGate()
         val store = WakeWordConfigStore(applicationContext)
         val phrase = store.getPhrase()
         val keywordScore = store.getKeywordScore()
         val keywordThreshold = store.getKeywordThreshold()
+        val confirmHits = store.getConfirmHitCount()
+        val vadGateEnabled = store.isVadGateEnabled()
+        val speechGate = if (vadGateEnabled) SpeechActivityGate() else null
+        val hitConfirmer = WakeWordHitConfirmer(requiredHits = confirmHits)
         val detector = SherpaOnnxWakeWordDetector(
             context = applicationContext,
             keyword = phrase,
@@ -85,7 +88,8 @@ class WakeWordService : Service() {
             return false
         }
         AgentRuntime.appendLog(
-            "本地唤醒已就绪：$phrase，score=$keywordScore，threshold=$keywordThreshold",
+            "本地唤醒已就绪：$phrase，score=$keywordScore，threshold=$keywordThreshold，" +
+                "confirm=$confirmHits，vad=${if (vadGateEnabled) "开" else "关"}",
         )
         val min = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
@@ -93,13 +97,7 @@ class WakeWordService : Service() {
             AudioFormat.ENCODING_PCM_16BIT,
         )
         val bufferSize = max(min, SAMPLE_RATE * 2)
-        val audio = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize,
-        )
+        val audio = createAudioRecord(bufferSize)
         record = audio
         runCatching { audio.startRecording() }
             .onFailure {
@@ -121,16 +119,21 @@ class WakeWordService : Service() {
                 val n = audio.read(buf, 0, buf.size)
                 if (n <= 0) continue
                 frameCount++
-                val boostedLen = WakeWordAudioNormalizer.boostIfQuiet(buf, n)
-                val speech = gate.hasSpeech(buf, boostedLen)
-                if (speech) vadPassCount++
                 val now = System.currentTimeMillis()
+                val boostedLen = WakeWordAudioNormalizer.boostIfQuiet(buf, n)
+                if (speechGate != null && !speechGate.shouldProcess(buf, boostedLen, now)) {
+                    lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
+                    continue
+                }
+                if (speechGate?.hasSpeech(buf, boostedLen) == true) vadPassCount++
                 if (now - serviceStartedAtMs < STARTUP_GRACE_MS) {
                     lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
                     continue
                 }
                 if (detector.feed(buf, boostedLen)) {
                     if (now - lastHitAt < WAKE_COOLDOWN_MS) continue
+                    if (!hitConfirmer.onCandidateHit(now)) continue
+                    hitConfirmer.reset()
                     lastHitAt = now
                     hitCount++
                     AgentRuntime.appendLog("唤醒命中：$phrase (#$hitCount)")
@@ -143,6 +146,25 @@ class WakeWordService : Service() {
             releaseRecorder()
         }
         return true
+    }
+
+    private fun createAudioRecord(bufferSize: Int): AudioRecord {
+        val preferred = AudioRecord(
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            bufferSize,
+        )
+        if (preferred.state == AudioRecord.STATE_INITIALIZED) return preferred
+        preferred.release()
+        return AudioRecord(
+            MediaRecorder.AudioSource.MIC,
+            SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            bufferSize,
+        )
     }
 
     private fun maybeReportStats(

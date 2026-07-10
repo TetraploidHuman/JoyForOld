@@ -9,6 +9,7 @@ import com.tetraploid.joyforold.overlay.VoiceConfirmOverlayService
 import com.tetraploid.joyforold.speech.DoubaoAsrClient
 import com.tetraploid.joyforold.wakeword.SherpaOnnxModelManager
 import com.tetraploid.joyforold.wakeword.WakeWordConfigStore
+import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 import com.tetraploid.joyforold.wakeword.WakeWordService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -49,6 +50,8 @@ data class AgentUiState(
     val wakeWordTestHint: String? = null,
     val wakeWordKeywordScore: Float = WakeWordConfigStore.DEFAULT_KEYWORD_SCORE,
     val wakeWordKeywordThreshold: Float = WakeWordConfigStore.DEFAULT_KEYWORD_THRESHOLD,
+    val wakeWordConfirmHits: Int = WakeWordConfigStore.DEFAULT_CONFIRM_HITS,
+    val wakeWordPreset: WakeWordSensitivityPreset = WakeWordSensitivityPreset.BALANCED,
     val wakeWordModelVersion: String = SherpaOnnxModelManager.MODEL_VERSION,
 )
 
@@ -92,6 +95,8 @@ object AgentRuntime {
                     wakeWordRunning = wakeWordStore!!.isEnabled() && WakeWordService.isRunning,
                     wakeWordKeywordScore = wakeWordStore!!.getKeywordScore(),
                     wakeWordKeywordThreshold = wakeWordStore!!.getKeywordThreshold(),
+                    wakeWordConfirmHits = wakeWordStore!!.getConfirmHitCount(),
+                    wakeWordPreset = wakeWordStore!!.getPreset(),
                     wakeWordModelVersion = SherpaOnnxModelManager.MODEL_VERSION,
                 )
             }
@@ -176,19 +181,43 @@ object AgentRuntime {
         val phrase = current.wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE }
         val score = current.wakeWordKeywordScore
         val threshold = current.wakeWordKeywordThreshold
+        val confirmHits = current.wakeWordConfirmHits
         wakeWordStore?.savePhrase(phrase)
         wakeWordStore?.saveKeywordScore(score)
         wakeWordStore?.saveKeywordThreshold(threshold)
+        wakeWordStore?.saveConfirmHitCount(confirmHits)
+        wakeWordStore?.savePreset(current.wakeWordPreset)
         _state.update {
             it.copy(
                 wakeWordPhrase = phrase,
                 wakeWordKeywordScore = score,
                 wakeWordKeywordThreshold = threshold,
+                wakeWordConfirmHits = confirmHits,
             )
         }
-        // 唤醒词变化时重启常听服务，让 keyword 文件生效
         syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
-        appendLog("唤醒配置已保存：$phrase，score=$score，threshold=$threshold")
+        appendLog(
+            "唤醒配置已保存：$phrase，score=$score，threshold=$threshold，confirm=$confirmHits，" +
+                "预设=${current.wakeWordPreset.label}",
+        )
+    }
+
+    fun applyWakeWordPreset(application: Application, preset: WakeWordSensitivityPreset) {
+        initIfNeeded(application)
+        wakeWordStore?.applyPreset(preset)
+        _state.update {
+            it.copy(
+                wakeWordPreset = preset,
+                wakeWordKeywordScore = preset.keywordScore,
+                wakeWordKeywordThreshold = preset.keywordThreshold,
+                wakeWordConfirmHits = preset.confirmHits,
+            )
+        }
+        syncWakeWordService(forceRestart = _state.value.wakeWordEnabled)
+        appendLog(
+            "已切换唤醒预设「${preset.label}」：score=${preset.keywordScore}，" +
+                "threshold=${preset.keywordThreshold}，二次确认=${preset.confirmHits}次",
+        )
     }
 
     fun updateWakeWordKeywordScore(value: String) {
