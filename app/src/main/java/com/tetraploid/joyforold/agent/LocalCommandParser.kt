@@ -1,7 +1,7 @@
 package com.tetraploid.joyforold.agent
 
 object LocalCommandParser {
-    private val clickPattern = Regex("""^(点击|点|按)\s*(.+)$""", RegexOption.IGNORE_CASE)
+    private val clickPattern = Regex("""^(?:点击|点按|按(?:一下)?)\s*(.+)$""", RegexOption.IGNORE_CASE)
     private val typeOnlyPattern = Regex("""^(输入|打字|写入)[:：]?\s*(.+)$""", RegexOption.IGNORE_CASE)
     private val sendToPersonPattern = Regex("""^(给)?(.+?)(发消息|发送消息|发送|发)[:：\s]+(.+)$""")
     private val sendInChatPattern = Regex("""^(发送|发消息|发一条消息)[:：\s]+(.+)$""", RegexOption.IGNORE_CASE)
@@ -75,8 +75,12 @@ object LocalCommandParser {
             return infoQuerySteps("query_weather")
         }
 
+        if (InfoQueryDetector.isTimeQuery(text)) {
+            return infoQuerySteps("tell_time")
+        }
+
         clickPattern.find(text)?.let { match ->
-            val target = match.groupValues[2].trim()
+            val target = match.groupValues[1].trim()
             if (target.isNotBlank()) {
                 return listOf(
                     AgentAction(action = "click", targetText = target),
@@ -128,7 +132,7 @@ object LocalCommandParser {
                 AgentAction(action = "open_weather"),
                 AgentAction(action = "finish", message = "已打开天气", finished = true),
             )
-            "查看时间", "几点了", "现在几点", "报时", "什么时间" -> infoQuerySteps("tell_time")
+            "查看时间", "几点了", "现在几点", "现在几点钟了", "几点钟了", "报时", "什么时间" -> infoQuerySteps("tell_time")
             "查看天气", "查天气", "今天天气", "今天天气怎么样", "帮我查一下天气" -> infoQuerySteps("query_weather")
             "紧急呼救", "sos" -> listOf(
                 AgentAction(action = "emergency_help"),

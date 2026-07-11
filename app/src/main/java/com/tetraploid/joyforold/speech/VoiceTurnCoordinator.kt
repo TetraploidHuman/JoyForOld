@@ -1,37 +1,29 @@
 package com.tetraploid.joyforold.speech
 
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import com.tetraploid.joyforold.speech.api.SpeechInput
 import com.tetraploid.joyforold.speech.api.SpeechInputSession
 import com.tetraploid.joyforold.speech.api.TtsOutput
 import com.tetraploid.joyforold.speech.api.VoiceInteractionState
 
 /**
- * 语音轮次：先播再问，再听用户说话（参考 SightSync VoiceTurnCoordinator）。
+ * 语音轮次：TTS 完全播完后再连接 ASR、开麦，避免把播报内容识别进去。
  */
 class VoiceTurnCoordinator(
     private val ttsOutput: TtsOutput,
     private val speechInput: SpeechInput,
     private val onStateChanged: (VoiceInteractionState) -> Unit,
+    private val awaitTtsIdle: suspend () -> Unit = {},
 ) {
-    companion object {
-        private const val POST_TTS_LISTEN_DELAY_MS = 450L
-    }
     suspend fun speakPromptThenListen(
         prompt: String?,
         session: SpeechInputSession,
-    ) = coroutineScope {
-        val prepareJob = async {
-            runCatching { speechInput.prepareConnection(session) }
-        }
+    ) {
         if (!prompt.isNullOrBlank()) {
             onStateChanged(VoiceInteractionState.SpeakingPrompt)
             ttsOutput.speakAndAwait(prompt, flush = true)
-            delay(POST_TTS_LISTEN_DELAY_MS)
         }
-        prepareJob.await()
+        awaitTtsIdle()
+        runCatching { speechInput.prepareConnection(session) }
         onStateChanged(VoiceInteractionState.Listening)
         speechInput.start(session)
     }

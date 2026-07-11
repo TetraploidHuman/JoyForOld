@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.speech.api.VoiceInteractionState
-import com.tetraploid.joyforold.ui.cortana.CortanaOrb
+import com.tetraploid.joyforold.ui.cortana.CortanaHeroHeader
 import com.tetraploid.joyforold.ui.cortana.CortanaSearchBar
 import com.tetraploid.joyforold.ui.cortana.OverlayInteractionCard
 import com.tetraploid.joyforold.ui.theme.CortanaColors
@@ -106,22 +106,19 @@ fun FloatingOverlayContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                CortanaOrb(
-                    size = 72.dp,
-                    active = uiState.isRunning || uiState.isListening || uiState.waitingForUserConfirm,
-                )
-
-                Text(
-                    text = interactionText,
-                    color = CortanaColors.AccentMuted,
-                    fontSize = 16.sp,
+                CortanaHeroHeader(
+                    greeting = interactionText,
+                    orbActive = uiState.isRunning || uiState.isListening || uiState.waitingForUserConfirm,
+                    compact = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
 
-                if (uiState.speechText.isNotBlank() && !uiState.waitingForUserConfirm) {
+                if (uiState.speechText.isNotBlank() &&
+                    !uiState.waitingForUserConfirm &&
+                    uiState.isListening
+                ) {
                     Text(
                         text = "「${uiState.speechText}」",
                         color = CortanaColors.OnBackgroundSecondary,

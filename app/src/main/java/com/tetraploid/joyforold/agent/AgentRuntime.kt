@@ -207,6 +207,7 @@ object AgentRuntime {
             preloadWakeWordModelIfNeeded()
             migrateWakeWordDefaultsIfNeeded()
             migrateWakeWordAntiFalsePositiveIfNeeded()
+            migrateWakeWordQualityIfNeeded()
             syncWakeWordService()
         }
         ensureAccessibilityStateListener(application)
@@ -426,20 +427,20 @@ object AgentRuntime {
 
     private fun continueVoiceConversation(application: Application, result: AgentRunResult) {
         if (!voiceSessionActive) return
-        when {
-            result.waitingForUserConfirm && result.needsBinaryConfirm ->
-                startVoiceReplyToConfirm(application)
-            result.waitingForUserConfirm && !result.needsBinaryConfirm ->
-                startVoiceOpenFollowUp(application)
-            !result.waitingForUserConfirm && result.success && shouldContinueConversation(result.summary) ->
-                mainScope.launch {
-                    kotlinx.coroutines.delay(400)
+        mainScope.launch {
+            androidTtsOutput?.awaitIdle()
+            when {
+                result.waitingForUserConfirm && result.needsBinaryConfirm ->
+                    startVoiceReplyToConfirm(application)
+                result.waitingForUserConfirm && !result.needsBinaryConfirm ->
+                    startVoiceOpenFollowUp(application)
+                !result.waitingForUserConfirm && result.success && shouldContinueConversation(result.summary) ->
                     startVoiceInputInternal(
                         confirmReplyMode = false,
                         application = application,
                         skipPrompt = true,
                     )
-                }
+            }
         }
     }
 
@@ -855,7 +856,10 @@ object AgentRuntime {
         if (_state.value.isListening || _state.value.isRunning) return
         initIfNeeded(application)
         voiceSessionActive = true
-        startVoiceInputInternal(confirmReplyMode = true, application = application)
+        mainScope.launch {
+            androidTtsOutput?.awaitIdle()
+            startVoiceInputInternal(confirmReplyMode = true, application = application)
+        }
     }
 
     fun startVoiceOpenFollowUp(application: Application) {
@@ -863,11 +867,14 @@ object AgentRuntime {
         if (_state.value.isListening || _state.value.isRunning) return
         initIfNeeded(application)
         voiceSessionActive = true
-        startVoiceInputInternal(
-            confirmReplyMode = true,
-            application = application,
-            skipPrompt = false,
-        )
+        mainScope.launch {
+            androidTtsOutput?.awaitIdle()
+            startVoiceInputInternal(
+                confirmReplyMode = true,
+                application = application,
+                skipPrompt = false,
+            )
+        }
     }
 
     private fun startVoiceInputInternal(
@@ -905,7 +912,7 @@ object AgentRuntime {
         mainScope.launch {
             _state.update {
                 it.copy(
-                    isListening = true,
+                    isListening = false,
                     speechText = "",
                     voiceInteractionState = if (prompt.isNullOrBlank()) {
                         VoiceInteractionState.Listening
@@ -961,7 +968,6 @@ object AgentRuntime {
                     },
                 ),
             )
-            _state.update { it.copy(voiceInteractionState = VoiceInteractionState.Listening) }
         }
     }
 
@@ -1178,8 +1184,15 @@ object AgentRuntime {
             ttsOutput = tts,
             speechInput = input,
             onStateChanged = { state ->
-                _state.update { it.copy(voiceInteractionState = state) }
+                _state.update {
+                    it.copy(
+                        voiceInteractionState = state,
+                        isListening = state == VoiceInteractionState.Listening,
+                    )
+                }
+                syncOverlayVisibility()
             },
+            awaitTtsIdle = { tts.awaitIdle() },
         )
         voiceTurnCoordinator = coordinator
         return coordinator
@@ -1243,7 +1256,7 @@ object AgentRuntime {
                 appendLog("预设指令命中：${current.command} -> $effectiveCommand")
             }
             appendLog("开始执行：$effectiveCommand")
-            if (!shouldResumePending) {
+            if (!shouldResumePending && !voiceSessionActive) {
                 speakStatus("收到，正在执行")
             }
 
@@ -1293,15 +1306,14 @@ object AgentRuntime {
                     if (result.success) "完成（${elapsed}ms）：${result.summary}"
                     else "结束（${elapsed}ms）：${result.summary}",
                 )
-                speakStatus(
-                    if (result.waitingForUserConfirm) {
-                        // 确认问题由 startVoiceReplyToConfirm 先播再问，避免与开麦重叠
-                        ""
-                    } else {
-                        result.summary
-                    },
-                    flush = true,
-                )
+                when {
+                    result.waitingForUserConfirm -> Unit
+                    voiceSessionActive && result.summary.isNotBlank() -> {
+                        recordVoicePrompt(result.summary)
+                        androidTtsOutput?.speakAndAwait(result.summary, flush = true)
+                    }
+                    result.summary.isNotBlank() -> speakStatus(result.summary, flush = true)
+                }
                 refreshMemories()
                 _state.update {
                     it.copy(
@@ -1453,6 +1465,30 @@ object AgentRuntime {
             appendLog("已收紧唤醒灵敏度，降低误触（二次确认 + 二阶段复检）")
         }
         store.markAntiFalsePositiveMigrationDone()
+    }
+
+    private fun migrateWakeWordQualityIfNeeded() {
+        val store = wakeWordStore ?: return
+        if (!store.needsWakeQualityMigration()) return
+        val preset = store.getPreset()
+        if (preset != WakeWordSensitivityPreset.SENSITIVE || store.getConfirmHitCount() <= 1) {
+            store.applyPreset(WakeWordSensitivityPreset.BALANCED)
+        }
+        store.saveVadGateEnabled(true)
+        store.saveSecondStageEnabled(true)
+        store.saveSileroVadEnabled(true)
+        _state.update {
+            it.copy(
+                wakeWordKeywordScore = store.getKeywordScore(),
+                wakeWordKeywordThreshold = store.getKeywordThreshold(),
+                wakeWordConfirmHits = store.getConfirmHitCount(),
+                wakeWordPreset = store.getPreset(),
+                wakeWordSileroVadEnabled = store.isSileroVadEnabled(),
+                wakeWordSecondStageEnabled = store.isSecondStageEnabled(),
+            )
+        }
+        store.markWakeQualityMigrationDone()
+        appendLog("已优化唤醒：启用语音活动门控 + 二次确认，降低环境噪音误触")
     }
 
     private fun preloadWakeWordModelIfNeeded() {

@@ -1,6 +1,7 @@
 package com.tetraploid.joyforold.agent
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -36,6 +37,20 @@ class LocalCommandParserTest {
         val steps = LocalCommandParser.parse("几点了")
         assertNotNull(steps)
         assertEquals("tell_time", steps!!.first().action)
+    }
+
+    @Test
+    fun parse_timeQuery_colloquial() {
+        val steps = LocalCommandParser.parse("现在几点钟了")
+        assertNotNull(steps)
+        assertEquals("tell_time", steps!!.first().action)
+    }
+
+    @Test
+    fun planFromCommand_timeQuery_notClick() {
+        val phases = TaskPhasePlanner.planFromCommand("现在几点钟了")
+        assertTrue(phases.any { it.label.contains("查看时间") })
+        assertFalse(phases.any { it.label.contains("钟了") })
     }
 
     @Test

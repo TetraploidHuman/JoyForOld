@@ -72,7 +72,7 @@ object ElderTaskTemplateMatcher {
             ),
         ),
         TemplateIntent(
-            aliases = listOf("查看时间", "几点了", "现在几点", "报时"),
+            aliases = listOf("查看时间", "几点了", "现在几点", "现在几点钟了", "几点钟了", "报时"),
             actions = listOf(
                 AgentAction(action = "tell_time"),
                 AgentAction(action = "finish", message = "正在查看时间", finished = true),

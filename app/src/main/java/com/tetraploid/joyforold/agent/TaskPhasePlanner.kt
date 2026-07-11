@@ -24,7 +24,7 @@ object TaskPhasePlanner {
         """(?:请|帮我?)?(?:打开|启动|开启|运行|开一下)\s*([^\s，,。；;]+)""",
         RegexOption.IGNORE_CASE,
     )
-    private val clickPattern = Regex("""(?:点击|点|按)\s*(.+)""", RegexOption.IGNORE_CASE)
+    private val clickPattern = Regex("""^(?:点击|点按|按(?:一下)?)\s*(.+)$""", RegexOption.IGNORE_CASE)
     private val typePattern = Regex("""(?:输入|打字|写入)[:：]?\s*(.+)""", RegexOption.IGNORE_CASE)
     private val findPattern = Regex("""(?:搜索|查找|找)\s*(.+)""", RegexOption.IGNORE_CASE)
     private val scrollDownPattern = Regex("""(?:向下滚动|下滑|往下翻)""")
@@ -66,6 +66,14 @@ object TaskPhasePlanner {
 
         if (text.contains("读") && text.contains("消息")) {
             return phases("读取未读消息")
+        }
+
+        if (InfoQueryDetector.isTimeQuery(text)) {
+            return phases("查看时间")
+        }
+
+        if (InfoQueryDetector.isWeatherQuery(text)) {
+            return phases("查询天气")
         }
 
         clickPattern.find(text)?.let { match ->
@@ -167,6 +175,8 @@ object TaskPhasePlanner {
             "dial_contact" -> "拨打${action.targetText.orEmpty()}"
             "send_sms" -> "给${action.targetText.orEmpty()}发短信"
             "read_unread_messages" -> "读取未读消息"
+            "tell_time" -> "查看时间"
+            "query_weather" -> "查询天气"
             "ask_family_for_help" -> "联系家人帮忙"
             "emergency_help" -> "紧急呼救"
             "list_apps" -> "查找应用"

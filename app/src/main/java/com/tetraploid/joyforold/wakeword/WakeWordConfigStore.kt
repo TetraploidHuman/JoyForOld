@@ -88,6 +88,13 @@ class WakeWordConfigStore(context: Context) {
         prefs.edit().putInt(KEY_RECALL_MIGRATION, ANTI_FALSE_POSITIVE_MIGRATION_VERSION).apply()
     }
 
+    fun needsWakeQualityMigration(): Boolean =
+        prefs.getInt(KEY_RECALL_MIGRATION, 0) < WAKE_QUALITY_MIGRATION_VERSION
+
+    fun markWakeQualityMigrationDone() {
+        prefs.edit().putInt(KEY_RECALL_MIGRATION, WAKE_QUALITY_MIGRATION_VERSION).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "joy_for_old_prefs"
         private const val KEY_ENABLED = "wake_word_enabled"
@@ -103,11 +110,12 @@ class WakeWordConfigStore(context: Context) {
         private const val KEY_RECALL_MIGRATION = "wake_word_recall_migration"
         private const val RECALL_MIGRATION_VERSION = 2
         private const val ANTI_FALSE_POSITIVE_MIGRATION_VERSION = 3
+        private const val WAKE_QUALITY_MIGRATION_VERSION = 4
         const val DEFAULT_PHRASE = "Hey,Cortana"
         val DEFAULT_KEYWORD_SCORE = WakeWordSensitivityPreset.BALANCED.keywordScore
         val DEFAULT_KEYWORD_THRESHOLD = WakeWordSensitivityPreset.BALANCED.keywordThreshold
         val DEFAULT_CONFIRM_HITS = WakeWordSensitivityPreset.BALANCED.confirmHits
-        const val DEFAULT_VAD_GATE = false
+        const val DEFAULT_VAD_GATE = true
         const val DEFAULT_SILERO_VAD = true
         const val DEFAULT_SECOND_STAGE = true
     }

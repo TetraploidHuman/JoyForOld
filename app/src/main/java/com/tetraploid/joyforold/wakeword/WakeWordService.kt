@@ -103,8 +103,9 @@ class WakeWordService : Service() {
         } else {
             null
         }
-        val rmsGate = if (vadGateEnabled && sileroGate == null) SpeechActivityGate() else null
-        val hitConfirmer = WakeWordHitConfirmer(requiredHits = confirmHits)
+        val rmsGate = if (vadGateEnabled) SpeechActivityGate() else null
+        val feedGate = if (vadGateEnabled) WakeWordFeedGate(sileroGate, rmsGate) else null
+        val hitConfirmer = WakeWordHitConfirmer(requiredHits = confirmHits, windowMs = 1100L)
         val ringBuffer = WakeWordAudioRingBuffer()
         val detector = SherpaOnnxWakeWordDetector(
             context = applicationContext,
@@ -155,11 +156,14 @@ class WakeWordService : Service() {
                 val now = System.currentTimeMillis()
                 val boostedLen = WakeWordAudioNormalizer.boostIfQuiet(buf, n)
                 ringBuffer.append(buf, boostedLen)
-                // VAD 仅用于统计，不再拦截 KWS 输入，避免截断唤醒词开头导致漏检
                 if (sileroGate?.hasSpeech(buf, boostedLen) == true ||
                     rmsGate?.hasSpeech(buf, boostedLen) == true
                 ) {
                     vadPassCount++
+                }
+                if (feedGate != null && !feedGate.shouldFeed(buf, boostedLen, now)) {
+                    lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
+                    continue
                 }
                 if (now - serviceStartedAtMs < STARTUP_GRACE_MS) {
                     lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
