@@ -26,6 +26,7 @@ class JoyAccessibilityService : AccessibilityService() {
   override fun onServiceConnected() {
     super.onServiceConnected()
     instance = this
+    com.tetraploid.joyforold.agent.AgentRuntime.refreshAccessibilityState()
   }
 
   override fun onDestroy() {
@@ -33,6 +34,7 @@ class JoyAccessibilityService : AccessibilityService() {
       instance = null
       lastExternalRoot?.recycle()
       lastExternalRoot = null
+      com.tetraploid.joyforold.agent.AgentRuntime.refreshAccessibilityState()
     }
     super.onDestroy()
   }
@@ -56,7 +58,12 @@ class JoyAccessibilityService : AccessibilityService() {
     }
   }
 
-  override fun onInterrupt() = Unit
+  override fun onInterrupt() {
+    if (instance === this) {
+      instance = null
+      com.tetraploid.joyforold.agent.AgentRuntime.refreshAccessibilityState()
+    }
+  }
 
   fun isReady(): Boolean = instance != null
 
@@ -421,9 +428,11 @@ class JoyAccessibilityService : AccessibilityService() {
 
     val roots = collectExternalRoots()
     if (roots.isEmpty()) return "输入失败：无法读取页面"
+    var focused: AccessibilityNodeInfo? = null
+    var editable: AccessibilityNodeInfo? = null
     return try {
-      val focused = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-      var editable = focused
+      focused = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+      editable = focused
       if (editable == null) {
         editable = roots
           .mapNotNull { NodeFinder.findBestEditable(it) }
@@ -451,10 +460,23 @@ class JoyAccessibilityService : AccessibilityService() {
       if (!ok) {
         ok = editable.performAction(AccessibilityNodeInfo.ACTION_PASTE)
       }
-      if (focused == null) editable.recycle()
       if (ok) "已输入：$text" else "输入失败：系统未接受输入，可先 click 输入框再试"
     } finally {
+      recycleInputNodes(focused, editable)
       roots.forEach { it.recycle() }
+    }
+  }
+
+  private fun recycleInputNodes(
+    focused: AccessibilityNodeInfo?,
+    editable: AccessibilityNodeInfo?,
+  ) {
+    when {
+      focused != null && editable != null && focused === editable -> focused.recycle()
+      else -> {
+        focused?.recycle()
+        editable?.recycle()
+      }
     }
   }
 

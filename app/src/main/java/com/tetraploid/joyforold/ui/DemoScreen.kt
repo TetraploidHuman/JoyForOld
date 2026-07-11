@@ -43,6 +43,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.OverlayPermission
+import com.tetraploid.joyforold.speech.api.VoiceInteractionState
+import com.tetraploid.joyforold.system.NotificationAccessPermission
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -73,6 +75,11 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
             pendingVoiceAfterPermission = false
             pendingVoiceInputAfterPermission = false
         },
+    )
+
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted -> viewModel.onReadContactsPermissionResult(granted) },
     )
 
     DisposableEffect(lifecycleOwner) {
@@ -123,6 +130,30 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                     MaterialTheme.colorScheme.error
                 },
             )
+            Text(
+                text = if (uiState.readContactsGranted) {
+                    "联系人权限：已授予"
+                } else {
+                    "联系人权限：未授予（按姓名拨号需要，也可在家人协助中配置）"
+                },
+                color = if (uiState.readContactsGranted) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            Text(
+                text = if (uiState.notificationAccessGranted) {
+                    "通知使用权：已开启（可读未读消息）"
+                } else {
+                    "通知使用权：未开启（读未读消息需要）"
+                },
+                color = if (uiState.notificationAccessGranted) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
 
             OutlinedButton(
                 onClick = {
@@ -154,6 +185,38 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                         "3. 麦克风权限已开启"
                     } else {
                         "3. 授予麦克风权限"
+                    },
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                },
+                enabled = !uiState.readContactsGranted,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    if (uiState.readContactsGranted) {
+                        "4. 联系人权限已开启"
+                    } else {
+                        "4. 授予联系人权限"
+                    },
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    context.startActivity(NotificationAccessPermission.createSettingsIntent(context))
+                },
+                enabled = !uiState.notificationAccessGranted,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    if (uiState.notificationAccessGranted) {
+                        "5. 通知使用权已开启"
+                    } else {
+                        "5. 开启通知使用权（读未读消息）"
                     },
                 )
             }
@@ -317,7 +380,7 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
             }
 
             HorizontalDivider()
-            Text("本地语音唤醒（Sherpa KWS + Silero VAD）", style = MaterialTheme.typography.titleSmall)
+            Text("本地语音唤醒（Sherpa KWS）", style = MaterialTheme.typography.titleSmall)
             Text(
                 "模型版本：${uiState.wakeWordModelVersion}（开发模式会自动预下载）",
                 style = MaterialTheme.typography.bodySmall,
@@ -385,7 +448,7 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                         checked = uiState.wakeWordSileroVadEnabled,
                         onCheckedChange = viewModel::setWakeWordSileroVadEnabled,
                     )
-                    Text("Silero VAD", style = MaterialTheme.typography.bodySmall)
+                    Text("VAD 统计", style = MaterialTheme.typography.bodySmall)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Switch(
@@ -396,7 +459,7 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 }
             }
             Text(
-                "Silero 过滤静音；二阶段在 ring buffer 上用更高阈值复检，降低误触。",
+                "默认持续监听全量音频；二阶段复检可降误触但可能漏唤醒。中文词如「小艺小艺」效果通常更好。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -405,7 +468,7 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 onValueChange = viewModel::updateWakeWordPhrase,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("唤醒词") },
-                placeholder = { Text("例如：Hey,Cortana") },
+                placeholder = { Text("例如：小艺小艺、Hey,Cortana") },
                 singleLine = true,
             )
             OutlinedTextField(
@@ -504,13 +567,18 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                     Text("填入识别结果")
                 }
             }
-            if (uiState.isListening || uiState.speechText.isNotBlank()) {
+            if (uiState.isListening || uiState.speechText.isNotBlank() ||
+                uiState.voiceInteractionState != VoiceInteractionState.Idle
+            ) {
                 Text(
-                    text = if (uiState.isListening) {
-                        if (uiState.speechText.isNotBlank()) "识别中：${uiState.speechText}"
-                        else "正在聆听（流式识别）..."
-                    } else {
-                        "识别文本：${uiState.speechText}"
+                    text = when (uiState.voiceInteractionState) {
+                        VoiceInteractionState.SpeakingPrompt -> "正在播报，请听完再说话…"
+                        VoiceInteractionState.Listening -> {
+                            if (uiState.speechText.isNotBlank()) "聆听中：${uiState.speechText}"
+                            else "正在聆听…"
+                        }
+                        VoiceInteractionState.Processing -> "正在处理语音…"
+                        VoiceInteractionState.Idle -> "识别文本：${uiState.speechText}"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,

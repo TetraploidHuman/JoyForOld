@@ -9,6 +9,8 @@ object LocalCommandParser {
         Regex("""^(发送上一条消息|发送刚才的消息|确认发送)$""", RegexOption.IGNORE_CASE)
     private val alarmPattern = Regex("""^(设(个|置)?闹钟|提醒我)\s*(\d{1,2}:\d{2})\s*(.*)$""")
     private val smsPattern = Regex("""^(给)?(.+?)(发短信|短信)[:：\s]+(.+)$""")
+    private val weatherQueryPattern = Regex("""^(查看|查|今天|现在)?天气(怎么样|如何)?$""")
+    private val weatherCityPattern = Regex("""^(.+?)的天气(怎么样|如何)?$""")
 
     fun isSendToSpecificPerson(command: String): Boolean {
         return sendToPersonPattern.matches(command.trim())
@@ -60,6 +62,17 @@ object LocalCommandParser {
                     AgentAction(action = "finish", message = "已打开闹钟设置：$time", finished = true),
                 )
             }
+        }
+
+        weatherCityPattern.find(text)?.let { match ->
+            val city = match.groupValues[1].trim()
+            if (city.isNotBlank()) {
+                return infoQuerySteps("query_weather", city)
+            }
+        }
+
+        if (weatherQueryPattern.matches(text)) {
+            return infoQuerySteps("query_weather")
         }
 
         clickPattern.find(text)?.let { match ->
@@ -115,12 +128,21 @@ object LocalCommandParser {
                 AgentAction(action = "open_weather"),
                 AgentAction(action = "finish", message = "已打开天气", finished = true),
             )
+            "查看时间", "几点了", "现在几点", "报时", "什么时间" -> infoQuerySteps("tell_time")
+            "查看天气", "查天气", "今天天气", "今天天气怎么样", "帮我查一下天气" -> infoQuerySteps("query_weather")
             "紧急呼救", "sos" -> listOf(
                 AgentAction(action = "emergency_help"),
                 AgentAction(action = "finish", message = "已执行紧急呼救流程", finished = true),
             )
             else -> null
         }
+    }
+
+    private fun infoQuerySteps(action: String, targetText: String? = null): List<AgentAction> {
+        return listOf(
+            AgentAction(action = action, targetText = targetText),
+            AgentAction(action = "finish", message = "正在查询", finished = true),
+        )
     }
 
     private fun sendMessageSteps(message: String, contact: String? = null): List<AgentAction> {

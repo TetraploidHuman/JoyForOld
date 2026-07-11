@@ -3,11 +3,11 @@ package com.tetraploid.joyforold.speech
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -40,6 +40,7 @@ class DoubaoAsrClient(
     private var streamingJob: Job? = null
     private var connectId: String = ""
     private var lastAudioFrame: ByteArray? = null
+    @Volatile
     private var finalText: String = ""
     private val pendingAudioFrames = ArrayDeque<ByteArray>()
     private val pendingAudioLock = Any()
@@ -50,6 +51,56 @@ class DoubaoAsrClient(
     private var endpointStopTracker: AsrEndpointStopTracker? = null
     @Volatile
     private var errorReported = false
+    @Volatile
+    private var stopRecordingRequested = false
+    @Volatile
+    private var sessionDelivered = false
+    @Volatile
+    private var manualStopRequested = false
+    @Volatile
+    private var connectionPrepared = false
+    @Volatile
+    private var clientRequestSent = false
+    private var onPartialCallback: ((String) -> Unit)? = null
+    private var onFinalCallback: ((String) -> Unit)? = null
+    private var onErrorCallback: ((String) -> Unit)? = null
+    private var onPrepareReady: (() -> Unit)? = null
+    private var onPrepareError: ((String) -> Unit)? = null
+
+    fun prepareConnection(
+        shortUtterance: Boolean = false,
+        onReady: () -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        if (streamingJob?.isActive == true) {
+            onError("识别会话进行中")
+            return
+        }
+        if (!validateCredentials(onError)) return
+        if (connectionPrepared && opened) {
+            shortUtteranceMode = shortUtterance
+            onReady()
+            return
+        }
+        if (webSocket != null && !opened) {
+            onPrepareReady = onReady
+            onPrepareError = onError
+            shortUtteranceMode = shortUtterance
+            return
+        }
+        resetSessionState(shortUtterance)
+        onPrepareReady = onReady
+        onPrepareError = onError
+        openWebSocket(deferClientRequest = true)
+    }
+
+    fun cancelPrepare() {
+        if (streamingJob?.isActive == true) return
+        onPrepareReady = null
+        onPrepareError = null
+        if (!connectionPrepared && webSocket == null) return
+        cancelSession()
+    }
 
     fun start(
         onPartialText: (String) -> Unit,
@@ -59,24 +110,72 @@ class DoubaoAsrClient(
         shortUtterance: Boolean = false,
     ) {
         if (streamingJob?.isActive == true) return
+        if (!validateCredentials(onError)) return
+
+        onPartialCallback = onPartialText
+        onFinalCallback = onFinalText
+        onErrorCallback = onError
+        onPrepareReady = null
+        onPrepareError = null
+
+        if (connectionPrepared && opened) {
+            activatePreparedSession(shortUtterance)
+            return
+        }
+
+        resetSessionState(shortUtterance)
+        openWebSocket(deferClientRequest = false)
+        beginRecordingSession()
+    }
+
+    private fun activatePreparedSession(shortUtterance: Boolean) {
+        connectionPrepared = false
+        shortUtteranceMode = shortUtterance
+        endpointStopTracker = createEndpointStopTracker(shortUtterance).also {
+            it.reset(System.currentTimeMillis())
+        }
+        val socket = webSocket
+        if (socket != null && !clientRequestSent) {
+            sendFullClientRequest(socket)
+            clientRequestSent = true
+            flushPendingAudioFrames()
+        }
+        beginRecordingSession()
+    }
+
+    private fun validateCredentials(onError: (String) -> Unit): Boolean {
         if (apiKey.isBlank() && (appId.isBlank() || accessToken.isBlank())) {
             onError(
                 "豆包 ASR 配置缺失：请在 local.properties 设置 volc.asr.api_key，或旧版 volc.asr.app_id / volc.asr.access_token",
             )
-            return
+            return false
         }
+        return true
+    }
 
+    private fun resetSessionState(shortUtterance: Boolean) {
         connectId = UUID.randomUUID().toString()
         finalText = ""
         lastAsrErrorDetail = null
         errorReported = false
+        stopRecordingRequested = false
+        sessionDelivered = false
+        manualStopRequested = false
         opened = false
+        connectionPrepared = false
+        clientRequestSent = false
         shortUtteranceMode = shortUtterance
         endpointStopTracker = createEndpointStopTracker(shortUtterance).also {
             it.reset(System.currentTimeMillis())
         }
         synchronized(pendingAudioLock) { pendingAudioFrames.clear() }
+    }
 
+    private fun openWebSocket(deferClientRequest: Boolean) {
+        webSocket = okHttpClient.newWebSocket(buildRequest(), createWebSocketListener(deferClientRequest))
+    }
+
+    private fun buildRequest(): Request {
         val requestBuilder = Request.Builder()
             .url(ASR_URL)
             .addHeader("X-Api-Resource-Id", resourceId.ifBlank { DEFAULT_RESOURCE_ID })
@@ -90,31 +189,49 @@ class DoubaoAsrClient(
                 .addHeader("X-Api-App-Key", appId)
                 .addHeader("X-Api-Access-Key", accessToken)
         }
-        val request = requestBuilder.build()
+        return requestBuilder.build()
+    }
 
-        webSocket = okHttpClient.newWebSocket(
-            request,
-            object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    opened = true
-                    sendFullClientRequest(webSocket)
-                    flushPendingAudioFrames()
+    private fun createWebSocketListener(deferClientRequest: Boolean): WebSocketListener {
+        return object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                opened = true
+                if (deferClientRequest) {
+                    connectionPrepared = true
+                    onPrepareReady?.invoke()
+                    onPrepareReady = null
+                    onPrepareError = null
+                    return
                 }
+                sendFullClientRequest(webSocket)
+                clientRequestSent = true
+                flushPendingAudioFrames()
+            }
 
-                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    handleServerBinaryFrame(bytes.toByteArray(), onPartialText)
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                handleServerBinaryFrame(bytes.toByteArray())
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (connectionPrepared && streamingJob == null) {
+                    connectionPrepared = false
+                    val prepareError = onPrepareError
+                    onPrepareError = null
+                    onPrepareReady = null
+                    prepareError?.invoke(formatConnectionError(t, response))
+                    return
                 }
+                if (sessionDelivered || finalText.isNotBlank() || errorReported) return
+                errorReported = true
+                onErrorCallback?.invoke(formatConnectionError(t, response))
+            }
+        }
+    }
 
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    // OkHttp 可能在正常 close 或网络抖动时触发 onFailure。
-                    // 若本轮已经拿到识别文本，就不要再对 UI 报“失败”，避免误导。
-                    if (finalText.isNotBlank() || errorReported) return
-                    errorReported = true
-                    onError(formatConnectionError(t, response))
-                }
-            },
-        )
-
+    private fun beginRecordingSession() {
+        if (streamingJob?.isActive == true) return
+        val onFinalText = onFinalCallback ?: return
+        val onError = onErrorCallback ?: return
         streamingJob = scope.launch {
             runCatching {
                 val minBuffer = AudioRecord.getMinBufferSize(
@@ -134,15 +251,15 @@ class DoubaoAsrClient(
                 record.startRecording()
 
                 val chunk = ByteArray(CHUNK_BYTES_200MS)
-                val maxChunks = if (shortUtterance) MAX_RECORD_CHUNKS_SHORT else MAX_RECORD_CHUNKS
+                val maxChunks = if (shortUtteranceMode) MAX_RECORD_CHUNKS_SHORT else MAX_RECORD_CHUNKS
                 var chunkCount = 0
-                while (isActive) {
+                while (isActive && !stopRecordingRequested) {
                     val read = record.read(chunk, 0, chunk.size)
                     if (read <= 0) continue
                     chunkCount++
                     if (chunkCount >= maxChunks) break
                     val payload = if (read == chunk.size) chunk else chunk.copyOf(read)
-                    if (!opened) {
+                    if (!opened || !clientRequestSent) {
                         enqueuePendingAudio(payload)
                         continue
                     }
@@ -154,12 +271,17 @@ class DoubaoAsrClient(
                         definite = false,
                         nowMs = System.currentTimeMillis(),
                     )
-                    if (stopAction == EndpointStopAction.Stop) break
+                    if (stopAction == EndpointStopAction.Stop || stopRecordingRequested) break
                 }
 
                 finalizeSession(onFinalText, onError)
-            }.onFailure {
-                onError("录音失败：${it.message ?: "unknown"}")
+            }.onFailure { error ->
+                if (error is CancellationException) return@onFailure
+                if (sessionDelivered || finalText.isNotBlank()) return@onFailure
+                if (!errorReported) {
+                    errorReported = true
+                    onError("录音失败：${error.message ?: "unknown"}")
+                }
             }
         }
     }
@@ -168,6 +290,7 @@ class DoubaoAsrClient(
         onFinalText: (String) -> Unit,
         onError: (String) -> Unit,
     ) {
+        if (sessionDelivered) return
         releaseRecording()
         if (opened) {
             val last = lastAudioFrame
@@ -178,7 +301,14 @@ class DoubaoAsrClient(
             webSocket?.close(1000, "auto-stop")
             webSocket = null
             opened = false
+            connectionPrepared = false
+            clientRequestSent = false
             lastAudioFrame = null
+        }
+        sessionDelivered = true
+        if (manualStopRequested) {
+            lastAsrErrorDetail = null
+            return
         }
         if (finalText.isBlank() && !lastAsrErrorDetail.isNullOrBlank()) {
             if (!errorReported) errorReported = true
@@ -211,22 +341,48 @@ class DoubaoAsrClient(
     }
 
     suspend fun stop(onFinalText: (String) -> Unit) {
-        streamingJob?.cancelAndJoin()
+        manualStopRequested = true
+        stopRecordingRequested = true
+        streamingJob?.join()
+        streamingJob = null
+        if (!sessionDelivered) {
+            releaseRecording()
+            if (opened) {
+                val last = lastAudioFrame
+                if (last != null && last.isNotEmpty()) {
+                    sendAudioFrame(last, isLast = true)
+                }
+                delay(FINAL_RESULT_WAIT_MS)
+            }
+            webSocket?.close(1000, "done")
+            webSocket = null
+            opened = false
+            lastAudioFrame = null
+            sessionDelivered = true
+        }
+        lastAsrErrorDetail = null
+        onFinalText(finalText)
+    }
+
+    fun cancelSession() {
+        stopRecordingRequested = true
+        streamingJob?.cancel()
         streamingJob = null
         releaseRecording()
-
-        if (opened) {
-            val last = lastAudioFrame
-            if (last != null && last.isNotEmpty()) {
-                sendAudioFrame(last, isLast = true)
-            }
-            delay(FINAL_RESULT_WAIT_MS)
-        }
-        webSocket?.close(1000, "done")
+        webSocket?.cancel()
         webSocket = null
         opened = false
+        connectionPrepared = false
+        clientRequestSent = false
         lastAudioFrame = null
-        onFinalText(finalText)
+        errorReported = false
+        sessionDelivered = false
+        onPartialCallback = null
+        onFinalCallback = null
+        onErrorCallback = null
+        onPrepareReady = null
+        onPrepareError = null
+        synchronized(pendingAudioLock) { pendingAudioFrames.clear() }
     }
 
     private fun releaseRecording() {
@@ -321,10 +477,7 @@ class DoubaoAsrClient(
         frames.forEach { frame -> sendAudioFrame(frame, isLast = false) }
     }
 
-    private fun handleServerBinaryFrame(
-        raw: ByteArray,
-        onPartialText: (String) -> Unit,
-    ) {
+    private fun handleServerBinaryFrame(raw: ByteArray) {
         if (raw.size < 8) return
         val second = raw[1].toInt() and 0xFF
         val messageType = (second shr 4) and 0x0F
@@ -345,7 +498,8 @@ class DoubaoAsrClient(
         }.getOrElse { AsrParseResult("", false) }
         if (parsed.text.isNotBlank()) {
             finalText = parsed.text
-            onPartialText(parsed.text)
+            lastAsrErrorDetail = null
+            onPartialCallback?.invoke(parsed.text)
         }
         val stopAction = endpointStopTracker?.onPartial(
             text = parsed.text,
@@ -353,7 +507,7 @@ class DoubaoAsrClient(
             nowMs = System.currentTimeMillis(),
         )
         if (stopAction == EndpointStopAction.Stop) {
-            streamingJob?.cancel()
+            stopRecordingRequested = true
         }
     }
 
@@ -368,18 +522,18 @@ class DoubaoAsrClient(
         private const val SAMPLE_RATE = 16_000
         private const val BYTES_PER_SAMPLE = 2
         private const val CHUNK_BYTES_200MS = SAMPLE_RATE * BYTES_PER_SAMPLE / 5
-        private const val END_WINDOW_SIZE_NORMAL_MS = 4800
-        private const val END_WINDOW_SIZE_SHORT_MS = 1800
-        private const val FORCE_TO_SPEECH_NORMAL_MS = 1600
-        private const val FORCE_TO_SPEECH_SHORT_MS = 700
-        private const val END_DEBOUNCE_NORMAL_MS = 2600L
-        private const val END_DEBOUNCE_SHORT_MS = 1100L
-        private const val MIN_RECORD_BEFORE_STOP_NORMAL_MS = 1800L
-        private const val MIN_RECORD_BEFORE_STOP_SHORT_MS = 800L
-        private const val POST_ENDPOINT_TAIL_CHUNKS = 6
+        private const val END_WINDOW_SIZE_NORMAL_MS = 2400
+        private const val END_WINDOW_SIZE_SHORT_MS = 1200
+        private const val FORCE_TO_SPEECH_NORMAL_MS = 900
+        private const val FORCE_TO_SPEECH_SHORT_MS = 450
+        private const val END_DEBOUNCE_NORMAL_MS = 900L
+        private const val END_DEBOUNCE_SHORT_MS = 550L
+        private const val MIN_RECORD_BEFORE_STOP_NORMAL_MS = 450L
+        private const val MIN_RECORD_BEFORE_STOP_SHORT_MS = 300L
+        private const val POST_ENDPOINT_TAIL_CHUNKS = 2
         private const val MAX_RECORD_CHUNKS = 150
         private const val MAX_RECORD_CHUNKS_SHORT = 50
-        private const val FINAL_RESULT_WAIT_MS = 900L
+        private const val FINAL_RESULT_WAIT_MS = 400L
         private const val MAX_PENDING_AUDIO_FRAMES = 40
 
         internal fun createEndpointStopTracker(shortUtterance: Boolean): AsrEndpointStopTracker {

@@ -10,15 +10,16 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.view.Gravity
-import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -34,7 +35,6 @@ import com.tetraploid.joyforold.MainActivity
 import com.tetraploid.joyforold.R
 import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.ui.theme.JoyForOldTheme
-import kotlin.math.abs
 
 class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
 
@@ -45,13 +45,6 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
     override val viewModelStore = ViewModelStore()
-
-    private var expanded by mutableStateOf(true)
-    private var initialX = 0
-    private var initialY = 0
-    private var initialTouchX = 0f
-    private var initialTouchY = 0f
-    private var dragging = false
 
     override fun onCreate() {
         super.onCreate()
@@ -65,40 +58,47 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         startForeground(NOTIFICATION_ID, createNotification())
 
         composeView = ComposeView(this).apply {
+            isFocusable = true
+            isFocusableInTouchMode = true
             setViewTreeLifecycleOwner(this@FloatingOverlayService)
             setViewTreeViewModelStoreOwner(this@FloatingOverlayService)
             setViewTreeSavedStateRegistryOwner(this@FloatingOverlayService)
             setContent {
                 JoyForOldTheme {
                     FloatingOverlayContent(
-                        expanded = expanded,
-                        onToggleExpand = { togglePanel() },
-                        onClose = { stopSelf() },
                         onRun = { AgentRuntime.runAgent(applicationContext as Application) },
-                        onPreview = { AgentRuntime.previewPageTree() },
                         onStartVoice = { AgentRuntime.startVoiceInput() },
                         onStopVoiceAndRun = {
                             AgentRuntime.stopVoiceInputAndRunAgent(applicationContext as Application)
                         },
                         onStopVoiceOnly = { AgentRuntime.stopVoiceInput() },
+                        onCancel = { AgentRuntime.clearInteraction() },
                     )
                 }
             }
-            setOnTouchListener(::handleDragTouch)
+            visibility = View.GONE
         }
 
         layoutParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 40
-            y = 180
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            y = 0
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                fitInsetsTypes = 0
+                fitInsetsSides = 0
+            }
         }
-        updateLayoutForMode()
+
+        ViewCompat.setOnApplyWindowInsetsListener(composeView) { _, _ ->
+            WindowInsetsCompat.CONSUMED
+        }
 
         windowManager.addView(composeView, layoutParams)
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
@@ -124,69 +124,28 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
     override val savedStateRegistry: SavedStateRegistry
         get() = savedStateRegistryController.savedStateRegistry
 
-    fun collapsePanel() {
-        if (!expanded) return
-        expanded = false
-        updateLayoutForMode()
-    }
+    private fun setDialogVisible(visible: Boolean) {
+        if (!::composeView.isInitialized) return
+        if (visible && AgentRuntime.isAppInForeground()) return
 
-    fun expandPanel() {
-        if (expanded) return
-        expanded = true
-        updateLayoutForMode()
-    }
-
-    private fun togglePanel() {
-        expanded = !expanded
-        updateLayoutForMode()
-    }
-
-    private fun updateLayoutForMode() {
-        layoutParams.flags = if (expanded) {
+        composeView.visibility = if (visible) View.VISIBLE else View.GONE
+        layoutParams.flags = if (visible) {
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
         } else {
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         }
-        if (::composeView.isInitialized && composeView.isAttachedToWindow) {
-            windowManager.updateViewLayout(composeView, layoutParams)
+        windowManager.updateViewLayout(composeView, layoutParams)
+
+        if (visible) {
+            composeView.isFocusable = true
+            composeView.isFocusableInTouchMode = true
+        } else {
+            composeView.clearFocus()
         }
-    }
-
-    private fun handleDragTouch(view: android.view.View, event: MotionEvent): Boolean {
-        if (expanded) return false
-
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                dragging = false
-                initialX = layoutParams.x
-                initialY = layoutParams.y
-                initialTouchX = event.rawX
-                initialTouchY = event.rawY
-                return true
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-                val dx = (event.rawX - initialTouchX).toInt()
-                val dy = (event.rawY - initialTouchY).toInt()
-                if (abs(dx) > 8 || abs(dy) > 8) {
-                    dragging = true
-                }
-                layoutParams.x = initialX + dx
-                layoutParams.y = initialY + dy
-                windowManager.updateViewLayout(composeView, layoutParams)
-                return true
-            }
-
-            MotionEvent.ACTION_UP -> {
-                if (!dragging) {
-                    togglePanel()
-                }
-                return true
-            }
-        }
-        return false
     }
 
     private fun createNotification(): Notification {
@@ -224,7 +183,10 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         var instance: FloatingOverlayService? = null
             private set
 
+        private val mainHandler = Handler(Looper.getMainLooper())
+
         fun start(context: Context) {
+            if (!OverlayPermission.canDrawOverlays(context)) return
             val intent = Intent(context, FloatingOverlayService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -237,12 +199,28 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
             context.stopService(Intent(context, FloatingOverlayService::class.java))
         }
 
-        fun collapsePanel() {
-            instance?.collapsePanel()
+        fun ensureStarted(context: Context) {
+            if (!OverlayPermission.canDrawOverlays(context)) return
+            if (!isRunning()) start(context)
         }
 
-        fun expandPanel() {
-            instance?.expandPanel()
+        fun showDialog() {
+            if (AgentRuntime.isAppInForeground()) return
+            val service = instance ?: return
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                service.setDialogVisible(true)
+            } else {
+                mainHandler.post { service.setDialogVisible(true) }
+            }
+        }
+
+        fun hideDialog() {
+            val service = instance ?: return
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                service.setDialogVisible(false)
+            } else {
+                mainHandler.post { service.setDialogVisible(false) }
+            }
         }
 
         fun isRunning(): Boolean = instance != null

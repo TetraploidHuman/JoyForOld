@@ -4,194 +4,174 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tetraploid.joyforold.agent.AgentRuntime
+import com.tetraploid.joyforold.speech.api.VoiceInteractionState
+import com.tetraploid.joyforold.ui.cortana.CortanaOrb
+import com.tetraploid.joyforold.ui.cortana.CortanaSearchBar
+import com.tetraploid.joyforold.ui.cortana.OverlayInteractionCard
+import com.tetraploid.joyforold.ui.theme.CortanaColors
+import kotlinx.coroutines.delay
+
+fun shouldShowOverlayDialog(
+    isRunning: Boolean,
+    isListening: Boolean,
+    waitingForUserConfirm: Boolean,
+    voiceInteractionState: VoiceInteractionState,
+): Boolean {
+    return isRunning ||
+        isListening ||
+        waitingForUserConfirm ||
+        voiceInteractionState != VoiceInteractionState.Idle
+}
 
 @Composable
 fun FloatingOverlayContent(
-    expanded: Boolean,
-    onToggleExpand: () -> Unit,
-    onClose: () -> Unit,
     onRun: () -> Unit,
-    onPreview: () -> Unit,
     onStartVoice: () -> Unit,
     onStopVoiceAndRun: () -> Unit,
     onStopVoiceOnly: () -> Unit,
+    onCancel: () -> Unit,
 ) {
     val uiState by AgentRuntime.state.collectAsStateWithLifecycle()
+    val visible = shouldShowOverlayDialog(
+        isRunning = uiState.isRunning,
+        isListening = uiState.isListening,
+        waitingForUserConfirm = uiState.waitingForUserConfirm,
+        voiceInteractionState = uiState.voiceInteractionState,
+    )
 
-    if (!expanded) {
-        FloatingActionButton(
-            onClick = onToggleExpand,
-            modifier = Modifier.padding(4.dp),
-            containerColor = MaterialTheme.colorScheme.primary,
-        ) {
-            Text("助手", color = Color.White)
+    LaunchedEffect(Unit) {
+        AgentRuntime.refreshAccessibilityState()
+        while (true) {
+            delay(2_000)
+            AgentRuntime.refreshAccessibilityState()
         }
-        return
     }
 
-    Card(
-        modifier = Modifier
-            .width(320.dp)
-            .padding(4.dp),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xF2FFFFFF)),
+    if (!visible) return
+
+    val interactionText = when {
+        uiState.isRunning && uiState.statusMessage.isNotBlank() ->
+            uiState.statusMessage
+        uiState.isListening && uiState.speechText.isNotBlank() ->
+            uiState.speechText
+        uiState.voiceInteractionState == VoiceInteractionState.SpeakingPrompt ->
+            "请听我说…"
+        uiState.isListening ->
+            "我在听，请说…"
+        uiState.voiceInteractionState == VoiceInteractionState.Processing ->
+            "正在处理…"
+        uiState.isRunning ->
+            "正在为您处理…"
+        else ->
+            "有什么可以帮您？"
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
     ) {
+        uiState.overlayInteractionCard?.let { card ->
+            OverlayInteractionCard(
+                card = card,
+                isListening = uiState.isListening,
+                speechText = uiState.speechText,
+                onBinaryConfirm = { AgentRuntime.submitBinaryConfirm(approved = true) },
+                onBinaryCancel = { AgentRuntime.submitBinaryConfirm(approved = false) },
+                onDismissConfirm = { AgentRuntime.clearPendingConfirmUI() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(CortanaColors.OverlayBackground),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("JoyForOld 助手", style = MaterialTheme.typography.titleMedium)
-                Row {
-                    TextButton(onClick = onToggleExpand) { Text("收起") }
-                    TextButton(onClick = onClose) { Text("关闭") }
-                }
-            }
-
-            Text(
-                text = if (uiState.accessibilityEnabled) "可操作前台应用" else "请先开启无障碍",
-                color = if (uiState.accessibilityEnabled) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.error
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            OutlinedTextField(
-                value = uiState.command,
-                onValueChange = AgentRuntime::updateCommand,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("输入指令") },
-                placeholder = { Text("例如：点击搜索 / 返回") },
-                singleLine = false,
-                minLines = 2,
-            )
-
-            if (uiState.isRunning) {
-                Text(
-                    text = buildString {
-                        append("步骤 ${uiState.currentStep}")
-                        if (uiState.statusMessage.isNotBlank()) append(" · ${uiState.statusMessage}")
-                        if (uiState.isPaused) append("（已暂停）")
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = onRun,
-                    enabled = !uiState.isRunning && uiState.accessibilityEnabled,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (uiState.isRunning) "执行中" else "执行")
-                }
-                OutlinedButton(
-                    onClick = onPreview,
-                    enabled = uiState.accessibilityEnabled,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("读页面")
-                }
-            }
-
-            if (uiState.isRunning) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            if (uiState.isPaused) AgentRuntime.resumeAgent() else AgentRuntime.pauseAgent()
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(if (uiState.isPaused) "继续" else "暂停")
-                    }
-                    OutlinedButton(
-                        onClick = { AgentRuntime.cancelAgent() },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("停止")
-                    }
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        if (uiState.isListening) {
-                            if (uiState.accessibilityEnabled) onStopVoiceAndRun() else onStopVoiceOnly()
-                        } else {
-                            onStartVoice()
-                        }
-                    },
-                    enabled = !uiState.isRunning,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (uiState.isListening) "结束并执行" else "语音输入")
-                }
-                OutlinedButton(
-                    onClick = { AgentRuntime.updateCommand(uiState.speechText) },
-                    enabled = uiState.speechText.isNotBlank() && !uiState.isListening,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("填入文本")
-                }
-            }
-
-            if (uiState.speechText.isNotBlank()) {
-                Text(
-                    text = "识别：${uiState.speechText}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 140.dp)
-                    .background(Color(0x11000000), RoundedCornerShape(8.dp))
-                    .padding(8.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                if (uiState.logs.isEmpty()) {
-                    Text("切换到任意 App 后输入指令", style = MaterialTheme.typography.bodySmall)
-                } else {
-                    uiState.logs.takeLast(12).forEach { line ->
-                        Text(line, style = MaterialTheme.typography.bodySmall)
+                CortanaOrb(
+                    size = 72.dp,
+                    active = uiState.isRunning || uiState.isListening || uiState.waitingForUserConfirm,
+                )
+
+                Text(
+                    text = interactionText,
+                    color = CortanaColors.AccentMuted,
+                    fontSize = 16.sp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                if (uiState.speechText.isNotBlank() && !uiState.waitingForUserConfirm) {
+                    Text(
+                        text = "「${uiState.speechText}」",
+                        color = CortanaColors.OnBackgroundSecondary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                if (uiState.isRunning) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        TextButton(
+                            onClick = {
+                                if (uiState.isPaused) AgentRuntime.resumeAgent() else AgentRuntime.pauseAgent()
+                            },
+                        ) {
+                            Text(
+                                if (uiState.isPaused) "继续" else "暂停",
+                                color = CortanaColors.AccentMuted,
+                            )
+                        }
                     }
                 }
             }
+
+            CortanaSearchBar(
+                value = uiState.command,
+                onValueChange = AgentRuntime::updateCommand,
+                onMicClick = onStartVoice,
+                onSendClick = {
+                    if (uiState.isListening) {
+                        if (uiState.accessibilityServiceConnected) onStopVoiceAndRun() else onStopVoiceOnly()
+                    } else if (uiState.command.isNotBlank()) {
+                        onRun()
+                    }
+                },
+                onCancelClick = {
+                    if (uiState.isRunning) {
+                        AgentRuntime.cancelAgent()
+                    } else {
+                        onCancel()
+                    }
+                },
+                isListening = uiState.isListening,
+                isRunning = uiState.isRunning,
+                enabled = !uiState.isRunning,
+                canExecute = uiState.accessibilityServiceConnected,
+            )
         }
     }
 }

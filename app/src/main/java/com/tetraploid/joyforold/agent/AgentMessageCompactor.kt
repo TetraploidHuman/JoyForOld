@@ -12,7 +12,7 @@ object AgentMessageCompactor {
     private const val AGENT_FEEDBACK_DETAIL_MAX_CHARS = 1_000
 
     private val historicalPageBlockRegex = Regex(
-        """(?:【当前页面快览】|【当前页面】)[\s\S]*?【页面变化】[\s\S]*?(?=\n请决定|$)""",
+        """(?:【当前页面快览】|【当前页面】)[\s\S]*?【页面变化】[\s\S]*?(?=\n请规划|\n请决定|$)""",
     )
 
     fun compactForApi(messages: List<ChatMessage>): List<ChatMessage> {
@@ -27,18 +27,37 @@ object AgentMessageCompactor {
         pageContext: String,
         pageDiff: String,
         minimalPageContext: String,
-    ): String = buildString {
-        val unchanged = pageDiff.contains("页面指纹未变")
-        appendLine()
-        if (unchanged) {
-            appendLine("$PAGE_MINIMAL_MARKER $minimalPageContext")
+        mode: PageContextMode? = null,
+    ): String {
+        val resolved = mode ?: if (pageDiff.contains("页面指纹未变")) {
+            PageContextMode.DIFF_ONLY
         } else {
-            appendLine(PAGE_CONTEXT_MARKER)
-            append(pageContext)
+            PageContextMode.FULL
         }
-        appendLine()
-        appendLine(PAGE_DIFF_MARKER)
-        append(pageDiff)
+        return when (resolved) {
+            PageContextMode.DIFF_ONLY -> buildString {
+                appendLine()
+                appendLine("$PAGE_MINIMAL_MARKER $minimalPageContext")
+                appendLine()
+                appendLine(PAGE_DIFF_MARKER)
+                append("页面无明显变化，沿用上次观察，请结合近期执行结果决策。")
+            }
+            PageContextMode.COMPACT -> buildString {
+                appendLine()
+                appendLine("$PAGE_MINIMAL_MARKER $minimalPageContext")
+                appendLine()
+                appendLine(PAGE_DIFF_MARKER)
+                append(pageDiff)
+            }
+            PageContextMode.FULL -> buildString {
+                appendLine()
+                appendLine(PAGE_CONTEXT_MARKER)
+                append(pageContext)
+                appendLine()
+                appendLine(PAGE_DIFF_MARKER)
+                append(pageDiff)
+            }
+        }
     }
 
     fun truncateAgentFeedbackDetail(detail: String): String {

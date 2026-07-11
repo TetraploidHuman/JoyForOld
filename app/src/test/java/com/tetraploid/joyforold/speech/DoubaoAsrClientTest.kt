@@ -54,4 +54,12 @@ class DoubaoAsrClientTest {
         assertEquals("你好", parsed.text)
         assertFalse(parsed.hasDefiniteUtterance)
     }
+
+    @Test
+    fun isRetryableAsrError_matchesConnectionFailures() {
+        assertTrue(
+            DoubaoSpeechInput.isRetryableAsrError("无法连接豆包语音服务器（openspeech.bytedance.com）"),
+        )
+        assertFalse(DoubaoSpeechInput.isRetryableAsrError("豆包 ASR 配置缺失"))
+    }
 }

@@ -28,6 +28,7 @@ class DeepSeekClient(
         pageDiff: String,
         keyMemories: String,
         minimalPageContext: String,
+        pageContextMode: PageContextMode = PageContextMode.FULL,
     ): JSONObject {
         conversation.seedSystem(buildSystemPrompt(keyMemories))
         conversation.addUser(
@@ -38,10 +39,15 @@ class DeepSeekClient(
                         pageContext = pageContext,
                         pageDiff = pageDiff,
                         minimalPageContext = minimalPageContext,
+                        mode = pageContextMode,
                     ),
                 )
                 appendLine()
-                appendLine("请决定第一步操作，只返回 JSON。")
+                appendLine(
+                    "请规划本屏接下来 1~${AgentPlanParser.MAX_PLANNED_STEPS} 步（高置信度、同一屏连续操作）。" +
+                        "返回 JSON：{\"actions\":[...]}；单步也可用 {\"action\":...}。" +
+                        "open_app/list_apps/finish/read_tree/send 必须单独一步，禁止超过 ${AgentPlanParser.MAX_PLANNED_STEPS} 步。",
+                )
             },
         )
 
@@ -65,6 +71,7 @@ class DeepSeekClient(
         pageDiff: String,
         keyMemories: String = "",
         minimalPageContext: String = "",
+        pageContextMode: PageContextMode = PageContextMode.FULL,
     ): JSONObject = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) throw IllegalArgumentException("请先填写 DeepSeek API Key")
 
@@ -78,10 +85,15 @@ class DeepSeekClient(
                         pageContext = pageContext,
                         pageDiff = pageDiff,
                         minimalPageContext = minimalPageContext,
+                        mode = pageContextMode,
                     ),
                 )
                 appendLine()
-                appendLine("请决定下一步，只返回 JSON。")
+                appendLine(
+                    "请规划本屏接下来 1~${AgentPlanParser.MAX_PLANNED_STEPS} 步（高置信度、同一屏连续操作）。" +
+                        "返回 JSON：{\"actions\":[...]} 或单步 {\"action\":...}。" +
+                        "open_app/list_apps/finish/read_tree/send 必须单独一步，禁止超过 ${AgentPlanParser.MAX_PLANNED_STEPS} 步。",
+                )
             },
         )
 
@@ -199,7 +211,8 @@ class DeepSeekClient(
 
         【原则】
         - **必须以本轮【用户指令】为唯一目标**；历史记忆只能辅助，禁止擅自继续上一轮未提及的任务。
-        - 每次只输出一个 action；基于页面快览和变化决策，禁止让用户描述页面。
+        - 每次返回 **actions 数组（1~${AgentPlanParser.MAX_PLANNED_STEPS} 步）** 或单步 action；**action 必须在工具白名单内**，只允许：${AgentToolRegistry.toolNames.joinToString()}；基于页面快览和变化决策，禁止让用户描述页面。
+        - **同一屏内**才可规划 2 步；open_app、list_apps、finish、read_tree、send、拨号/发短信必须 **单独 1 步**。
         - 能走系统级动作时优先走系统动作（dial_contact/send_sms/set_alarm/add_calendar_event/open_*），避免纯 UI 点按。
         - 找联系人：优先可见列表模糊匹配（同音字、谐音、号码片段），直接 click；找不到先 scroll_down 或 swipe_down。
         - 需要切换应用时：不确定应用名先 list_apps（可带 target_text 筛选），再用 open_app；target_text **必须**与 list_apps 返回的名称逐字一致，禁止猜测。
@@ -212,11 +225,12 @@ class DeepSeekClient(
           · 若不确定是否完成，用 find_on_page 或 read_tree 确认，或 finish+waiting_for_user 询问用户
         - **上一步失败后禁止重复相同操作**；必须换策略（搜索/滚动/读树/换应用/询问用户）。
         - **敏感操作必须先询问用户**（finish + waiting_for_user:true）：
-          · 拨打电话、点击拨打/通话按钮
-          · 发送消息（send 或点击发送）
-          · 给指定联系人发消息输入完成后
-          · 联系人歧义、QQ电话 vs 手机电话未明确
-        - 任务完成：finish, finished:true；需用户回复：waiting_for_user:true。
+          · 拨打电话、点击拨打/通话按钮 → needs_binary_confirm:true
+          · 发送消息（send 或点击发送）→ needs_binary_confirm:true
+          · 给指定联系人发消息输入完成后 → needs_binary_confirm:true
+          · 联系人歧义、QQ电话 vs 手机电话未明确 → needs_binary_confirm:false（开放问答）
+        - **闲聊/问候/说明性回复**：finished:true, waiting_for_user:false；不要因为 message 带问号就设 waiting_for_user。
+        - 任务完成：finish, finished:true；需用户回复：waiting_for_user:true（并按上文设置 needs_binary_confirm）。
     """.trimIndent()
 
     private fun baseRequestBody(): JSONObject {

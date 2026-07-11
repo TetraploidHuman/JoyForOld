@@ -11,9 +11,19 @@ import androidx.core.net.toUri
 import com.tetraploid.joyforold.agent.ActionExecutionResult
 import com.tetraploid.joyforold.app.InstalledAppResolver
 import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
+import com.tetraploid.joyforold.util.NetworkStatus
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.Locale
+import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 object SystemIntentExecutor {
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .build()
     fun execute(context: Context, action: String, targetText: String?, inputText: String?): ActionExecutionResult {
         return when (action.lowercase(Locale.getDefault())) {
             "dial_contact" -> dialContact(context, targetText)
@@ -32,6 +42,8 @@ object SystemIntentExecutor {
             "open_font_settings" -> launchSimpleIntent(context, Intent(Settings.ACTION_DISPLAY_SETTINGS), "已打开显示设置")
             "navigate_home" -> navigateHome(context)
             "read_unread_messages" -> readUnreadMessages(context)
+            "tell_time" -> tellTime()
+            "query_weather" -> queryWeather(context, targetText)
             "ask_family_for_help" -> askFamilyForHelp(context, targetText)
             "emergency_help" -> emergencyHelp(context)
             else -> ActionExecutionResult(false, "不支持的系统动作：$action")
@@ -118,12 +130,112 @@ object SystemIntentExecutor {
     }
 
     private fun readUnreadMessages(context: Context): ActionExecutionResult {
+        if (!NotificationAccessPermission.isEnabled(context)) {
+            return ActionExecutionResult(
+                success = false,
+                summary = "通知朗读未授权",
+                detail = "请先在应用设置中开启「通知使用权」，才能读取未读消息。",
+                suggestions = listOf("打开 JoyForOld 设置页，开启通知使用权"),
+            )
+        }
+        val recent = UnreadNotificationStore.recent(limit = 5)
+        if (recent.isEmpty()) {
+            return ActionExecutionResult(
+                success = true,
+                summary = "目前没有新的未读通知",
+                detail = "若刚收到消息，请稍等几秒后重试。",
+            )
+        }
+        val spoken = recent.joinToString(separator = "。") { entry ->
+            val body = entry.text.ifBlank { entry.title }
+            val prefix = if (entry.title.isNotBlank() && entry.title != body) {
+                "${entry.appLabel}，${entry.title}，$body"
+            } else {
+                "${entry.appLabel}，$body"
+            }
+            prefix.trim()
+        }
         return ActionExecutionResult(
-            success = false,
-            summary = "系统通知朗读暂未授权",
-            detail = "需额外接入 NotificationListenerService 后才能读取未读通知。",
-            suggestions = listOf("先开启系统通知监听能力", "短期可改为打开微信/短信首页并让 Agent 读取页面"),
+            success = true,
+            summary = "最近未读通知：$spoken",
+            detail = spoken,
         )
+    }
+
+    private fun tellTime(): ActionExecutionResult {
+        val spoken = TimeFormatter.spokenNow()
+        return ActionExecutionResult(
+            success = true,
+            summary = spoken,
+            detail = spoken,
+        )
+    }
+
+    private fun queryWeather(context: Context, targetText: String?): ActionExecutionResult {
+        if (NetworkStatus.offlineHint(context) != null) {
+            val fallback = openWeather(context)
+            return if (fallback.success) {
+                ActionExecutionResult(
+                    success = true,
+                    summary = "网络不可用，已为您打开天气应用",
+                    detail = fallback.summary,
+                )
+            } else {
+                ActionExecutionResult(false, "网络不可用，暂时无法查询天气")
+            }
+        }
+        val city = targetText?.trim().orEmpty().ifBlank { defaultWeatherCity(context) }
+        val encoded = URLEncoder.encode(city, StandardCharsets.UTF_8.name())
+        val request = Request.Builder()
+            .url("https://wttr.in/$encoded?format=%l:+%c+%t+%h&lang=zh")
+            .header("User-Agent", "JoyForOld/1.0")
+            .build()
+        return try {
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return queryWeatherFallback(context, city, "天气服务暂时不可用")
+                }
+                val body = response.body?.string()?.trim().orEmpty()
+                if (body.isBlank()) {
+                    return queryWeatherFallback(context, city, "暂时没有查到天气信息")
+                }
+                val spoken = if (body.contains(city)) body else "$city，$body"
+                ActionExecutionResult(
+                    success = true,
+                    summary = spoken,
+                    detail = spoken,
+                )
+            }
+        } catch (_: Exception) {
+            queryWeatherFallback(context, city, "查询天气失败")
+        }
+    }
+
+    private fun queryWeatherFallback(
+        context: Context,
+        city: String,
+        reason: String,
+    ): ActionExecutionResult {
+        val fallback = openWeather(context)
+        return if (fallback.success) {
+            ActionExecutionResult(
+                success = true,
+                summary = "$reason，已为您打开天气应用",
+                detail = fallback.summary,
+            )
+        } else {
+            ActionExecutionResult(false, reason)
+        }
+    }
+
+    private fun defaultWeatherCity(context: Context): String {
+        val home = CaregiverSupportStore(context).loadHomeAddress().trim()
+        if (home.isNotBlank()) {
+            home.split(Regex("""[省市区县\s]"""))
+                .firstOrNull { it.length >= 2 }
+                ?.let { return it }
+        }
+        return "北京"
     }
 
     private fun navigateHome(context: Context): ActionExecutionResult {

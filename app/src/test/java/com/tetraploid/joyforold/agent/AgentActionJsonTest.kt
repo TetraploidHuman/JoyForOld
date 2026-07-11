@@ -47,10 +47,12 @@ class AgentActionJsonTest {
             action = "type",
             inputText = "你好",
             waitingForUser = true,
+            needsBinaryConfirm = true,
         )
         val restored = AgentAction.fromJson(original.toJson())
         assertEquals(original.action, restored.action)
         assertEquals(original.inputText, restored.inputText)
         assertEquals(original.waitingForUser, restored.waitingForUser)
+        assertEquals(original.needsBinaryConfirm, restored.needsBinaryConfirm)
     }
 }

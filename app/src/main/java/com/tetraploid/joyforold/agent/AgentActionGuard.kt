@@ -36,8 +36,8 @@ object AgentActionGuard {
             .takeLast(8)
             .filter { !it.result.success && actionKey(it.action) == key }
 
-        if (recentFails.isNotEmpty()) {
-            return "相同操作「${describe(action)}」刚刚已失败，禁止再次尝试。请换策略：" +
+        if (recentFails.size >= 2) {
+            return "相同操作「${describe(action)}」已连续失败 ${recentFails.size} 次，禁止再次尝试。请换策略：" +
                 "find_on_page 搜索、read_tree 看结构、scroll/swipe 滚动、open_app 切换应用，" +
                 "或 finish+waiting_for_user 询问用户。"
         }
@@ -45,7 +45,7 @@ object AgentActionGuard {
         val sameTypeFails = session.stepRecords
             .takeLast(6)
             .count { !it.result.success && it.action.action.equals(action.action, ignoreCase = true) }
-        if (sameTypeFails >= 3) {
+        if (sameTypeFails >= 4) {
             return "「${action.action}」已连续失败 $sameTypeFails 次，禁止继续同类操作。必须换完全不同策略。"
         }
         return null
@@ -65,7 +65,7 @@ object AgentActionGuard {
         val root = session.rootCommand.trim()
 
         if (action.action.equals("send", ignoreCase = true)) {
-            return maybeConfirm(session, SEND_PROMPT) {
+            return maybeConfirm(session, SEND_PROMPT, needsBinaryConfirm = true) {
                 !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND)
             }
         }
@@ -75,14 +75,14 @@ object AgentActionGuard {
             if (sendKeywords.any { target.contains(it, ignoreCase = true) } &&
                 SendIntentDetector.isSendCommand(root)
             ) {
-                return maybeConfirm(session, SEND_CLICK_PROMPT) {
+                return maybeConfirm(session, SEND_CLICK_PROMPT, needsBinaryConfirm = true) {
                     !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND)
                 }
             }
             if (isCallIntent(root) &&
                 callButtonKeywords.any { target.contains(it, ignoreCase = true) }
             ) {
-                return maybeConfirm(session, CALL_ROUTE_PROMPT) {
+                return maybeConfirm(session, CALL_ROUTE_PROMPT, needsBinaryConfirm = false) {
                     !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_CALL_ROUTE)
                 }
             }
@@ -92,7 +92,7 @@ object AgentActionGuard {
             if (action.action.equals("open_app", ignoreCase = true)) {
                 val target = action.targetText?.trim().orEmpty().lowercase()
                 if (target.contains("电话") || target.contains("拨号") || target.contains("dialer")) {
-                    return maybeConfirm(session, CALL_ROUTE_PROMPT) {
+                    return maybeConfirm(session, CALL_ROUTE_PROMPT, needsBinaryConfirm = false) {
                         !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_CALL_ROUTE)
                     }
                 }
@@ -112,19 +112,21 @@ object AgentActionGuard {
     private inline fun maybeConfirm(
         session: AgentConversationSession,
         prompt: String,
+        needsBinaryConfirm: Boolean,
         shouldAsk: () -> Boolean,
     ): AgentAction? {
         if (!shouldAsk()) return null
         if (session.hasAnsweredConfirmPrompt(prompt)) return null
-        return confirmFinish(prompt)
+        return confirmFinish(prompt, needsBinaryConfirm)
     }
 
-    private fun confirmFinish(message: String): AgentAction {
+    private fun confirmFinish(message: String, needsBinaryConfirm: Boolean): AgentAction {
         return AgentAction(
             action = "finish",
             message = message,
             finished = false,
             waitingForUser = true,
+            needsBinaryConfirm = needsBinaryConfirm,
         )
     }
 

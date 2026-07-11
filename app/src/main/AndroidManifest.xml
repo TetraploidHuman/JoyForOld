@@ -35,7 +35,8 @@
                 android:name=".MainActivity"
                 android:exported="true"
                 android:label="@string/app_name"
-                android:theme="@style/Theme.JoyForOld">
+                android:theme="@style/Theme.JoyForOld"
+                android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
 
@@ -73,6 +74,7 @@
         <service
                 android:name=".accessibility.JoyAccessibilityService"
                 android:exported="false"
+                android:label="@string/app_name"
                 android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService"/>
@@ -80,6 +82,15 @@
             <meta-data
                     android:name="android.accessibilityservice"
                     android:resource="@xml/accessibility_service_config"/>
+        </service>
+
+        <service
+                android:name=".system.JoyNotificationListenerService"
+                android:exported="true"
+                android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
     </application>
 

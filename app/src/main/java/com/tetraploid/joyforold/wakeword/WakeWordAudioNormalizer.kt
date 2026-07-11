@@ -8,8 +8,8 @@ object WakeWordAudioNormalizer {
     fun boostIfQuiet(
         pcm16le: ByteArray,
         len: Int,
-        targetRms: Double = 1800.0,
-        maxGain: Double = 5.0,
+        targetRms: Double = 2000.0,
+        maxGain: Double = 8.0,
     ): Int {
         if (len < 2) return len
         var sumSquares = 0.0
@@ -24,7 +24,7 @@ object WakeWordAudioNormalizer {
         }
         if (samples == 0) return len
         val rms = sqrt(sumSquares / samples)
-        if (rms >= targetRms || rms < 80.0) return len
+        if (rms >= targetRms || rms < 40.0) return len
 
         val gain = (targetRms / rms).coerceAtMost(maxGain)
         i = 0

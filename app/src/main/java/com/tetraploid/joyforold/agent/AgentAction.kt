@@ -10,6 +10,8 @@ data class AgentAction(
     val finished: Boolean = false,
     /** AI/计划显式标记：finish 后需等待用户回复再继续（由弹窗展示 message） */
     val waitingForUser: Boolean = false,
+    /** AI/本地守卫显式标记：须二选一确认（发送/取消），否则为开放问答 */
+    val needsBinaryConfirm: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("action", action)
@@ -18,6 +20,7 @@ data class AgentAction(
         put("message", message.orEmpty())
         put("finished", finished)
         put("waiting_for_user", waitingForUser)
+        put("needs_binary_confirm", needsBinaryConfirm)
     }
 
     companion object {
@@ -30,6 +33,7 @@ data class AgentAction(
                 message = json.optString("message").ifBlank { null },
                 finished = json.optBoolean("finished", action.equals("finish", ignoreCase = true)),
                 waitingForUser = json.optBoolean("waiting_for_user", false),
+                needsBinaryConfirm = json.optBoolean("needs_binary_confirm", false),
             )
         }
     }
@@ -48,5 +52,6 @@ data class AgentRunResult(
     val logs: List<AgentStepLog>,
     val waitingForUserConfirm: Boolean = false,
     val confirmPrompt: String? = null,
+    val needsBinaryConfirm: Boolean = false,
     val sessionId: String? = null,
 )

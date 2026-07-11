@@ -74,13 +74,25 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateCommand(value: String) = AgentRuntime.updateCommand(value)
 
+    fun submitCommand(command: String) {
+        AgentRuntime.updateCommand(command)
+        AgentRuntime.runAgent(getApplication())
+    }
+
     fun runAgent() = AgentRuntime.runAgent(getApplication())
 
     fun previewPageTree() = AgentRuntime.previewPageTree()
 
     fun startVoiceInput() = AgentRuntime.startVoiceInput()
 
+    fun resumeWakeWordVoiceSession() = AgentRuntime.resumeWakeWordVoiceSession()
+
+    fun clearPermissionPrompt() = AgentRuntime.clearPermissionPrompt()
+
     fun stopVoiceInput() = AgentRuntime.stopVoiceInput()
+
+    fun onReadContactsPermissionResult(granted: Boolean) =
+        AgentRuntime.onReadContactsPermissionResult(getApplication(), granted)
 
     fun onVoicePermissionDenied() = AgentRuntime.appendLog("缺少录音权限，无法开始语音输入")
 
@@ -89,6 +101,10 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
     fun startVoiceReplyToConfirm() = AgentRuntime.startVoiceReplyToConfirm(getApplication())
 
     fun clearPendingConfirmUI() = AgentRuntime.clearPendingConfirmUI()
+
+    fun submitBinaryConfirm(approved: Boolean) = AgentRuntime.submitBinaryConfirm(approved)
+
+    fun clearInteraction() = AgentRuntime.clearInteraction()
 
     fun cancelAgent() = AgentRuntime.cancelAgent()
 

@@ -49,6 +49,7 @@ class AgentMessageCompactorTest {
             pageContext = "full page",
             pageDiff = "页面指纹未变（可能仍在同一屏或变化较小）",
             minimalPageContext = "当前为微信 | 可点击 12 | 可输入 1",
+            mode = PageContextMode.DIFF_ONLY,
         )
 
         assertTrue(section.contains("【当前页面】"))

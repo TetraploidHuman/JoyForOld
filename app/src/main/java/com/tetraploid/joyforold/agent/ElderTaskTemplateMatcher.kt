@@ -32,6 +32,17 @@ object ElderTaskTemplateMatcher {
             ),
         ),
         TemplateIntent(
+            aliases = listOf("发送消息给家人", "发消息给家人", "给家人发消息"),
+            actions = listOf(
+                AgentAction(action = "open_app", targetText = "微信"),
+                AgentAction(
+                    action = "finish",
+                    message = "已打开微信，请告诉我要发给哪位家人、说什么内容。",
+                    waitingForUser = true,
+                ),
+            ),
+        ),
+        TemplateIntent(
             aliases = listOf("接听视频通话", "接视频电话"),
             actions = listOf(
                 AgentAction(action = "open_app", targetText = "微信"),
@@ -51,6 +62,20 @@ object ElderTaskTemplateMatcher {
             actions = listOf(
                 AgentAction(action = "open_weather"),
                 AgentAction(action = "finish", message = "已为您打开天气。", finished = true),
+            ),
+        ),
+        TemplateIntent(
+            aliases = listOf("查看天气", "查天气", "今天天气怎么样", "帮我查一下天气"),
+            actions = listOf(
+                AgentAction(action = "query_weather"),
+                AgentAction(action = "finish", message = "正在查询天气", finished = true),
+            ),
+        ),
+        TemplateIntent(
+            aliases = listOf("查看时间", "几点了", "现在几点", "报时"),
+            actions = listOf(
+                AgentAction(action = "tell_time"),
+                AgentAction(action = "finish", message = "正在查看时间", finished = true),
             ),
         ),
         TemplateIntent(
@@ -96,7 +121,7 @@ object ElderTaskTemplateMatcher {
             ),
         ),
         TemplateIntent(
-            aliases = listOf("读未读消息", "读通知", "读一下消息"),
+            aliases = listOf("读未读消息", "读通知", "读一下消息", "帮我读一下未读消息"),
             actions = listOf(
                 AgentAction(action = "read_unread_messages"),
                 AgentAction(action = "finish", message = "我先尝试读取未读消息。", finished = true),

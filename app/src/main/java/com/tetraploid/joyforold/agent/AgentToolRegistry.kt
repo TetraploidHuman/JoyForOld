@@ -10,7 +10,8 @@ object AgentToolRegistry {
         "dial_contact", "send_sms", "set_alarm", "add_calendar_event",
         "open_camera", "open_gallery", "open_weather",
         "open_health_code", "open_payment_code", "open_font_settings",
-        "navigate_home", "read_unread_messages", "ask_family_for_help", "emergency_help",
+        "navigate_home", "read_unread_messages", "tell_time", "query_weather",
+        "ask_family_for_help", "emergency_help",
     )
 
     fun descriptionsForPrompt(): String = """
@@ -27,6 +28,8 @@ object AgentToolRegistry {
         - set_alarm: 系统闹钟，target_text 填时间（如 7:30），input_text 可填提醒标题
         - add_calendar_event: 新建日历事件，target_text 为标题，input_text 为备注
         - open_camera / open_gallery / open_weather: 打开相机/相册/天气
+        - tell_time: 查看当前时间并朗读
+        - query_weather: 查询天气并朗读；target_text 可选填城市
         - open_health_code / open_payment_code: 尝试打开健康码或付款码入口应用
         - open_font_settings: 打开字体显示设置
         - navigate_home: 用地图应用导航回家（从用户预设地址读取）
@@ -36,9 +39,13 @@ object AgentToolRegistry {
         - wait: 等待界面刷新
         - find_on_page: 仅搜索不点击，target_text 为关键词，结果在下一步反馈里
         - read_tree: 读取当前页结构树片段（元素找不到时用）
-        - finish: 结束；waiting_for_user:true 时向用户提问
+        - finish: 结束；waiting_for_user:true 时等待用户回复；needs_binary_confirm:true 时须用户说发送/取消
+        - **finish 与等待用户（由你显式标记，禁止靠标点猜测）**：
+          · 闲聊/问候/任务已完成：finished:true, waiting_for_user:false, needs_binary_confirm:false
+          · 需用户补充信息（开放问答）：waiting_for_user:true, needs_binary_confirm:false
+          · 敏感操作二选一（发送/取消、拨号确认）：waiting_for_user:true, needs_binary_confirm:true
 
-        返回 JSON：{"action":"...","target_text":"","input_text":"","message":"","finished":false,"waiting_for_user":false}
+        返回 JSON：{"action":"...","target_text":"","input_text":"","message":"","finished":false,"waiting_for_user":false,"needs_binary_confirm":false}
     """.trimIndent()
 
     suspend fun execute(
@@ -68,6 +75,8 @@ object AgentToolRegistry {
             "open_font_settings",
             "navigate_home",
             "read_unread_messages",
+            "tell_time",
+            "query_weather",
             "ask_family_for_help",
             "emergency_help",
             -> SystemIntentExecutor.execute(

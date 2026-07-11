@@ -218,4 +218,15 @@ object PageObservation {
             }
         }.trimEnd()
     }
+
+    fun isMinorChange(previous: StructuredPageSnapshot, current: StructuredPageSnapshot): Boolean {
+        if (previous.packageName != current.packageName) return false
+        if (previous.fingerprint == current.fingerprint) return true
+        val prevClickables = previous.clickables.toSet()
+        val prevEditables = previous.editables.toSet()
+        val newClickables = current.clickables.count { it !in prevClickables }
+        val newEditables = current.editables.count { it !in prevEditables }
+        val removedClickables = previous.clickables.count { it !in current.clickables.toSet() }
+        return newClickables <= 3 && newEditables <= 1 && removedClickables <= 3
+    }
 }

@@ -3,6 +3,7 @@ package com.tetraploid.joyforold.agent
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -51,6 +52,7 @@ class AgentSessionStoreTest {
         assertNotNull(loaded)
         assertEquals("给610打电话", loaded!!.originalCommand)
         assertEquals("你要在哪里打电话？", loaded.aiPrompt)
+        assertFalse(loaded.needsBinaryConfirm)
         assertTrue(loaded.session.hasSystem())
         assertEquals("com.tencent.mobileqq", loaded.previousSnapshot?.packageName)
     }

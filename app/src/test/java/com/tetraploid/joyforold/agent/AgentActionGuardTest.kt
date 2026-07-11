@@ -17,6 +17,20 @@ class AgentActionGuardTest {
             pageDiff = "",
         )
 
+        assertNull(
+            AgentActionGuard.blockedRepeatReason(
+                session,
+                AgentAction(action = "click", targetText = "610"),
+            ),
+        )
+
+        session.recordStep(
+            step = 2,
+            action = AgentAction(action = "click", targetText = "610"),
+            result = ActionExecutionResult(false, "仍未找到"),
+            pageDiff = "",
+        )
+
         val reason = AgentActionGuard.blockedRepeatReason(
             session,
             AgentAction(action = "click", targetText = "610"),

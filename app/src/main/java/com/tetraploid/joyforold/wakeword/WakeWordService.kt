@@ -42,14 +42,27 @@ class WakeWordService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, createNotification())
         if (!hasRecordAudioPermission()) {
             AgentRuntime.appendLog("本地唤醒启动失败：缺少麦克风权限")
             stopSelf()
             return START_NOT_STICKY
         }
+        if (!promoteToForeground()) {
+            AgentRuntime.appendLog("本地唤醒启动失败：无法启动前台服务（请确认麦克风权限并在应用内开启唤醒）")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startListenLoop()
-        return START_STICKY
+        return START_NOT_STICKY
+    }
+
+    private fun promoteToForeground(): Boolean {
+        return runCatching {
+            startForeground(NOTIFICATION_ID, createNotification())
+            true
+        }.onFailure { error ->
+            Log.w(logTag, "startForeground failed", error)
+        }.getOrDefault(false)
     }
 
     override fun onDestroy() {
@@ -142,15 +155,7 @@ class WakeWordService : Service() {
                 val now = System.currentTimeMillis()
                 val boostedLen = WakeWordAudioNormalizer.boostIfQuiet(buf, n)
                 ringBuffer.append(buf, boostedLen)
-                val vadAllows = when {
-                    sileroGate != null -> sileroGate.shouldProcess(buf, boostedLen, now)
-                    rmsGate != null -> rmsGate.shouldProcess(buf, boostedLen, now)
-                    else -> true
-                }
-                if (!vadAllows) {
-                    lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
-                    continue
-                }
+                // VAD 仅用于统计，不再拦截 KWS 输入，避免截断唤醒词开头导致漏检
                 if (sileroGate?.hasSpeech(buf, boostedLen) == true ||
                     rmsGate?.hasSpeech(buf, boostedLen) == true
                 ) {
@@ -273,7 +278,7 @@ class WakeWordService : Service() {
 
         private const val SAMPLE_RATE = 16000
         private const val WAKE_COOLDOWN_MS = 1500L
-        private const val STARTUP_GRACE_MS = 2500L
+        private const val STARTUP_GRACE_MS = 1000L
         private const val RETRY_DELAY_MS = 3000L
         private const val STATS_LOG_INTERVAL_MS = 10_000L
         private const val NOTIFICATION_ID = 1003

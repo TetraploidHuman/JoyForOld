@@ -32,8 +32,22 @@ class LocalCommandParserTest {
     }
 
     @Test
+    fun parse_timeQuery() {
+        val steps = LocalCommandParser.parse("几点了")
+        assertNotNull(steps)
+        assertEquals("tell_time", steps!!.first().action)
+    }
+
+    @Test
+    fun parse_weatherQuery() {
+        val steps = LocalCommandParser.parse("帮我查一下天气")
+        assertNotNull(steps)
+        assertEquals("query_weather", steps!!.first().action)
+    }
+
+    @Test
     fun parse_unknownReturnsNull() {
-        assertNull(LocalCommandParser.parse("帮我查一下天气"))
+        assertNull(LocalCommandParser.parse("随便说点什么"))
     }
 
     @Test

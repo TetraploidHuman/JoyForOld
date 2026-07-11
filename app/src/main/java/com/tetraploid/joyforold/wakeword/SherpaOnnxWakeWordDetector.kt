@@ -164,7 +164,7 @@ class SherpaOnnxWakeWordDetector(
     }
 
     companion object {
-        const val SECOND_STAGE_THRESHOLD_RATIO = 1.08f
+        const val SECOND_STAGE_THRESHOLD_RATIO = 1.0f
 
         fun defaultSecondStageThreshold(stage1Threshold: Float): Float =
             (stage1Threshold * SECOND_STAGE_THRESHOLD_RATIO).coerceAtMost(5f)
