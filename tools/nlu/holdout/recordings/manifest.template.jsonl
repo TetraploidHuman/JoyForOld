@@ -1,0 +1,2 @@
+{"id":"r-wifi-01","wav":"recordings/835/wifi_01.wav","device":"Snapdragon 835","speaker":"elder_01","scene":"quiet_room","asr_engine":"doubao","raw_asr":"","reviewed_text":"","intent":"open_wifi_settings","status":"pending","recorded_at":""}
+{"id":"r-bt-01","wav":"recordings/835/bt_01.wav","device":"Snapdragon 835","speaker":"elder_01","scene":"quiet_room","asr_engine":"doubao","raw_asr":"","reviewed_text":"","intent":"open_bluetooth_settings","status":"pending","recorded_at":""}

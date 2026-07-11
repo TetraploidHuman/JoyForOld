@@ -16,3 +16,10 @@ local.properties
 .repo_audit/
 .repo_audit_fresh/
 /_reference/
+tools/nlu/.work/
+tools/nlu/__pycache__/
+.tmp_bundle/
+.tmp_kws_inspect/
+.tmp_sherpa/
+.tmp_kws.tar.bz2
+.kotlin/

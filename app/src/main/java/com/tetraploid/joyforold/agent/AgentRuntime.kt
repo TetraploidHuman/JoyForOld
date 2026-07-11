@@ -11,6 +11,7 @@ import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
 import com.tetraploid.joyforold.data.ApiKeyStore
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.OverlayPermission
+import com.tetraploid.joyforold.offline.nlu.OfflineNluModelManager
 import com.tetraploid.joyforold.preset.PresetCommand
 import com.tetraploid.joyforold.preset.PresetCommandStore
 import com.tetraploid.joyforold.preset.PresetTextNormalizer
@@ -169,6 +170,9 @@ object AgentRuntime {
             }
             refreshMemories()
             restorePendingUiIfNeeded()
+            mainScope.launch(Dispatchers.IO) {
+                OfflineNluModelManager.getClassifier(application)
+            }
             _state.update {
                 val contacts = caregiverStore!!.loadFamilyContacts()
                 val daughter = contacts.firstOrNull { it.alias == "女儿" }

@@ -1,0 +1,1069 @@
+{
+  "version": 1,
+  "description": "Generalization eval — never fed into TEMPLATES; compositional + confusable only.",
+  "stats": {
+    "total": 148,
+    "by_intent": {
+      "open_wifi_settings": 9,
+      "open_bluetooth_settings": 6,
+      "open_sound_settings": 7,
+      "open_mobile_data_settings": 9,
+      "open_location_settings": 6,
+      "open_display_settings": 6,
+      "open_settings": 7,
+      "open_app": 7,
+      "set_alarm": 8,
+      "add_calendar_event": 9,
+      "open_camera": 7,
+      "open_gallery": 8,
+      "open_weather": 6,
+      "tell_time": 1,
+      "query_weather": 7,
+      "dial_contact": 6,
+      "navigate_home": 6,
+      "emergency_help": 7,
+      "ask_family_for_help": 6,
+      "open_health_code": 8,
+      "open_payment_code": 6,
+      "none": 6
+    }
+  },
+  "samples": [
+    {
+      "id": "g-open_w-001",
+      "text": "启动WiFi设置",
+      "intent": "open_wifi_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-002",
+      "text": "弄开一下无线局域网",
+      "intent": "open_wifi_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-003",
+      "text": "家里无线局域网怎么开",
+      "intent": "open_wifi_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-004",
+      "text": "打开一下WiFi",
+      "intent": "open_wifi_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-005",
+      "text": "WiFi连不上启用",
+      "intent": "open_wifi_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-006",
+      "text": "WLAN连不上开启",
+      "intent": "open_wifi_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_b-007",
+      "text": "耳机连不上启动",
+      "intent": "open_bluetooth_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_b-008",
+      "text": "蓝牙没开",
+      "intent": "open_bluetooth_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_b-009",
+      "text": "重新启用蓝牙",
+      "intent": "open_bluetooth_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_b-010",
+      "text": "搜不到蓝牙设备",
+      "intent": "open_bluetooth_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_b-011",
+      "text": "重新弄开蓝牙",
+      "intent": "open_bluetooth_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_b-012",
+      "text": "帮我把蓝牙打开",
+      "intent": "open_bluetooth_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-013",
+      "text": "媒体声音加大一点",
+      "intent": "open_sound_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-014",
+      "text": "听不见减小",
+      "intent": "open_sound_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-015",
+      "text": "通话调大太小",
+      "intent": "open_sound_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-016",
+      "text": "通话减小太小",
+      "intent": "open_sound_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-017",
+      "text": "减小声音设置",
+      "intent": "open_sound_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-018",
+      "text": "铃声音量减小",
+      "intent": "open_sound_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_m-019",
+      "text": "没WiFi用蜂窝网络上网",
+      "intent": "open_mobile_data_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_m-020",
+      "text": "出门用4G上网",
+      "intent": "open_mobile_data_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_m-021",
+      "text": "SIM卡4G弄开",
+      "intent": "open_mobile_data_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_m-022",
+      "text": "SIM卡移动数据弄开",
+      "intent": "open_mobile_data_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_m-023",
+      "text": "帮我把流量打开",
+      "intent": "open_mobile_data_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_m-024",
+      "text": "4G上不了开移动数据",
+      "intent": "open_mobile_data_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_l-025",
+      "text": "卫星定位开一下",
+      "intent": "open_location_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_l-026",
+      "text": "定位不准开启",
+      "intent": "open_location_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_l-027",
+      "text": "启用定位",
+      "intent": "open_location_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_l-028",
+      "text": "卫星定位启动",
+      "intent": "open_location_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_l-029",
+      "text": "位置服务弄开",
+      "intent": "open_location_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_l-030",
+      "text": "定位不准开一下",
+      "intent": "open_location_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_d-031",
+      "text": "夜间模式调暗",
+      "intent": "open_display_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_d-032",
+      "text": "字体放大",
+      "intent": "open_display_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_d-033",
+      "text": "调亮显示设置",
+      "intent": "open_display_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_d-034",
+      "text": "屏幕打开一点",
+      "intent": "open_display_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_d-035",
+      "text": "屏幕打开看不清",
+      "intent": "open_display_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_d-036",
+      "text": "字体调暗",
+      "intent": "open_display_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-037",
+      "text": "系统找到在哪",
+      "intent": "open_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-038",
+      "text": "齿轮图标进入",
+      "intent": "open_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-039",
+      "text": "手机参数进入",
+      "intent": "open_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-040",
+      "text": "齿轮图标找到",
+      "intent": "open_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-041",
+      "text": "进入设置",
+      "intent": "open_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_s-042",
+      "text": "系统进入在哪",
+      "intent": "open_settings",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_a-043",
+      "text": "开一下京东",
+      "intent": "open_app",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_a-044",
+      "text": "缴费用快手",
+      "intent": "open_app",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_a-045",
+      "text": "聊天用京东",
+      "intent": "open_app",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_a-046",
+      "text": "购物用抖音",
+      "intent": "open_app",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_a-047",
+      "text": "帮我启用快手",
+      "intent": "open_app",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_a-048",
+      "text": "帮我开一下微信",
+      "intent": "open_app",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-set_al-049",
+      "text": "7点叫我",
+      "intent": "set_alarm",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-set_al-050",
+      "text": "定个晚上9点的闹铃",
+      "intent": "set_alarm",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-set_al-051",
+      "text": "10分钟后提醒关火",
+      "intent": "set_alarm",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-set_al-052",
+      "text": "设闹钟7点",
+      "intent": "set_alarm",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-set_al-053",
+      "text": "10分钟后提醒出门",
+      "intent": "set_alarm",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-set_al-054",
+      "text": "8点半提醒吃药",
+      "intent": "set_alarm",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-add_ca-055",
+      "text": "把接孩子加进日历",
+      "intent": "add_calendar_event",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-add_ca-056",
+      "text": "每天明早6点提醒体检",
+      "intent": "add_calendar_event",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-add_ca-057",
+      "text": "每天8点半提醒交水费",
+      "intent": "add_calendar_event",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-add_ca-058",
+      "text": "每天8点半提醒接孩子",
+      "intent": "add_calendar_event",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-add_ca-059",
+      "text": "每天下午3点提醒开会",
+      "intent": "add_calendar_event",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-add_ca-060",
+      "text": "后天去医院记日程",
+      "intent": "add_calendar_event",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_c-061",
+      "text": "扫码不行开镜头",
+      "intent": "open_camera",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_c-062",
+      "text": "现在拍一张",
+      "intent": "open_camera",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_c-063",
+      "text": "现在拍照",
+      "intent": "open_camera",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_c-064",
+      "text": "开相机",
+      "intent": "open_camera",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_c-065",
+      "text": "启动摄像头",
+      "intent": "open_camera",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_c-066",
+      "text": "打开摄像头",
+      "intent": "open_camera",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_g-067",
+      "text": "翻翻相册",
+      "intent": "open_gallery",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_g-068",
+      "text": "翻下周五拍的照片",
+      "intent": "open_gallery",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_g-069",
+      "text": "图库里找风景",
+      "intent": "open_gallery",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_g-070",
+      "text": "图库里找照片",
+      "intent": "open_gallery",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_g-071",
+      "text": "看后天的截图",
+      "intent": "open_gallery",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_g-072",
+      "text": "翻后天拍的照片",
+      "intent": "open_gallery",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-073",
+      "text": "看预报进入天气",
+      "intent": "open_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-074",
+      "text": "进入天气应用",
+      "intent": "open_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-075",
+      "text": "进天气打开",
+      "intent": "open_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-076",
+      "text": "打开天气应用",
+      "intent": "open_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-077",
+      "text": "启动天气应用",
+      "intent": "open_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-078",
+      "text": "看预报打开天气",
+      "intent": "open_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-tell_t-079",
+      "text": "什么时间",
+      "intent": "tell_time",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-query_-080",
+      "text": "明天冷不冷",
+      "intent": "query_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-query_-081",
+      "text": "明天下不下雨",
+      "intent": "query_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-query_-082",
+      "text": "杭州天气怎么样",
+      "intent": "query_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-query_-083",
+      "text": "明天要不要添衣",
+      "intent": "query_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-query_-084",
+      "text": "北京天气怎么样",
+      "intent": "query_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-query_-085",
+      "text": "上海天气怎么样",
+      "intent": "query_weather",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-dial_c-086",
+      "text": "给老伴打电话",
+      "intent": "dial_contact",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-dial_c-087",
+      "text": "给女儿打电话",
+      "intent": "dial_contact",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-dial_c-088",
+      "text": "跟老伴视频",
+      "intent": "dial_contact",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-dial_c-089",
+      "text": "联系孩子",
+      "intent": "dial_contact",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-dial_c-090",
+      "text": "给孙子打电话",
+      "intent": "dial_contact",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-dial_c-091",
+      "text": "跟孩子视频",
+      "intent": "dial_contact",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-naviga-092",
+      "text": "带我回公司",
+      "intent": "navigate_home",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-naviga-093",
+      "text": "导回家里",
+      "intent": "navigate_home",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-naviga-094",
+      "text": "从公司回家怎么走",
+      "intent": "navigate_home",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-naviga-095",
+      "text": "从家里回家怎么走",
+      "intent": "navigate_home",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-naviga-096",
+      "text": "从社区回家怎么走",
+      "intent": "navigate_home",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-naviga-097",
+      "text": "导回银行",
+      "intent": "navigate_home",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-emerge-098",
+      "text": "我不行了",
+      "intent": "emergency_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-emerge-099",
+      "text": "闻到煤气味",
+      "intent": "emergency_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-emerge-100",
+      "text": "救命",
+      "intent": "emergency_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-emerge-101",
+      "text": "胸口疼",
+      "intent": "emergency_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-emerge-102",
+      "text": "燃气泄漏了",
+      "intent": "emergency_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-emerge-103",
+      "text": "快打120",
+      "intent": "emergency_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-ask_fa-104",
+      "text": "叫家人来",
+      "intent": "ask_family_for_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-ask_fa-105",
+      "text": "让孩子过来",
+      "intent": "ask_family_for_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-ask_fa-106",
+      "text": "联系家人帮忙",
+      "intent": "ask_family_for_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-ask_fa-107",
+      "text": "通知孩子来一趟",
+      "intent": "ask_family_for_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-ask_fa-108",
+      "text": "让老伴过来",
+      "intent": "ask_family_for_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-ask_fa-109",
+      "text": "让儿子过来",
+      "intent": "ask_family_for_help",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_h-110",
+      "text": "出示健康码",
+      "intent": "open_health_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_h-111",
+      "text": "扫码场所码",
+      "intent": "open_health_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_h-112",
+      "text": "亮绿码",
+      "intent": "open_health_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_h-113",
+      "text": "打开防疫码",
+      "intent": "open_health_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_h-114",
+      "text": "打开场所码",
+      "intent": "open_health_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_h-115",
+      "text": "亮防疫码",
+      "intent": "open_health_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_p-116",
+      "text": "出示付款码",
+      "intent": "open_payment_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_p-117",
+      "text": "亮付款码",
+      "intent": "open_payment_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_p-118",
+      "text": "摊位结账用哪个码",
+      "intent": "open_payment_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_p-119",
+      "text": "扫码付钱",
+      "intent": "open_payment_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_p-120",
+      "text": "商店结账用哪个码",
+      "intent": "open_payment_code",
+      "source": "synthetic",
+      "notes": "compositional"
+    },
+    {
+      "id": "g-open_w-121",
+      "text": "打开WiFi用无线网上网",
+      "intent": "open_wifi_settings",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_w-122",
+      "text": "打开WiFi无线设置",
+      "intent": "open_wifi_settings",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_m-123",
+      "text": "打开流量用移动数据上网",
+      "intent": "open_mobile_data_settings",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_m-124",
+      "text": "打开移动数据流量设置",
+      "intent": "open_mobile_data_settings",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_m-125",
+      "text": "没WiFi帮我开蜂窝数据",
+      "intent": "open_mobile_data_settings",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_w-126",
+      "text": "连路由器开无线网",
+      "intent": "open_wifi_settings",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_g-127",
+      "text": "看上次拍的照片",
+      "intent": "open_gallery",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_c-128",
+      "text": "我要照相",
+      "intent": "open_camera",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_g-129",
+      "text": "找相册里的旧图",
+      "intent": "open_gallery",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_h-130",
+      "text": "出示绿码",
+      "intent": "open_health_code",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_p-131",
+      "text": "超市扫我付款码",
+      "intent": "open_payment_code",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_h-132",
+      "text": "亮健康码",
+      "intent": "open_health_code",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-set_al-133",
+      "text": "明早7点叫我起床",
+      "intent": "set_alarm",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-add_ca-134",
+      "text": "明早7点记体检日程",
+      "intent": "add_calendar_event",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-set_al-135",
+      "text": "十分钟后叫我",
+      "intent": "set_alarm",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-add_ca-136",
+      "text": "十分钟后提醒交电费",
+      "intent": "add_calendar_event",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_s-137",
+      "text": "打开设置",
+      "intent": "open_settings",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_s-138",
+      "text": "打开声音设置",
+      "intent": "open_sound_settings",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-open_a-139",
+      "text": "打开微信",
+      "intent": "open_app",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-query_-140",
+      "text": "今天天气怎么样",
+      "intent": "query_weather",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-emerge-141",
+      "text": "闻到燃气泄漏",
+      "intent": "emergency_help",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-add_ca-142",
+      "text": "记得交燃气费",
+      "intent": "add_calendar_event",
+      "source": "synthetic",
+      "notes": "confusable boundary"
+    },
+    {
+      "id": "g-none-143",
+      "text": "今天topic",
+      "intent": "none",
+      "source": "synthetic",
+      "notes": "none compositional"
+    },
+    {
+      "id": "g-none-144",
+      "text": "搜一下topic",
+      "intent": "none",
+      "source": "synthetic",
+      "notes": "none compositional"
+    },
+    {
+      "id": "g-none-145",
+      "text": "我想want",
+      "intent": "none",
+      "source": "synthetic",
+      "notes": "none compositional"
+    },
+    {
+      "id": "g-none-146",
+      "text": "topic怎么办",
+      "intent": "none",
+      "source": "synthetic",
+      "notes": "none compositional"
+    },
+    {
+      "id": "g-none-147",
+      "text": "帮我ask",
+      "intent": "none",
+      "source": "synthetic",
+      "notes": "none compositional"
+    },
+    {
+      "id": "g-none-148",
+      "text": "播放media",
+      "intent": "none",
+      "source": "synthetic",
+      "notes": "none compositional"
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 package com.tetraploid.joyforold.agent
 
 enum class PageContextMode {
+    /** 不传页面上下文（开放问答 / 纯系统动作） */
+    NONE,
     /** 页面明显变化：传完整快览 + diff */
     FULL,
     /** 小幅变化：只传一行摘要 + diff */

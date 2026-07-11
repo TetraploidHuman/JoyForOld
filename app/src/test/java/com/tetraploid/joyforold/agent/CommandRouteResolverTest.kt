@@ -1,5 +1,6 @@
 package com.tetraploid.joyforold.agent
 
+import com.tetraploid.joyforold.offline.nlu.OfflineNluRouter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -18,6 +19,52 @@ class CommandRouteResolverTest {
         assertNotNull(route)
         assertEquals(1.0, route!!.confidence, 0.001)
         assertNull(route.clarifyMessage)
+    }
+
+    @Test
+    fun looksLikeComplexQuery_detectsQuestion() {
+        assertEquals(true, CommandRouteResolver.looksLikeComplexQuery("煤气味很重怎么办"))
+        assertEquals(true, CommandRouteResolver.looksLikeComplexQuery("明天会降温吗我该穿啥"))
+        assertEquals(false, CommandRouteResolver.looksLikeComplexQuery("打开蓝牙"))
+    }
+
+    @Test
+    fun shouldUseOfflineNlu_skipsComplexWhenOnline() {
+        val offline = OfflineNluRouter.Match(
+            steps = listOf(AgentAction(action = "finish", message = "test")),
+            confidence = 0.94,
+            intent = "emergency_help",
+        )
+        assertEquals(
+            false,
+            CommandRouteResolver.shouldUseOfflineNlu("煤气味很重怎么办", offline, appContext = null),
+        )
+    }
+
+    @Test
+    fun shouldUseOfflineNlu_rejectsClarifyBand() {
+        val offline = OfflineNluRouter.Match(
+            steps = listOf(AgentAction(action = "finish", message = "打开蓝牙")),
+            confidence = 0.68,
+            clarifyMessage = "您是要打开蓝牙吗？",
+        )
+        assertEquals(
+            false,
+            CommandRouteResolver.shouldUseOfflineNlu("打开蓝牙", offline, appContext = null),
+        )
+    }
+
+    @Test
+    fun shouldUseOfflineNlu_allowsSimpleHighConfidenceWhenOnline() {
+        val offline = OfflineNluRouter.Match(
+            steps = listOf(AgentAction(action = "finish", message = "打开蓝牙")),
+            confidence = 0.94,
+            intent = "open_bluetooth_settings",
+        )
+        assertEquals(
+            true,
+            CommandRouteResolver.shouldUseOfflineNlu("打开蓝牙", offline, appContext = null),
+        )
     }
 
     @Test

@@ -29,8 +29,9 @@ class DeepSeekClient(
         keyMemories: String,
         minimalPageContext: String,
         pageContextMode: PageContextMode = PageContextMode.FULL,
+        toolsPrompt: String? = null,
     ): JSONObject {
-        conversation.seedSystem(buildSystemPrompt(keyMemories))
+        conversation.seedSystem(buildSystemPrompt(keyMemories, toolsPrompt))
         conversation.addUser(
             buildString {
                 appendLine("【用户指令】$userCommand")
@@ -269,9 +270,9 @@ class DeepSeekClient(
         )
     }
 
-    private fun buildSystemPrompt(keyMemories: String): String = """
+    private fun buildSystemPrompt(keyMemories: String, toolsPrompt: String? = null): String = """
         你是手机操作 Agent，工作方式类似 Claude Code / Codex：观察页面 → 选一步工具 → 看结果 → 再观察。
-        ${AgentToolRegistry.descriptionsForPrompt()}
+        ${toolsPrompt ?: AgentToolRegistry.descriptionsForPrompt()}
 
         【历史关键记忆（仅供参考）】
         $keyMemories

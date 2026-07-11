@@ -1,0 +1,203 @@
+# JoyForOld 离线意图目录（与 SystemIntentExecutor 动作对齐）
+version: 1
+feature_dim: 8192
+ngram_min: 2
+ngram_max: 4
+
+intents:
+  - id: open_bluetooth_settings
+    action: open_bluetooth_settings
+    templates:
+      - 打开蓝牙
+      - 开蓝牙
+      - 帮我把蓝牙打开
+      - 蓝牙怎么开
+      - 连接蓝牙
+      - 把蓝牙开一下
+
+  - id: open_wifi_settings
+    action: open_wifi_settings
+    templates:
+      - 打开wifi
+      - 打开无线网
+      - 打开无线网络
+      - 开wifi
+      - 连wifi
+      - 连接无线网络
+      - wifi设置
+
+  - id: open_settings
+    action: open_settings
+    templates:
+      - 打开设置
+      - 系统设置
+      - 手机设置
+      - 进入设置
+
+  - id: open_sound_settings
+    action: open_sound_settings
+    templates:
+      - 打开声音设置
+      - 音量设置
+      - 调音量
+      - 声音太大了
+      - 媒体音量
+
+  - id: open_mobile_data_settings
+    action: open_mobile_data_settings
+    templates:
+      - 打开移动数据
+      - 流量设置
+      - 数据流量
+      - 蜂窝数据
+
+  - id: open_location_settings
+    action: open_location_settings
+    templates:
+      - 打开定位
+      - 定位设置
+      - gps设置
+      - 打开gps
+
+  - id: open_display_settings
+    action: open_display_settings
+    templates:
+      - 打开显示设置
+      - 屏幕设置
+      - 亮度设置
+      - 字体设置
+
+  - id: open_camera
+    action: open_camera
+    templates:
+      - 打开相机
+      - 拍照
+      - 我要拍照
+
+  - id: open_gallery
+    action: open_gallery
+    templates:
+      - 打开相册
+      - 看照片
+      - 我的照片
+
+  - id: open_weather
+    action: open_weather
+    templates:
+      - 打开天气
+      - 看天气
+      - 天气应用
+
+  - id: tell_time
+    action: tell_time
+    templates:
+      - 几点了
+      - 现在几点
+      - 报时
+      - 什么时间
+
+  - id: query_weather
+    action: query_weather
+    templates:
+      - 今天天气怎么样
+      - 查天气
+      - 帮我查天气
+      - 会不会下雨
+
+  - id: navigate_home
+    action: navigate_home
+    templates:
+      - 导航回家
+      - 带我回家
+      - 回家路线
+
+  - id: emergency_help
+    action: emergency_help
+    templates:
+      - 紧急呼救
+      - 救命
+      - sos
+
+  - id: ask_family_for_help
+    action: ask_family_for_help
+    templates:
+      - 叫家人帮忙
+      - 联系家人帮忙
+      - 让家人来帮我
+
+  - id: open_health_code
+    action: open_health_code
+    templates:
+      - 打开健康码
+      - 健康码
+
+  - id: open_payment_code
+    action: open_payment_code
+    templates:
+      - 打开付款码
+      - 付款码
+      - 收款码
+
+  - id: open_app
+    action: open_app
+    slot: app
+    templates:
+      - 打开{app}
+      - 启动{app}
+      - 运行{app}
+      - 进入{app}
+    app_examples:
+      - 微信
+      - 支付宝
+      - 抖音
+      - 相机
+
+  - id: set_alarm
+    action: set_alarm
+    slots: [time, title]
+    templates:
+      - 设闹钟{time}
+      - 定个闹钟{time}
+      - {time}叫我
+      - {time}闹钟
+      - 提醒我{time}{title}
+      - 明早{time}叫我
+    time_examples: ["7:30", "07:00", "七点半", "早上七点", "下午3点"]
+    title_examples: ["吃药", "起床", ""]
+
+  - id: add_calendar_event
+    action: add_calendar_event
+    slots: [title, notes]
+    templates:
+      - 添加日程{title}
+      - 记一下{title}
+      - 提醒我{title}
+      - 明天{title}
+    title_examples: ["开会", "体检", "接孙子"]
+
+  - id: dial_contact
+    action: dial_contact
+    slot: contact
+    templates:
+      - 给{contact}打电话
+      - 打电话给{contact}
+      - 拨打{contact}电话
+    contact_examples: ["女儿", "儿子", "老伴"]
+
+  - id: send_sms
+    action: send_sms
+    slots: [contact, body]
+    templates:
+      - 给{contact}发短信{body}
+      - 发短信给{contact}{body}
+    contact_examples: ["女儿"]
+    body_examples: ["我到了", "晚上回家吃饭"]
+
+negative_templates:
+  - 你好
+  - 谢谢
+  - 今天心情不好
+  - 帮我看看这个字
+  - 播放音乐
+  - 打开微信支付
+  - 我想聊天

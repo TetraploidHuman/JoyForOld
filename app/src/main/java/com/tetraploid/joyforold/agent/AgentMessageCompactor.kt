@@ -35,6 +35,7 @@ object AgentMessageCompactor {
             PageContextMode.FULL
         }
         return when (resolved) {
+            PageContextMode.NONE -> ""
             PageContextMode.DIFF_ONLY -> buildString {
                 appendLine()
                 appendLine("$PAGE_MINIMAL_MARKER $minimalPageContext")

@@ -1,0 +1,14 @@
+{
+  "model_type": "transformer",
+  "base_model": "uer/chinese_roberta_L-4_H-256",
+  "max_length": 64,
+  "cls_token_id": 101,
+  "sep_token_id": 102,
+  "pad_token_id": 0,
+  "unk_token_id": 100,
+  "unk_token": "[UNK]",
+  "auto_execute_threshold": 0.88,
+  "clarify_threshold": 0.75,
+  "margin_threshold": 0.28,
+  "version": 4
+}

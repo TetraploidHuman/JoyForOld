@@ -721,9 +721,29 @@ class AgentOrchestrator(
 
         var stepNo = session.stepRecords.size
 
+        val pageContextNeed = IntentCapabilityMatrix.inferPageContextNeed(loopCommand)
+
+        val agentToolsPrompt = IntentCapabilityMatrix.toolsPromptForContext(pageContextNeed)
+
 
 
         suspend fun captureObservation(): PageObservationPayload {
+
+            if (pageContextNeed == IntentCapabilityMatrix.PageContextNeed.NONE) {
+
+                return PageObservationPayload(
+
+                    pageContext = "",
+
+                    pageDiff = "",
+
+                    minimalPageContext = "",
+
+                    mode = PageContextMode.NONE,
+
+                )
+
+            }
 
             val snapshots = service.captureStructuredSnapshots()
 
@@ -743,9 +763,11 @@ class AgentOrchestrator(
 
             val pageDiff = PageContextRedactor.redact(PageObservation.diff(previousSnapshot, enriched))
 
-            val mode = PageContextSelector.modeFor(previousSnapshot, enriched, pageDiff)
+            val dynamicMode = PageContextSelector.modeFor(previousSnapshot, enriched, pageDiff)
 
             previousSnapshot = enriched
+
+            val mode = IntentCapabilityMatrix.pageContextModeForNeed(pageContextNeed, dynamicMode)
 
             return PageObservationPayload(
 
@@ -850,6 +872,8 @@ class AgentOrchestrator(
                     minimalPageContext = observation.minimalPageContext,
 
                     pageContextMode = observation.mode,
+
+                    toolsPrompt = agentToolsPrompt,
 
                 )
 

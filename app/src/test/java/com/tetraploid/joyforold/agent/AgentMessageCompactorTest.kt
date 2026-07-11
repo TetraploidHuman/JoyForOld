@@ -44,6 +44,17 @@ class AgentMessageCompactorTest {
     }
 
     @Test
+    fun formatPageSection_none_isEmpty() {
+        val section = AgentMessageCompactor.formatPageSection(
+            pageContext = "full",
+            pageDiff = "diff",
+            minimalPageContext = "min",
+            mode = PageContextMode.NONE,
+        )
+        assertEquals("", section)
+    }
+
+    @Test
     fun formatPageSection_usesMinimalSummaryWhenFingerprintUnchanged() {
         val section = AgentMessageCompactor.formatPageSection(
             pageContext = "full page",

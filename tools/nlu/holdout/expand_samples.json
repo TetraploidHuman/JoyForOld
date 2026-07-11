@@ -1,0 +1,128 @@
+[
+  {"id": "h-wifi-05", "text": "家里宽带断了先看看无线开没开", "intent": "open_wifi_settings", "source": "human"},
+  {"id": "h-wifi-06", "text": "右上角那个扇形图标点不开", "intent": "open_wifi_settings", "source": "human", "notes": "隐喻WiFi图标"},
+  {"id": "h-wifi-07", "text": "连不上路由器了帮我把网打开", "intent": "open_wifi_settings", "source": "human"},
+  {"id": "r-wifi-02", "text": "开无线路由", "intent": "open_wifi_settings", "source": "asr_device", "recording": {"wav": "recordings/pending/wifi_asr_02.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+  {"id": "h-wifi-08", "text": "热点能开吗我试试wlan", "intent": "open_wifi_settings", "source": "human"},
+
+  {"id": "h-bt-05", "text": "老年机连音响咋整蓝牙给开开", "intent": "open_bluetooth_settings", "source": "human"},
+  {"id": "h-bt-06", "text": "耳机盒亮红灯是不是没配对上", "intent": "open_bluetooth_settings", "source": "human"},
+  {"id": "r-bt-02", "text": "打开兰牙", "intent": "open_bluetooth_settings", "source": "asr_device", "recording": {"wav": "recordings/pending/bt_asr_02.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+  {"id": "h-bt-07", "text": "车载蓝牙连不上你帮我瞅瞅", "intent": "open_bluetooth_settings", "source": "human"},
+
+  {"id": "h-sound-05", "text": "视频通话对方听不见我说话", "intent": "open_sound_settings", "source": "human"},
+  {"id": "h-sound-06", "text": "静音了怎么关帮我找音量", "intent": "open_sound_settings", "source": "human"},
+  {"id": "r-sound-01", "text": "因量太小", "intent": "open_sound_settings", "source": "asr_device", "recording": {"wav": "recordings/pending/sound_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}, "notes": "ASR：音量"},
+  {"id": "h-sound-07", "text": "通知声太吵别的声太小", "intent": "open_sound_settings", "source": "human"},
+
+  {"id": "h-data-04", "text": "外面没wifi得用移动网", "intent": "open_mobile_data_settings", "source": "human"},
+  {"id": "h-data-05", "text": "套餐还有流量吗先帮我把数据打开", "intent": "open_mobile_data_settings", "source": "human"},
+  {"id": "h-data-06", "text": "蜂窝网络关着上不了网", "intent": "open_mobile_data_settings", "source": "human"},
+  {"id": "r-data-02", "text": "开流量上网", "intent": "open_mobile_data_settings", "source": "asr_device", "recording": {"wav": "recordings/pending/data_asr_02.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+
+  {"id": "h-gps-04", "text": "外卖员找不到我定位是不是关了", "intent": "open_location_settings", "source": "human"},
+  {"id": "h-gps-05", "text": "权限里把位置打开", "intent": "open_location_settings", "source": "human"},
+  {"id": "r-gps-01", "text": "开一下订位", "intent": "open_location_settings", "source": "asr_device", "recording": {"wav": "recordings/pending/gps_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}, "notes": "ASR：定位"},
+  {"id": "h-gps-06", "text": "卫星定位没信号去设置看看", "intent": "open_location_settings", "source": "human"},
+
+  {"id": "h-display-04", "text": "夜间模式字还是太小", "intent": "open_display_settings", "source": "human"},
+  {"id": "h-display-05", "text": "屏幕暗得看不清字", "intent": "open_display_settings", "source": "human"},
+  {"id": "h-display-06", "text": "字体粗细在哪调", "intent": "open_display_settings", "source": "human"},
+
+  {"id": "h-settings-04", "text": "恢复出厂设置在哪找", "intent": "open_settings", "source": "human"},
+  {"id": "h-settings-05", "text": "我要改语言进设置", "intent": "open_settings", "source": "human"},
+  {"id": "h-settings-06", "text": "那个小齿轮点进去", "intent": "open_settings", "source": "human"},
+  {"id": "h-settings-07", "text": "手机配置项都在哪", "intent": "open_settings", "source": "human"},
+  {"id": "r-settings-01", "text": "打开设制", "intent": "open_settings", "source": "asr_device", "recording": {"wav": "recordings/pending/settings_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}, "notes": "ASR：设置"},
+  {"id": "h-settings-08", "text": "帮我把控制面板调出来", "intent": "open_settings", "source": "human"},
+  {"id": "h-settings-09", "text": "系统管理那个界面怎么进", "intent": "open_settings", "source": "human"},
+
+  {"id": "h-app-05", "text": "跟老战友视频上微信", "intent": "open_app", "source": "human", "slots": {"app": "微信"}},
+  {"id": "h-app-06", "text": "拼多多上买米你帮我开", "intent": "open_app", "source": "human", "slots": {"app": "拼多多"}},
+  {"id": "h-app-07", "text": "京东查快递", "intent": "open_app", "source": "human", "slots": {"app": "京东"}},
+  {"id": "r-app-02", "text": "启动抖阴", "intent": "open_app", "source": "asr_device", "recording": {"wav": "recordings/pending/app_douyin_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}, "slots": {"app": "抖音"}},
+  {"id": "h-app-08", "text": "我要用淘宝买菜", "intent": "open_app", "source": "human", "slots": {"app": "淘宝"}},
+  {"id": "h-app-09", "text": "QQ里家族群消息看一下", "intent": "open_app", "source": "human", "slots": {"app": "QQ"}},
+
+  {"id": "h-alarm-05", "text": "每周一三五早上八点叫我锻炼", "intent": "set_alarm", "source": "human", "slots": {"time": "08:00", "title": "锻炼"}},
+  {"id": "h-alarm-06", "text": "十分钟后提醒我关火", "intent": "set_alarm", "source": "human", "slots": {"time": "+10m", "title": "关火"}},
+  {"id": "h-alarm-07", "text": "夜里三点起来吃药设个铃", "intent": "set_alarm", "source": "human", "slots": {"time": "03:00", "title": "吃药"}},
+  {"id": "r-alarm-02", "text": "明早七点叫我", "intent": "set_alarm", "source": "asr_device", "recording": {"wav": "recordings/pending/alarm_asr_02.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}, "notes": "与训练近义但非字面重叠"},
+  {"id": "h-alarm-08", "text": "午休十二点叫我", "intent": "set_alarm", "source": "human", "slots": {"time": "12:00"}},
+
+  {"id": "h-cal-04", "text": "记个事下周五去银行办事", "intent": "add_calendar_event", "source": "human", "slots": {"title": "去银行办事"}},
+  {"id": "h-cal-05", "text": "把同学聚餐写进日程", "intent": "add_calendar_event", "source": "human", "slots": {"title": "同学聚餐"}},
+  {"id": "h-cal-06", "text": "提醒我给花浇水每天", "intent": "add_calendar_event", "source": "human", "slots": {"title": "给花浇水"}},
+  {"id": "h-cal-07", "text": "社区活动周六十点别忘了", "intent": "add_calendar_event", "source": "human", "slots": {"title": "社区活动"}},
+  {"id": "r-cal-01", "text": "日程提醒明天交燃气费", "intent": "add_calendar_event", "source": "asr_device", "recording": {"wav": "recordings/pending/cal_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}, "slots": {"title": "交燃气费"}},
+
+  {"id": "h-camera-04", "text": "扫码识别不了开镜头试试", "intent": "open_camera", "source": "human"},
+  {"id": "h-camera-05", "text": "给孙子拍个照", "intent": "open_camera", "source": "human"},
+  {"id": "r-camera-01", "text": "开照相", "intent": "open_camera", "source": "asr_device", "recording": {"wav": "recordings/pending/camera_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+  {"id": "h-camera-06", "text": "视频通话前我想照照镜子", "intent": "open_camera", "source": "human"},
+
+  {"id": "h-gallery-03", "text": "上礼拜出游的照片在哪看", "intent": "open_gallery", "source": "human"},
+  {"id": "h-gallery-04", "text": "把截图找出来", "intent": "open_gallery", "source": "human"},
+  {"id": "h-gallery-05", "text": "相册里删错了我能恢复吗先打开", "intent": "open_gallery", "source": "human"},
+  {"id": "r-gallery-01", "text": "看看相册", "intent": "open_gallery", "source": "asr_device", "recording": {"wav": "recordings/pending/gallery_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+
+  {"id": "h-weather-app-03", "text": "查湿度得进哪个天气程序", "intent": "open_weather", "source": "human"},
+  {"id": "h-weather-app-04", "text": "把气象软件启动一下", "intent": "open_weather", "source": "human"},
+  {"id": "h-weather-app-05", "text": "我想滑动看一周预报打开那个天气", "intent": "open_weather", "source": "human"},
+  {"id": "r-weather-app-01", "text": "开天气应佣", "intent": "open_weather", "source": "asr_device", "recording": {"wav": "recordings/pending/weather_app_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}, "notes": "ASR：应用"},
+
+  {"id": "h-time-04", "text": "现在北京时间多少", "intent": "tell_time", "source": "human"},
+  {"id": "h-time-05", "text": "钟点到了没", "intent": "tell_time", "source": "human"},
+  {"id": "r-time-02", "text": "现在几点钟", "intent": "tell_time", "source": "asr_device", "recording": {"wav": "recordings/pending/time_asr_02.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+
+  {"id": "h-weather-q-05", "text": "后天下雨不我得带伞", "intent": "query_weather", "source": "human"},
+  {"id": "h-weather-q-06", "text": "紫外线强不强", "intent": "query_weather", "source": "human"},
+  {"id": "h-weather-q-07", "text": "广州现在几度", "intent": "query_weather", "source": "human"},
+  {"id": "r-weather-q-01", "text": "今天晒不晒", "intent": "query_weather", "source": "asr_device", "recording": {"wav": "recordings/pending/weather_q_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+
+  {"id": "h-dial-04", "text": "给儿子拨个视频", "intent": "dial_contact", "source": "human", "slots": {"contact": "儿子"}},
+  {"id": "h-dial-05", "text": "社区医生电话多少先打过去", "intent": "dial_contact", "source": "human", "notes": "边界：可能查号或拨号"},
+  {"id": "h-dial-06", "text": "闺女手机通一下", "intent": "dial_contact", "source": "human", "slots": {"contact": "女儿"}},
+  {"id": "r-dial-01", "text": "打电话给老班", "intent": "dial_contact", "source": "asr_device", "recording": {"wav": "recordings/pending/dial_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}, "slots": {"contact": "老伴"}, "notes": "ASR：老伴"},
+
+  {"id": "h-nav-03", "text": "走导航回咱家", "intent": "navigate_home", "source": "human"},
+  {"id": "h-nav-04", "text": "从医院回家怎么走", "intent": "navigate_home", "source": "human"},
+  {"id": "h-nav-05", "text": "家地址你知道吧导过去", "intent": "navigate_home", "source": "human"},
+
+  {"id": "h-sos-04", "text": "胸口疼快帮帮我", "intent": "emergency_help", "source": "human"},
+  {"id": "h-sos-05", "text": "有人晕倒了报警", "intent": "emergency_help", "source": "human"},
+  {"id": "r-sos-01", "text": "紧集呼救", "intent": "emergency_help", "source": "asr_device", "recording": {"wav": "recordings/pending/sos_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+  {"id": "h-sos-06", "text": "煤气味很重怎么办", "intent": "emergency_help", "source": "human", "notes": "边界：可能问答非sos"},
+
+  {"id": "h-family-03", "text": "我摔了起不来叫孩子", "intent": "ask_family_for_help", "source": "human"},
+  {"id": "h-family-04", "text": "让儿子下班回来看看", "intent": "ask_family_for_help", "source": "human"},
+  {"id": "h-family-05", "text": "联系亲属来搭把手", "intent": "ask_family_for_help", "source": "human"},
+  {"id": "r-family-01", "text": "喊家人来", "intent": "ask_family_for_help", "source": "asr_device", "recording": {"wav": "recordings/pending/family_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+
+  {"id": "h-health-03", "text": "坐地铁要亮那个绿码", "intent": "open_health_code", "source": "human"},
+  {"id": "h-health-04", "text": "行程卡和健康码在哪", "intent": "open_health_code", "source": "human"},
+  {"id": "h-health-05", "text": "社区要看核酸码帮我调出来", "intent": "open_health_code", "source": "human"},
+  {"id": "r-health-01", "text": "打开健康马", "intent": "open_health_code", "source": "asr_device", "recording": {"wav": "recordings/pending/health_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+  {"id": "h-health-06", "text": "防疫码出示", "intent": "open_health_code", "source": "human"},
+
+  {"id": "h-pay-03", "text": "小卖部扫码我手机哪个码", "intent": "open_payment_code", "source": "human"},
+  {"id": "h-pay-04", "text": "微信里那个收钱的二维码", "intent": "open_payment_code", "source": "human"},
+  {"id": "r-pay-01", "text": "打开付宽码", "intent": "open_payment_code", "source": "asr_device", "recording": {"wav": "recordings/pending/pay_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+  {"id": "h-pay-05", "text": "摊主让我亮码付款", "intent": "open_payment_code", "source": "human"},
+
+  {"id": "h-none-09", "text": "血压今天有点高", "intent": "none", "source": "human"},
+  {"id": "h-none-10", "text": "晚上吃面条还是饺子", "intent": "none", "source": "human"},
+  {"id": "h-none-11", "text": "帮我算算一百减三十七", "intent": "none", "source": "human"},
+  {"id": "h-none-12", "text": "这个字念什么", "intent": "none", "source": "human"},
+  {"id": "h-none-13", "text": "明天会降温吗我该穿啥", "intent": "none", "source": "human", "notes": "边界：像query_weather但偏闲聊决策"},
+  {"id": "h-none-14", "text": "把刚才那句话再说一遍", "intent": "none", "source": "human"},
+  {"id": "h-none-15", "text": "屏幕怎么又卡了", "intent": "none", "source": "human"},
+  {"id": "h-none-16", "text": "相册权限是什么意思", "intent": "none", "source": "human", "notes": "问句非打开相册"},
+  {"id": "h-none-17", "text": "闹钟怎么关", "intent": "none", "source": "human", "notes": "操作问句非设闹钟"},
+  {"id": "h-none-18", "text": "附近哪家药店近", "intent": "none", "source": "human"},
+  {"id": "h-none-19", "text": "讲个笑话听听", "intent": "none", "source": "human"},
+  {"id": "h-none-20", "text": "微信怎么加好友", "intent": "none", "source": "human", "notes": "教程问句非open_app"},
+  {"id": "r-none-02", "text": "来段新闻", "intent": "none", "source": "asr_device", "recording": {"wav": "recordings/pending/none_news_asr_01.wav", "status": "pending", "device": "Snapdragon 835", "asr_engine": "doubao"}},
+  {"id": "h-none-21", "text": "今天心情不错", "intent": "none", "source": "human"},
+  {"id": "h-none-22", "text": "取消吧不用了", "intent": "none", "source": "human", "notes": "对话控制非系统技能"}
+]
