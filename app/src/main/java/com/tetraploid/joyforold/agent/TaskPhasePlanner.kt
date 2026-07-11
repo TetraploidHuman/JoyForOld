@@ -170,7 +170,13 @@ object TaskPhasePlanner {
             "open_weather" -> "打开天气"
             "open_health_code" -> "打开健康码"
             "open_payment_code" -> "打开付款码"
-            "open_font_settings" -> "打开字体设置"
+            "open_font_settings", "open_display_settings" -> "打开显示设置"
+            "open_settings" -> "打开系统设置"
+            "open_wifi_settings" -> "打开无线网络"
+            "open_bluetooth_settings" -> "打开蓝牙"
+            "open_sound_settings" -> "打开声音设置"
+            "open_mobile_data_settings" -> "打开移动数据"
+            "open_location_settings" -> "打开定位设置"
             "navigate_home" -> "导航回家"
             "dial_contact" -> "拨打${action.targetText.orEmpty()}"
             "send_sms" -> "给${action.targetText.orEmpty()}发短信"
@@ -261,7 +267,9 @@ object TaskPhaseTracker {
         val action = actionName?.lowercase().orEmpty()
         val keyword = when (action) {
             "open_app", "list_apps", "open_camera", "open_gallery", "open_weather",
-            "open_health_code", "open_payment_code", "open_font_settings",
+            "open_health_code", "open_payment_code", "open_font_settings", "open_display_settings",
+            "open_settings", "open_wifi_settings", "open_bluetooth_settings", "open_sound_settings",
+            "open_mobile_data_settings", "open_location_settings",
             -> "打开"
             "find_on_page" -> "搜索"
             "click" -> phases.firstOrNull { it.label.startsWith("找到") }?.label?.take(2) ?: "点击"

@@ -14,12 +14,18 @@ import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
 import com.tetraploid.joyforold.util.NetworkStatus
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
 object SystemIntentExecutor {
+    private const val DEFAULT_EVENT_DURATION_MS = 60L * 60L * 1000L
+
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
@@ -39,7 +45,14 @@ object SystemIntentExecutor {
             "open_weather" -> openWeather(context)
             "open_health_code" -> openByAlias(context, "支付宝", "已尝试打开健康码入口应用（支付宝）")
             "open_payment_code" -> openByAlias(context, "支付宝", "已尝试打开付款码入口应用（支付宝）")
-            "open_font_settings" -> launchSimpleIntent(context, Intent(Settings.ACTION_DISPLAY_SETTINGS), "已打开显示设置")
+            "open_font_settings", "open_display_settings" -> openDisplaySettings(context)
+            "open_settings" -> launchSimpleIntent(context, Intent(Settings.ACTION_SETTINGS), "已打开系统设置")
+            "open_wifi_settings" -> launchSimpleIntent(context, Intent(Settings.ACTION_WIFI_SETTINGS), "已打开无线网络设置")
+            "open_bluetooth_settings" -> launchSimpleIntent(context, Intent(Settings.ACTION_BLUETOOTH_SETTINGS), "已打开蓝牙设置")
+            "open_sound_settings" -> launchSimpleIntent(context, Intent(Settings.ACTION_SOUND_SETTINGS), "已打开声音设置")
+            "open_mobile_data_settings" -> openMobileDataSettings(context)
+            "open_location_settings" -> launchSimpleIntent(context, Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS), "已打开定位设置")
+            "open_app" -> openApp(context, targetText)
             "navigate_home" -> navigateHome(context)
             "read_unread_messages" -> readUnreadMessages(context)
             "tell_time" -> tellTime()
@@ -84,13 +97,99 @@ object SystemIntentExecutor {
         return launchSimpleIntent(context, intent, "已打开闹钟设置：${hm.first}:${hm.second.toString().padStart(2, '0')}")
     }
 
+    private fun openDisplaySettings(context: Context): ActionExecutionResult {
+        return launchSimpleIntent(context, Intent(Settings.ACTION_DISPLAY_SETTINGS), "已打开显示设置")
+    }
+
+    private fun openMobileDataSettings(context: Context): ActionExecutionResult {
+        val intents = listOf(
+            Intent(Settings.ACTION_DATA_ROAMING_SETTINGS),
+            Intent(Settings.ACTION_WIRELESS_SETTINGS),
+            Intent(Settings.ACTION_SETTINGS),
+        )
+        for (intent in intents) {
+            val result = launchSimpleIntent(context, intent, "已打开移动数据设置")
+            if (result.success) return result
+        }
+        return ActionExecutionResult(false, "暂时无法打开移动数据设置")
+    }
+
+    private fun openApp(context: Context, targetText: String?): ActionExecutionResult {
+        val query = targetText?.trim().orEmpty()
+        if (query.isEmpty()) {
+            return ActionExecutionResult(false, "打开失败", detail = "缺少应用名称")
+        }
+
+        val packageName = InstalledAppResolver.resolvePackage(context, query)
+            ?: return ActionExecutionResult(
+                success = false,
+                summary = "未识别应用：$query",
+                detail = buildString {
+                    val suggestions = InstalledAppResolver.suggestMatches(context, query, limit = 6)
+                        .joinToString("、") { it.label }
+                    append("请说已安装应用的中文名称。")
+                    if (suggestions.isNotBlank()) append("\n你可能想找：$suggestions")
+                },
+                suggestions = listOf("换用桌面图标上的应用名称重试"),
+            )
+
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+            ?: return ActionExecutionResult(
+                success = false,
+                summary = "无法打开：$query",
+                detail = "应用 $packageName 没有桌面启动入口",
+            )
+
+        return launchSimpleIntent(context, launchIntent, "已打开：$query")
+    }
+
     private fun addCalendarEvent(context: Context, targetText: String?, inputText: String?): ActionExecutionResult {
         val title = targetText?.trim().orEmpty().ifBlank { "日程提醒" }
-        val desc = inputText?.trim().orEmpty()
+        val encoded = parseCalendarInput(inputText)
         val intent = Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI)
             .putExtra(CalendarContract.Events.TITLE, title)
-            .putExtra(CalendarContract.Events.DESCRIPTION, desc)
-        return launchSimpleIntent(context, intent, "已打开日历新建事件")
+            .putExtra(CalendarContract.Events.DESCRIPTION, encoded.notes)
+        encoded.beginMs?.let { begin ->
+            intent.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
+            intent.putExtra(CalendarContract.EXTRA_EVENT_END_TIME, begin + DEFAULT_EVENT_DURATION_MS)
+        }
+        val summary = if (encoded.beginMs != null) {
+            "已打开日历新建事件：$title（时间已预填）"
+        } else {
+            "已打开日历新建事件"
+        }
+        return launchSimpleIntent(context, intent, summary)
+    }
+
+    private data class CalendarInput(
+        val notes: String,
+        val beginMs: Long? = null,
+    )
+
+    private fun parseCalendarInput(inputText: String?): CalendarInput {
+        val text = inputText?.trim().orEmpty()
+        val marker = "@t="
+        val markerIndex = text.indexOf(marker)
+        if (markerIndex < 0) return CalendarInput(notes = text)
+        val isoPart = text.substring(markerIndex + marker.length)
+        val separatorIndex = isoPart.indexOf('|')
+        val iso = if (separatorIndex >= 0) isoPart.substring(0, separatorIndex).trim() else isoPart.trim()
+        val notes = if (separatorIndex >= 0) isoPart.substring(separatorIndex + 1).trim() else ""
+        return CalendarInput(notes = notes, beginMs = parseEventBeginMs(iso))
+    }
+
+    private fun parseEventBeginMs(iso: String): Long? {
+        if (iso.isBlank()) return null
+        return runCatching {
+            OffsetDateTime.parse(iso, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                .toInstant()
+                .toEpochMilli()
+        }.getOrNull() ?: runCatching {
+            LocalDateTime.parse(iso, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        }.getOrNull()
     }
 
     private fun openWeather(context: Context): ActionExecutionResult {

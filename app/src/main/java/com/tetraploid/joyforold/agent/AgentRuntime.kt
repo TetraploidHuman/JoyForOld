@@ -1264,6 +1264,7 @@ object AgentRuntime {
                 val result = orchestrator.run(
                     userCommand = effectiveCommand,
                     apiKey = current.apiKey.ifBlank { apiKeyStore?.getApiKey().orEmpty() },
+                    appContext = application,
                     runContext = context,
                     resumePendingConfirm = shouldResumePending,
                     onProgress = { step, message ->

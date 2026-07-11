@@ -1,10 +1,11 @@
 package com.tetraploid.joyforold.agent
 
+import android.content.Context
 import com.tetraploid.joyforold.preset.PresetCommand
 import com.tetraploid.joyforold.preset.PresetTextNormalizer
 
 /**
- * 统一指令路由：模板 / 本地正则 / 照护者预设 / AI 分类，按置信度决策。
+ * 统一指令路由：模板 / 本地系统快捷 / AI 系统意图 / 本地结构指令 / 照护者预设 / AI 分类，按置信度决策。
  */
 object CommandRouteResolver {
     const val AUTO_EXECUTE_THRESHOLD = 0.85
@@ -22,6 +23,7 @@ object CommandRouteResolver {
         apiKey: String,
         deepSeekClient: DeepSeekClient,
         presetCommands: List<PresetCommand> = emptyList(),
+        appContext: Context? = null,
     ): Route? {
         val trimmed = command.trim()
         if (trimmed.isBlank()) return null
@@ -30,6 +32,23 @@ object CommandRouteResolver {
 
         ElderTaskTemplateMatcher.match(trimmed)?.let { steps ->
             candidates += Route(steps, source = "template", confidence = 1.0)
+        }
+
+        LocalSystemShortcutResolver.match(trimmed, appContext)?.let { shortcut ->
+            candidates += Route(
+                steps = shortcut.steps,
+                source = "local_system",
+                confidence = shortcut.confidence,
+            )
+        }
+
+        SystemIntentAiResolver.resolve(trimmed, apiKey, deepSeekClient)?.let { resolved ->
+            candidates += Route(
+                steps = resolved.steps,
+                source = "system_ai",
+                confidence = resolved.confidence,
+                clarifyMessage = resolved.clarifyMessage,
+            )
         }
 
         LocalCommandParser.parse(trimmed)?.let { steps ->
@@ -59,6 +78,13 @@ object CommandRouteResolver {
     }
 
     fun buildClarifyMessage(command: String, route: Route): String {
+        route.clarifyMessage?.trim()?.takeIf { it.isNotBlank() }?.let { aiHint ->
+            return if (aiHint.contains("确认")) {
+                aiHint
+            } else {
+                "$aiHint 请说「确认」或「取消」。"
+            }
+        }
         val hint = route.steps.lastOrNull { it.action.equals("finish", ignoreCase = true) }
             ?.message
             ?.trim()

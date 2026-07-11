@@ -2,6 +2,8 @@ package com.tetraploid.joyforold.agent
 
 
 
+import android.content.Context
+
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 
 import com.tetraploid.joyforold.preset.PresetCommandStore
@@ -112,6 +114,8 @@ class AgentOrchestrator(
 
         apiKey: String,
 
+        appContext: Context? = null,
+
         runContext: AgentRunContext = AgentRunContext(),
 
         onProgress: ((Int, String) -> Unit)? = null,
@@ -132,11 +136,45 @@ class AgentOrchestrator(
 
         val service = JoyAccessibilityService.instance
 
-            ?: return AgentRunResult(
+        val executionContext = service ?: appContext
+
+        if (executionContext == null) {
+
+            return AgentRunResult(
+
                 false,
+
                 "无障碍服务未连接，请回到应用稍候或重新打开应用后再试",
+
                 emptyList(),
+
             )
+
+        }
+
+
+
+        if (service == null && pendingState != null) {
+
+            return AgentRunResult(
+
+                false,
+
+                "无障碍服务未连接，请回到应用稍候或重新打开应用后再试",
+
+                emptyList(),
+
+            )
+
+        }
+
+
+
+        if (service == null) {
+
+            return runSystemIntentOnly(command, apiKey, executionContext, runContext, onProgress)
+
+        }
 
 
 
@@ -190,7 +228,7 @@ class AgentOrchestrator(
 
         val presets = presetStore?.loadPresets().orEmpty()
 
-        CommandRouteResolver.resolve(command, apiKey, deepSeekClient, presets)?.let { route ->
+        CommandRouteResolver.resolve(command, apiKey, deepSeekClient, presets, appContext = executionContext)?.let { route ->
 
             route.clarifyMessage?.let { clarify ->
 
@@ -198,7 +236,7 @@ class AgentOrchestrator(
 
             }
 
-            val routeResult = executeLocalSteps(service, route.steps, command, runContext)
+            val routeResult = executeLocalSteps(executionContext, service, route.steps, command, runContext)
 
             if (routeResult.success || routeResult.waitingForUserConfirm) {
 
@@ -322,7 +360,7 @@ class AgentOrchestrator(
 
                 } else {
 
-                    executeLocalSteps(service, steps, pending.originalCommand, runContext)
+                    executeLocalSteps(service, service, steps, pending.originalCommand, runContext)
 
                 }
 
@@ -390,7 +428,14 @@ class AgentOrchestrator(
 
                 } else {
 
-                    run(deferred, apiKey, runContext, onProgress, resumePendingConfirm = false)
+                    run(
+                        userCommand = deferred,
+                        apiKey = apiKey,
+                        appContext = service,
+                        runContext = runContext,
+                        onProgress = onProgress,
+                        resumePendingConfirm = false,
+                    )
 
                 }
 
@@ -580,7 +625,9 @@ class AgentOrchestrator(
 
     private suspend fun executeGuardedAction(
 
-        service: JoyAccessibilityService,
+        context: Context,
+
+        service: JoyAccessibilityService?,
 
         session: AgentConversationSession,
 
@@ -606,13 +653,23 @@ class AgentOrchestrator(
 
 
 
-        val currentSnapshot = snapshot ?: service.mergeSnapshots(service.captureStructuredSnapshots())
+        val currentSnapshot = snapshot ?: service?.mergeSnapshots(service.captureStructuredSnapshots())
 
         RiskScreenGuard.blockReason(currentSnapshot, action)?.let { return GuardOutcome.Blocked(it) }
 
 
 
-        val result = AgentToolRegistry.execute(service, action)
+        if (service == null && !AgentToolRegistry.isSystemIntentAction(action.action)) {
+
+            return GuardOutcome.Blocked("需要无障碍服务才能执行：${action.action}")
+
+        }
+
+
+
+        val result = AgentToolRegistry.executeSystemIntent(context, action)
+
+            ?: service!!.executeWithResult(action)
 
         return GuardOutcome.Executed(result)
 
@@ -924,7 +981,7 @@ class AgentOrchestrator(
 
 
 
-                when (val outcome = executeGuardedAction(service, session, action, previousSnapshot)) {
+                when (val outcome = executeGuardedAction(service, service, session, action, previousSnapshot)) {
 
                     is GuardOutcome.Blocked -> {
 
@@ -1372,9 +1429,75 @@ class AgentOrchestrator(
 
 
 
+    private suspend fun runSystemIntentOnly(
+
+        command: String,
+
+        apiKey: String,
+
+        context: Context,
+
+        runContext: AgentRunContext,
+
+        onProgress: ((Int, String) -> Unit)?,
+
+    ): AgentRunResult {
+
+        val presets = presetStore?.loadPresets().orEmpty()
+
+        CommandRouteResolver.resolve(command, apiKey, deepSeekClient, presets, appContext = context)?.let { route ->
+
+            if (!AgentToolRegistry.isSystemIntentOnly(route.steps)) {
+
+                return AgentRunResult(
+
+                    false,
+
+                    "此操作需要无障碍服务，请回到应用开启后再试",
+
+                    emptyList(),
+
+                )
+
+            }
+
+            route.clarifyMessage?.let { clarify ->
+
+                return AgentRunResult(
+
+                    false,
+
+                    clarify,
+
+                    emptyList(),
+
+                )
+
+            }
+
+            return executeLocalSteps(context, service = null, route.steps, command, runContext)
+
+        }
+
+        return AgentRunResult(
+
+            false,
+
+            "无障碍服务未连接，请回到应用稍候或重新打开应用后再试",
+
+            emptyList(),
+
+        )
+
+    }
+
+
+
     private suspend fun executeLocalSteps(
 
-        service: JoyAccessibilityService,
+        context: Context,
+
+        service: JoyAccessibilityService?,
 
         steps: List<AgentAction>,
 
@@ -1398,7 +1521,7 @@ class AgentOrchestrator(
 
         val localSession = AgentConversationSession(rootCommand = userCommand)
 
-        var previousSnapshot = service.mergeSnapshots(service.captureStructuredSnapshots())
+        var previousSnapshot = service?.mergeSnapshots(service.captureStructuredSnapshots())
 
         var lastInfoSummary: String? = null
 
@@ -1466,7 +1589,7 @@ class AgentOrchestrator(
 
             stepNo++
 
-            when (val outcome = executeGuardedAction(service, localSession, action, previousSnapshot)) {
+            when (val outcome = executeGuardedAction(context, service, localSession, action, previousSnapshot)) {
 
                 is GuardOutcome.NeedsConfirm -> {
 
@@ -1542,7 +1665,7 @@ class AgentOrchestrator(
 
                     localSession.recordStep(stepNo, action, result, "")
 
-                    previousSnapshot = service.mergeSnapshots(service.captureStructuredSnapshots())
+                    previousSnapshot = service?.mergeSnapshots(service.captureStructuredSnapshots())
 
                         ?: previousSnapshot
 

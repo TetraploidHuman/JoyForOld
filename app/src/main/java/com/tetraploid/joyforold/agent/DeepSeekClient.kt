@@ -202,6 +202,73 @@ class DeepSeekClient(
         intent to confidence
     }
 
+    suspend fun classifySystemIntent(
+        apiKey: String,
+        utterance: String,
+    ): SystemIntentAiResolver.Classification? = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext null
+        val trimmed = utterance.trim()
+        if (trimmed.isBlank()) return@withContext null
+
+        val nowHint = com.tetraploid.joyforold.system.TimeFormatter.spokenNow()
+        val body = baseRequestBody().apply {
+            put("max_tokens", 180)
+            put(
+                "messages",
+                JSONArray().apply {
+                    put(
+                        JSONObject().put("role", "system").put(
+                            "content",
+                            """
+                            你是老年手机助手的「系统能力理解器」，负责从口语中识别闹钟/日程意图并提取参数。
+                            当前时间参考：$nowHint
+
+                            意图定义：
+                            - set_alarm：设闹钟、到点叫醒、定时响铃（如「明早七点叫我」「7点半闹钟」）
+                            - add_calendar_event：日历/日程/约会/记事提醒（如「明天下午三点提醒开会」「记一下周五体检」）
+                            - none：不属于以上，或只是闲聊/查询时间天气/打开应用
+
+                            参数规则：
+                            - time_hhmm：闹钟用，24 小时制 HH:mm（如 07:00、19:30）；相对时间请结合当前时间换算
+                            - title：简短标题（吃药、开会、体检…）
+                            - notes：补充说明，可为空
+                            - event_time_iso：日程开始时间，ISO-8601（如 2026-07-11T15:00:00+08:00）；相对日期请换算
+                            - clarify：缺关键信息时用一句话追问（如缺闹钟时间）；信息足够则留空
+                            - confidence：0~1；不确定时 intent=none 或降低 confidence
+
+                            严格返回 JSON，不要多余文字：
+                            {"intent":"set_alarm|add_calendar_event|none","confidence":0.0,"time_hhmm":"","title":"","notes":"","event_time_iso":"","clarify":""}
+                            """.trimIndent(),
+                        ),
+                    )
+                    put(
+                        JSONObject().put("role", "user").put(
+                            "content",
+                            "用户原话：$trimmed",
+                        ),
+                    )
+                },
+            )
+        }
+
+        val content = try {
+            postChatRaw(apiKey, body)
+        } catch (_: Exception) {
+            return@withContext null
+        }
+
+        val json = runCatching { JSONObject(content) }.getOrNull() ?: return@withContext null
+        SystemIntentAiResolver.Classification(
+            intent = json.optString("intent").ifBlank { "none" },
+            confidence = json.optDouble("confidence", 0.0),
+            timeHhmm = json.optString("time_hhmm").ifBlank { null },
+            title = json.optString("title").ifBlank { null },
+            notes = json.optString("notes").ifBlank { null },
+            eventTimeIso = json.optString("event_time_iso").ifBlank { null },
+            clarify = json.optString("clarify").ifBlank { null },
+        )
+    }
+
     private fun buildSystemPrompt(keyMemories: String): String = """
         你是手机操作 Agent，工作方式类似 Claude Code / Codex：观察页面 → 选一步工具 → 看结果 → 再观察。
         ${AgentToolRegistry.descriptionsForPrompt()}
@@ -214,6 +281,8 @@ class DeepSeekClient(
         - 每次返回 **actions 数组（1~${AgentPlanParser.MAX_PLANNED_STEPS} 步）** 或单步 action；**action 必须在工具白名单内**，只允许：${AgentToolRegistry.toolNames.joinToString()}；基于页面快览和变化决策，禁止让用户描述页面。
         - **同一屏内**才可规划 2 步；open_app、list_apps、finish、read_tree、send、拨号/发短信必须 **单独 1 步**。
         - 能走系统级动作时优先走系统动作（dial_contact/send_sms/set_alarm/add_calendar_event/open_*），避免纯 UI 点按。
+        - **闹钟/日程**：必须用 set_alarm 或 add_calendar_event，禁止 open_app(时钟/日历)+click；时间放 target_text（HH:mm），标题/备注放 input_text。
+        - **系统设置/打开应用**：优先 open_wifi_settings/open_bluetooth_settings/open_settings/open_app 等系统动作，不要进设置 App 点按。
         - 找联系人：优先可见列表模糊匹配（同音字、谐音、号码片段），直接 click；找不到先 scroll_down 或 swipe_down。
         - 需要切换应用时：不确定应用名先 list_apps（可带 target_text 筛选），再用 open_app；target_text **必须**与 list_apps 返回的名称逐字一致，禁止猜测。
         - 若 open_app 失败，先 list_apps 核对名称，或根据失败提示中的「你可能想找」换用准确名称，不要重复同一错误名称。

@@ -7,7 +7,6 @@ object LocalCommandParser {
     private val sendInChatPattern = Regex("""^(发送|发消息|发一条消息)[:：\s]+(.+)$""", RegexOption.IGNORE_CASE)
     private val confirmLastSendPattern =
         Regex("""^(发送上一条消息|发送刚才的消息|确认发送)$""", RegexOption.IGNORE_CASE)
-    private val alarmPattern = Regex("""^(设(个|置)?闹钟|提醒我)\s*(\d{1,2}:\d{2})\s*(.*)$""")
     private val smsPattern = Regex("""^(给)?(.+?)(发短信|短信)[:：\s]+(.+)$""")
     private val weatherQueryPattern = Regex("""^(查看|查|今天|现在)?天气(怎么样|如何)?$""")
     private val weatherCityPattern = Regex("""^(.+?)的天气(怎么样|如何)?$""")
@@ -49,17 +48,6 @@ object LocalCommandParser {
                 return listOf(
                     AgentAction(action = "send_sms", targetText = target, inputText = body),
                     AgentAction(action = "finish", message = "已为 $target 准备短信发送页面", finished = true),
-                )
-            }
-        }
-
-        alarmPattern.find(text)?.let { match ->
-            val time = match.groupValues[3].trim()
-            val label = match.groupValues[4].trim()
-            if (time.isNotBlank()) {
-                return listOf(
-                    AgentAction(action = "set_alarm", targetText = time, inputText = label),
-                    AgentAction(action = "finish", message = "已打开闹钟设置：$time", finished = true),
                 )
             }
         }

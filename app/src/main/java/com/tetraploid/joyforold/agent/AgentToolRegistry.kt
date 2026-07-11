@@ -4,12 +4,31 @@ import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.system.SystemIntentExecutor
 
 object AgentToolRegistry {
+    private val systemIntentActions = setOf(
+        "dial_contact", "send_sms", "set_alarm", "add_calendar_event",
+        "open_camera", "open_gallery", "open_weather", "open_app",
+        "open_health_code", "open_payment_code", "open_font_settings", "open_display_settings",
+        "open_settings", "open_wifi_settings", "open_bluetooth_settings", "open_sound_settings",
+        "open_mobile_data_settings", "open_location_settings",
+        "navigate_home", "read_unread_messages", "tell_time", "query_weather",
+        "ask_family_for_help", "emergency_help",
+    )
+
+    fun isSystemIntentAction(action: String): Boolean =
+        action.lowercase() in systemIntentActions
+
+    fun isSystemIntentOnly(steps: List<AgentAction>): Boolean =
+        steps.filterNot { it.action.equals("finish", ignoreCase = true) }
+            .all { isSystemIntentAction(it.action) }
+
     val toolNames: List<String> = listOf(
         "click", "type", "send", "scroll_down", "scroll_up", "back", "home", "wait",
         "find_on_page", "read_tree", "swipe_down", "list_apps", "open_app", "finish",
         "dial_contact", "send_sms", "set_alarm", "add_calendar_event",
-        "open_camera", "open_gallery", "open_weather",
-        "open_health_code", "open_payment_code", "open_font_settings",
+        "open_camera", "open_gallery", "open_weather", "open_app",
+        "open_health_code", "open_payment_code", "open_font_settings", "open_display_settings",
+        "open_settings", "open_wifi_settings", "open_bluetooth_settings", "open_sound_settings",
+        "open_mobile_data_settings", "open_location_settings",
         "navigate_home", "read_unread_messages", "tell_time", "query_weather",
         "ask_family_for_help", "emergency_help",
     )
@@ -22,7 +41,8 @@ object AgentToolRegistry {
         - scroll_down / scroll_up: 在列表内滚动
         - swipe_down: 全屏下滑手势（列表滚不动时用）
         - list_apps: 读取本机已安装可打开应用；不确定应用名时先调用。target_text 可选，用于按关键词筛选
-        - open_app: 打开应用，target_text 填应用中文名（须与 list_apps 返回的名称逐字一致）
+        - open_app: 用系统启动器打开应用，target_text 填应用中文名
+        - open_settings / open_wifi_settings / open_bluetooth_settings / open_sound_settings / open_mobile_data_settings / open_location_settings / open_display_settings: 打开对应系统设置页
         - dial_contact: 系统拨号，target_text 填联系人名或手机号
         - send_sms: 系统短信，target_text 填联系人，input_text 填短信内容
         - set_alarm: 系统闹钟，target_text 填时间（如 7:30），input_text 可填提醒标题
@@ -51,41 +71,18 @@ object AgentToolRegistry {
     suspend fun execute(
         service: JoyAccessibilityService,
         action: AgentAction,
-    ): ActionExecutionResult {
-        return when (action.action.lowercase()) {
-            "find_on_page" -> service.findOnPage(action.targetText)
-            "read_tree" -> service.readTreeSnippet()
-            "list_apps" -> service.listAppsResult(action.targetText)
-            "swipe_down" -> {
-                val msg = service.swipeDown()
-                ActionExecutionResult(
-                    success = !msg.contains("失败") && !msg.contains("取消"),
-                    summary = msg,
-                )
-            }
-            "dial_contact",
-            "send_sms",
-            "set_alarm",
-            "add_calendar_event",
-            "open_camera",
-            "open_gallery",
-            "open_weather",
-            "open_health_code",
-            "open_payment_code",
-            "open_font_settings",
-            "navigate_home",
-            "read_unread_messages",
-            "tell_time",
-            "query_weather",
-            "ask_family_for_help",
-            "emergency_help",
-            -> SystemIntentExecutor.execute(
-                context = service,
-                action = action.action,
-                targetText = action.targetText,
-                inputText = action.inputText,
-            )
-            else -> service.executeWithResult(action)
-        }
+    ): ActionExecutionResult = executeSystemIntent(service, action) ?: service.executeWithResult(action)
+
+    suspend fun executeSystemIntent(
+        context: android.content.Context,
+        action: AgentAction,
+    ): ActionExecutionResult? {
+        if (!isSystemIntentAction(action.action)) return null
+        return SystemIntentExecutor.execute(
+            context = context,
+            action = action.action,
+            targetText = action.targetText,
+            inputText = action.inputText,
+        )
     }
 }
