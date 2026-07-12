@@ -32,6 +32,11 @@ volc.asr.access_token=
 # volc.bigasr.sauc.duration  或  volc.seedasr.sauc.duration
 volc.asr.resource_id=volc.bigasr.sauc.duration
 
+# 家人远程协助后端（Ktor + H2）
+# 模拟器访问本机：10.0.2.2；真机请改成电脑局域网 IP
+assist.server.url=http://10.0.2.2:8787
+assist.server.ws=ws://10.0.2.2:8787/ws
+
 # sdk.dir 无需填写：构建时会按以下顺序自动检测 Android SDK
 # 1. local.properties 里的 sdk.dir（若已填写）
 # 2. 环境变量 ANDROID_SDK_ROOT / ANDROID_HOME

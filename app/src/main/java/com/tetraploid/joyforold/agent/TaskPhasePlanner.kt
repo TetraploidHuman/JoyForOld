@@ -36,6 +36,7 @@ object TaskPhasePlanner {
 
         planFromCategoryPrefix(text)?.let { return it }
         ElderTaskTemplateMatcher.match(text)?.let { return planFromActions(it) }
+        SystemIntentLocalParser.parse(text)?.let { return planFromActions(it) }
         LocalCommandParser.parse(text)?.let { return planFromActions(it) }
         parseSendFlow(text)?.let { return it }
 

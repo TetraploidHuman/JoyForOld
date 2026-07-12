@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">UITreeTest</string>
+    <string name="accessibility_service_label">UITreeTest 无障碍树</string>
+    <string name="accessibility_service_description">读取并完整输出当前屏幕的无障碍 UI 结构树，仅供调试使用。</string>
+    <string name="open_accessibility_settings">开启无障碍服务</string>
+    <string name="refresh">刷新 UI 树</string>
+    <string name="copy">复制到剪贴板</string>
+    <string name="logcat">输出到 Logcat</string>
+    <string name="auto_refresh_on">自动刷新：开</string>
+    <string name="auto_refresh_off">自动刷新：关</string>
+    <string name="service_not_connected">无障碍服务未连接，请先在系统设置中开启「UITreeTest 无障碍树」。</string>
+    <string name="copied">已复制到剪贴板</string>
+    <string name="logged">已写入 Logcat（tag=UiTreeTest）</string>
+</resources>

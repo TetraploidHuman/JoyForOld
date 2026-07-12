@@ -704,91 +704,14 @@ class AgentOrchestrator(
 
 
 
-    private sealed class GuardOutcome {
-
-        data class Blocked(val reason: String) : GuardOutcome()
-
-        data class NeedsConfirm(val action: AgentAction) : GuardOutcome()
-
-        data class Executed(val result: ActionExecutionResult) : GuardOutcome()
-
-    }
-
-
-
     private suspend fun executeGuardedAction(
-
         context: Context,
-
         service: JoyAccessibilityService?,
-
         session: AgentConversationSession,
-
         action: AgentAction,
-
         snapshot: StructuredPageSnapshot?,
-
-    ): GuardOutcome {
-
-        AgentActionWhitelist.blockReason(action.action)?.let { return GuardOutcome.Blocked(it) }
-
-
-
-        AgentActionGuard.sensitiveConfirmOverride(session, action)?.let {
-
-            return GuardOutcome.NeedsConfirm(it)
-
-        }
-
-
-
-        val currentSnapshot = snapshot ?: service?.mergeSnapshots(service.captureStructuredSnapshots())
-
-        AgentActionGuard.blockedRepeatReason(
-            session,
-            action,
-            pageUnchangedSinceLastStep = session.stepRecords.lastOrNull()
-                ?.pageDiff
-                ?.let(AgentActionGuard::pageDiffIndicatesNoChange)
-                ?: false,
-            a11yUnavailable = PageReadiness.needsVisionFallback(currentSnapshot),
-        )?.let { return GuardOutcome.Blocked(it) }
-
-        PageReadiness.needsVisionFallback(currentSnapshot).takeIf { it }?.let {
-            AgentActionGuard.blockedInVisionMode(action)?.let { reason ->
-                return GuardOutcome.Blocked(reason)
-            }
-        }
-
-        if (action.action.equals("open_app", ignoreCase = true) && service != null) {
-            val targetPkg = InstalledAppResolver.resolvePackage(
-                context,
-                action.targetText.orEmpty(),
-            )
-            if (!targetPkg.isNullOrBlank() && currentSnapshot?.packageName == targetPkg) {
-                return GuardOutcome.Blocked(
-                    "目标应用已在当前前台（$targetPkg），请勿重复 open_app；请根据截图继续 tap/type。",
-                )
-            }
-        }
-
-        RiskScreenGuard.blockReason(currentSnapshot, action)?.let { return GuardOutcome.Blocked(it) }
-
-
-
-        AgentToolRegistry.executeSystemIntent(context, action)?.let {
-            return GuardOutcome.Executed(it)
-        }
-
-        if (service == null) {
-            return GuardOutcome.Blocked("需要无障碍服务才能执行：${action.action}")
-        }
-
-        val result = AgentToolRegistry.execute(context, service, action)
-
-        return GuardOutcome.Executed(result)
-
-    }
+    ): AgentGuardedActionExecutor.Outcome =
+        AgentGuardedActionExecutor.execute(context, service, session, action, snapshot)
 
 
 
@@ -864,8 +787,16 @@ class AgentOrchestrator(
 
         suspend fun captureObservation(phase: String = "规划前"): PageObservationPayload {
 
+            suspend fun maybeActivateVisionAgent(payload: PageObservationPayload) {
+                if (payload.visionMode) {
+                    AgentRuntime.activateVisionAgentMode()
+                }
+            }
+
             suspend fun captureVisionScreenshot(): String? =
-                VisionOverlayGuard.withHidden { service.captureScreenshotBase64() }
+                VisionOverlayGuard.withHiddenForCapture {
+                    service.captureScreenshotBase64(forceFresh = true)
+                }
 
             if (pageContextNeed == IntentCapabilityMatrix.PageContextNeed.NONE) {
 
@@ -886,7 +817,7 @@ class AgentOrchestrator(
             val merged = service.captureBestStructuredSnapshot()
             if (merged == null) {
                 val screenshot = captureVisionScreenshot()
-                val visionMode = !screenshot.isNullOrBlank()
+                val visionMode = PageReadiness.shouldEnterVisionMode(null, screenshot)
                 val currentVisionFp = VisionScreenChange.fingerprint(screenshot)
                 val baseDiff = "无法读取页面"
                 val pageDiff = if (visionMode) {
@@ -913,7 +844,7 @@ class AgentOrchestrator(
                     a11yUnavailable = true,
                     screenshotChars = screenshot?.length ?: 0,
                 )
-                return PageObservationPayload(
+                val payload = PageObservationPayload(
                     pageContext = if (visionMode) {
                         "无法读取无障碍树，已附带屏幕截图供视觉识别。"
                     } else {
@@ -926,16 +857,15 @@ class AgentOrchestrator(
                     visionMode = visionMode,
                     a11yUnavailable = true,
                 )
+                maybeActivateVisionAgent(payload)
+                return payload
             }
 
             val enriched = enrichWithAppHints(merged)
             val readable = PageReadiness.isReadable(enriched)
             val visionFallback = PageReadiness.needsVisionFallback(enriched)
             val screenshot = if (visionFallback) captureVisionScreenshot() else null
-            val visionOnlyApp = VisionOnlyApps.isVisionOnly(enriched.packageName)
-            val visionMode = visionFallback && (
-                !screenshot.isNullOrBlank() || visionOnlyApp
-                )
+            val visionMode = PageReadiness.shouldEnterVisionMode(enriched, screenshot)
 
             val currentVisionFp = VisionScreenChange.fingerprint(screenshot)
 
@@ -972,7 +902,7 @@ class AgentOrchestrator(
                 screenshotChars = screenshot?.length ?: 0,
             )
 
-            return PageObservationPayload(
+            val payload = PageObservationPayload(
                 pageContext = PageContextRedactor.redact(
                     buildString {
                         if (visionFallback) {
@@ -984,13 +914,17 @@ class AgentOrchestrator(
                             )
                             appendLine()
                             appendLine(
-                                "【系统提示】当前应用不提供可用无障碍 UI 信息；" +
-                                    "请以截图（若有）识别界面，使用 tap/type/send，禁止 click/read_tree/find_on_page。",
+                                if (visionMode) {
+                                    "【系统提示】当前应用不提供可用无障碍 UI 信息；" +
+                                        "请以截图识别界面，使用 tap/type/send，禁止 click/read_tree/find_on_page。"
+                                } else {
+                                    "【系统提示】当前应用不提供可用无障碍 UI 信息，但截屏暂不可用；请 wait 后重试。"
+                                },
                             )
                             VisionTaskHint.pageContextSupplement(
                                 command = session.rootCommand,
                                 steps = session.stepRecords,
-                                visionMode = true,
+                                visionMode = visionMode,
                             ).takeIf { it.isNotBlank() }?.let { supplement ->
                                 appendLine()
                                 append(supplement)
@@ -1017,7 +951,8 @@ class AgentOrchestrator(
                 pageDiff = pageDiff,
                 minimalPageContext = PageContextRedactor.redact(
                     if (visionFallback) {
-                        "${enriched.packageName.ifBlank { "未知应用" }} | 视觉观察（无无障碍 UI）"
+                        val pkg = enriched.packageName.ifBlank { "未知应用" }
+                        if (visionMode) "$pkg | 视觉观察（无无障碍 UI）" else "$pkg | 无无障碍 UI，截屏未就绪"
                     } else if (readable) {
                         enriched.toMinimalSummary()
                     } else {
@@ -1029,6 +964,8 @@ class AgentOrchestrator(
                 visionMode = visionMode,
                 a11yUnavailable = visionFallback,
             )
+            maybeActivateVisionAgent(payload)
+            return payload
 
         }
 
@@ -1191,6 +1128,7 @@ class AgentOrchestrator(
 
 
             val actionQueue = ArrayDeque<AgentAction>()
+            var activePlaybook: AgentActionPlaybook.Match? = null
 
 
 
@@ -1203,8 +1141,34 @@ class AgentOrchestrator(
 
 
                 if (actionQueue.isEmpty()) {
+                    activePlaybook?.let { playbook ->
+                        AgentActionPlaybook.drainNextSteps(
+                            playbook = playbook,
+                            stepRecords = session.stepRecords,
+                        )?.let { planned ->
+                            actionQueue.addAll(planned)
+                        }
+                    }
+                }
 
-                    actionQueue.addAll(AgentPlanParser.parsePlan(json))
+                if (actionQueue.isEmpty()) {
+                    val planned = AgentPlanParser.parsePlan(json)
+                    val expanded = AgentActionPlaybook.expandPlannedActions(planned)
+                    if (expanded.activePlaybook != null) {
+                        activePlaybook = expanded.activePlaybook
+                    }
+                    actionQueue.addAll(expanded.steps)
+
+                    if (actionQueue.isEmpty()) {
+                        activePlaybook?.let { playbook ->
+                            AgentActionPlaybook.drainNextSteps(
+                                playbook = playbook,
+                                stepRecords = session.stepRecords,
+                            )?.let { planned ->
+                                actionQueue.addAll(planned)
+                            }
+                        }
+                    }
 
                     if (actionQueue.isEmpty()) return@repeat
 
@@ -1317,7 +1281,9 @@ class AgentOrchestrator(
 
                         previousSnapshot = previousSnapshot,
 
-                    )
+                    ).also {
+                        activePlaybook = null
+                    }
 
                 }
 
@@ -1348,7 +1314,7 @@ class AgentOrchestrator(
                 }
                 when (outcome) {
 
-                    is GuardOutcome.Blocked -> {
+                    is AgentGuardedActionExecutor.Outcome.Blocked -> {
 
                         val blockReason = outcome.reason
 
@@ -1396,7 +1362,7 @@ class AgentOrchestrator(
 
                     }
 
-                    is GuardOutcome.NeedsConfirm -> {
+                    is AgentGuardedActionExecutor.Outcome.NeedsConfirm -> {
 
                         return finishAndPersist(
 
@@ -1422,7 +1388,7 @@ class AgentOrchestrator(
 
                     }
 
-                    is GuardOutcome.Executed -> {
+                    is AgentGuardedActionExecutor.Outcome.Executed -> {
 
                         val result = outcome.result
 
@@ -1600,8 +1566,6 @@ class AgentOrchestrator(
 
         } catch (_: CancellationException) {
 
-            AgentRuntime.resetVisionOverlaySuppression()
-
             session.status = "cancelled"
 
             session.finalSummary = "用户已停止"
@@ -1636,8 +1600,6 @@ class AgentOrchestrator(
 
         } catch (error: Exception) {
 
-            AgentRuntime.resetVisionOverlaySuppression()
-
             session.status = "failed"
 
             session.finalSummary = error.message ?: "AI 请求失败"
@@ -1670,6 +1632,8 @@ class AgentOrchestrator(
 
             return failResult
 
+        } finally {
+            AgentRuntime.deactivateVisionAgentMode()
         }
 
     }
@@ -1980,7 +1944,7 @@ class AgentOrchestrator(
 
             when (val outcome = executeGuardedAction(context, service, localSession, action, previousSnapshot)) {
 
-                is GuardOutcome.NeedsConfirm -> {
+                is AgentGuardedActionExecutor.Outcome.NeedsConfirm -> {
 
                     val confirmAction = outcome.action
 
@@ -2028,7 +1992,7 @@ class AgentOrchestrator(
 
                 }
 
-                is GuardOutcome.Blocked -> {
+                is AgentGuardedActionExecutor.Outcome.Blocked -> {
 
                     logs += AgentStepLog(
 
@@ -2046,7 +2010,7 @@ class AgentOrchestrator(
 
                 }
 
-                is GuardOutcome.Executed -> {
+                is AgentGuardedActionExecutor.Outcome.Executed -> {
 
                     val result = outcome.result
 
@@ -2134,6 +2098,10 @@ class AgentOrchestrator(
                 if (PageReadiness.needsVisionFallback(snap)) {
                     delay(VISION_TAP_BEFORE_TYPE_MS)
                 }
+            }
+            action.action.equals("type", ignoreCase = true) && result.success &&
+                VisionTapAnnotator.parseNormalizedCoords(action.targetText) != null -> {
+                delay(VISION_TAP_BEFORE_TYPE_MS)
             }
         }
     }

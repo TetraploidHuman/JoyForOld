@@ -52,11 +52,11 @@ object CommandRouteResolver {
             }
         }
 
-        LocalSystemShortcutResolver.match(trimmed, appContext)?.let { shortcut ->
+        SystemIntentLocalParser.parse(trimmed, appContext)?.let { steps ->
             candidates += Route(
-                steps = shortcut.steps,
-                source = "local_system",
-                confidence = shortcut.confidence,
+                steps = steps,
+                source = "system_intent_local",
+                confidence = 0.97,
             )
         }
 

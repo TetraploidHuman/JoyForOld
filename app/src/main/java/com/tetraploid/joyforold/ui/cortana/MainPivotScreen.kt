@@ -6,6 +6,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +31,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tetraploid.joyforold.agent.RuntimePermissionKind
+import com.tetraploid.joyforold.assist.protocol.AssistRole
+import com.tetraploid.joyforold.collaboration.AssistSessionPhase
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.ui.DemoViewModel
 import com.tetraploid.joyforold.ui.theme.CortanaColors
@@ -52,6 +55,7 @@ fun MainPivotScreen(
     var pendingEnableWakeWordAfterPermission by remember { mutableStateOf(false) }
     var pendingWakeWordVoiceAfterPermission by remember { mutableStateOf(false) }
     var permissionDialog by remember { mutableStateOf<PermissionDialogRequest?>(null) }
+    var showAssistRemoteScreen by remember { mutableStateOf(false) }
     val overlayRunning = remember { mutableStateOf(FloatingOverlayService.isRunning()) }
 
     val audioPermissionLauncher = rememberLauncherForActivityResult(
@@ -98,6 +102,7 @@ fun MainPivotScreen(
         )
         pendingEnableWakeWordAfterPermission = prompt.resumeEnableWakeWord
         pendingWakeWordVoiceAfterPermission = prompt.resumeWakeWordVoice
+        pendingVoiceInputAfterPermission = prompt.resumeVoiceInputAfterPermission
         viewModel.clearPermissionPrompt()
     }
 
@@ -177,6 +182,26 @@ fun MainPivotScreen(
         viewModel.setWakeWordEnabled(enabled)
     }
 
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage == 2) {
+            viewModel.refreshAssistConfig()
+        }
+    }
+
+    LaunchedEffect(uiState.assistRole, uiState.assistPhase) {
+        when {
+            uiState.assistRole == AssistRole.CAREGIVER &&
+                uiState.assistPhase == AssistSessionPhase.ACTIVE -> showAssistRemoteScreen = true
+            uiState.assistPhase != AssistSessionPhase.ACTIVE -> showAssistRemoteScreen = false
+        }
+    }
+
+    LaunchedEffect(uiState.assistNavigateTick) {
+        if (uiState.assistNavigateTick > 0L) {
+            pagerState.animateScrollToPage(2)
+        }
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
             delay(2_000)
@@ -215,6 +240,7 @@ fun MainPivotScreen(
         },
     )
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -315,6 +341,19 @@ fun MainPivotScreen(
                     )
                     2 -> CollaborationPage(
                         uiState = uiState,
+                        onSetAssistRole = viewModel::setAssistRole,
+                        onSetAssistDisplayName = viewModel::setAssistDisplayName,
+                        onSetAssistServerHttpUrl = viewModel::setAssistServerHttpUrl,
+                        onSetAssistServerWsUrl = viewModel::setAssistServerWsUrl,
+                        onStartElderAssist = viewModel::startElderAssistSession,
+                        onJoinAssist = viewModel::joinAssistSession,
+                        onConnectBinding = viewModel::connectAssistBinding,
+                        onDeleteBinding = viewModel::deleteAssistBinding,
+                        onOpenRemoteScreen = { showAssistRemoteScreen = true },
+                        onSendAssistAction = viewModel::sendAssistAction,
+                        onSendAssistTypeText = viewModel::sendAssistTypeText,
+                        onSendAssistCommand = viewModel::sendAssistCommand,
+                        onEndAssist = viewModel::endAssistSession,
                         onUpdateDaughterPhone = viewModel::updateDaughterPhone,
                         onUpdateSonPhone = viewModel::updateSonPhone,
                         onUpdateEmergencyPhone = viewModel::updateEmergencyPhone,
@@ -326,6 +365,24 @@ fun MainPivotScreen(
                     3 -> AboutPage(uiState = uiState)
                 }
             }
+        }
+    }
+
+        if (showAssistRemoteScreen &&
+            uiState.assistRole == AssistRole.CAREGIVER &&
+            uiState.assistPhase == AssistSessionPhase.ACTIVE
+        ) {
+            AssistRemoteScreenPage(
+                uiState = uiState,
+                onBack = { showAssistRemoteScreen = false },
+                onSendAssistTap = viewModel::sendAssistTap,
+                onSendAssistSwipe = viewModel::sendAssistSwipe,
+                onSendAssistAction = viewModel::sendAssistAction,
+                onEndAssist = {
+                    showAssistRemoteScreen = false
+                    viewModel.endAssistSession()
+                },
+            )
         }
     }
 }

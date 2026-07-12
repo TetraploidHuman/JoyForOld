@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    alias(libs.plugins.kotlin.serialization)
 }
 
 import java.util.Properties
@@ -32,6 +33,9 @@ val llmModel = localProperties.getProperty("llm.model")
     } else {
         localProperties.getProperty("zhipu.model", "glm-4.6v-flash")
     }
+
+val assistServerHttp = localProperties.getProperty("assist.server.url", "http://10.0.2.2:8787")
+val assistServerWs = localProperties.getProperty("assist.server.ws", "ws://10.0.2.2:8787/ws")
 
 android {
     namespace = "com.tetraploid.joyforold"
@@ -85,6 +89,16 @@ android {
             "VOLC_ASR_RESOURCE_ID",
             "\"${localProperties.getProperty("volc.asr.resource_id", "volc.bigasr.sauc.duration")}\"",
         )
+        buildConfigField(
+            "String",
+            "ASSIST_SERVER_URL",
+            "\"$assistServerHttp\"",
+        )
+        buildConfigField(
+            "String",
+            "ASSIST_SERVER_WS",
+            "\"$assistServerWs\"",
+        )
     }
 
     buildTypes {
@@ -104,6 +118,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":assist-protocol"))
+    implementation(libs.kotlinx.serialization.json)
     implementation("androidx.core:core-ktx:1.18.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")

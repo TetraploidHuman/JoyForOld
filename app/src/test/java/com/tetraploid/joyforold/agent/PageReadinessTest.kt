@@ -76,4 +76,25 @@ class PageReadinessTest {
         )
         assertFalse(PageReadiness.needsVisionFallback(snapshot))
     }
+
+    @Test
+    fun shouldEnterVisionMode_onlyWhenA11yUnavailableAndScreenshotReady() {
+        val emptyWechat = StructuredPageSnapshot(
+            packageName = "com.tencent.mm",
+            appHint = "当前为微信",
+            clickables = emptyList(),
+            editables = emptyList(),
+            visibleTexts = emptyList(),
+            sendButtons = emptyList(),
+            fingerprint = "x",
+        )
+        val readableWechat = emptyWechat.copy(clickables = listOf("搜索"))
+
+        assertTrue(PageReadiness.shouldEnterVisionMode(emptyWechat, "base64shot"))
+        assertFalse(PageReadiness.shouldEnterVisionMode(emptyWechat, null))
+        assertFalse(PageReadiness.shouldEnterVisionMode(emptyWechat, ""))
+        assertFalse(PageReadiness.shouldEnterVisionMode(readableWechat, "base64shot"))
+        assertTrue(PageReadiness.shouldEnterVisionMode(null, "base64shot"))
+        assertFalse(PageReadiness.shouldEnterVisionMode(null, null))
+    }
 }

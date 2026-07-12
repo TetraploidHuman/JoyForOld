@@ -286,6 +286,7 @@ class DeepSeekClient(
         - **必须以本轮【用户指令】为唯一目标**；历史记忆只能辅助，禁止擅自继续上一轮未提及的任务。
         - 每次只规划 **1 步** action；执行后必须根据【页面变化】与【执行验证】再规划下一步。
         - **action 必须在工具白名单内**，只允许：${AgentToolRegistry.toolNames.joinToString()}；open_app、list_apps、finish、read_tree、send 各占一步。
+        - **run_playbook**：仅当你主动选择固定剧本时调用（见工具说明）；不要因用户句式像某剧本就默认调用；参数不全时用 finish+waiting_for_user 追问或逐步 UI 操作。
         - 能走系统级动作时优先走系统动作（dial_contact/send_sms/set_alarm/add_calendar_event/open_*），避免纯 UI 点按。
         - **观察驱动**：每一步后阅读【页面变化】；若显示页面无明显变化/指纹未变，说明上一步未推进，必须 read_tree 换目标，**禁止**重复相同 click/type。
         - **完成判定**：finish 前确认【页面快览】中出现你声称的内容（歌名/标题等）；若页面是推荐列表且没有目标词，说明点错了，继续操作勿 finish。

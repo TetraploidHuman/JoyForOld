@@ -13,6 +13,7 @@ import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import android.util.Log
 import android.view.inputmethod.InputMethodManager
 import com.tetraploid.joyforold.app.InstalledAppResolver
 import com.tetraploid.joyforold.agent.AgentContextLimits
@@ -125,7 +126,8 @@ class JoyAccessibilityService : AccessibilityService() {
     }
   }
 
-  suspend fun captureScreenshotBase64(): String? = PageScreenshotCapture.captureBase64Jpeg(this)
+  suspend fun captureScreenshotBase64(forceFresh: Boolean = false): String? =
+    PageScreenshotCapture.captureBase64Jpeg(this, forceFresh = forceFresh)
 
   fun snapshotTreeForDebug(): String {
     val root = getTargetRoot() ?: return "(无法读取结构树：当前无外部窗口)"
@@ -160,7 +162,7 @@ class JoyAccessibilityService : AccessibilityService() {
   fun execute(action: AgentAction): String = executeWithResult(action).summary
 
   fun executeWithResult(action: AgentAction): ActionExecutionResult {
-    return when (action.action.lowercase()) {
+    val result = when (action.action.lowercase()) {
       "click" -> clickByTextResult(action.targetText)
       "tap" -> tapAtNormalizedResult(action.targetText)
       "type" -> typeTextResult(action.inputText, action.targetText)
@@ -181,6 +183,14 @@ class JoyAccessibilityService : AccessibilityService() {
         suggestions = listOf("请使用已注册工具：${AgentToolRegistry.toolNames.joinToString()}"),
       )
     }
+    if (mutatesUi(action.action)) {
+      invalidateExternalRootCache()
+    }
+    return result
+  }
+
+  private fun mutatesUi(action: String): Boolean {
+    return action.lowercase() in UI_MUTATING_ACTIONS
   }
 
   fun findOnPage(targetText: String?): ActionExecutionResult {
@@ -468,15 +478,24 @@ class JoyAccessibilityService : AccessibilityService() {
     return x to y
   }
 
-  private fun typeTextResult(input: String?, fieldHint: String? = null): ActionExecutionResult {
-    val msg = typeText(input, fieldHint)
-    val success = !msg.contains("失败")
-    return ActionExecutionResult(
-      success = success,
-      summary = msg,
-      suggestions = if (success) emptyList() else buildInputFailureSuggestions(),
-    )
-  }
+    private fun typeTextResult(input: String?, fieldHint: String? = null): ActionExecutionResult {
+        parseNormalizedCoords(fieldHint)?.let { (xNorm, yNorm) ->
+            val msg = typeTextAtNormalized(xNorm, yNorm, input)
+            val success = !msg.contains("失败")
+            return ActionExecutionResult(
+                success = success,
+                summary = msg,
+                suggestions = if (success) emptyList() else buildInputFailureSuggestions(),
+            )
+        }
+        val msg = typeText(input, fieldHint)
+        val success = !msg.contains("失败")
+        return ActionExecutionResult(
+            success = success,
+            summary = msg,
+            suggestions = if (success) emptyList() else buildInputFailureSuggestions(),
+        )
+    }
 
   private fun buildInputFailureSuggestions(): List<String> {
     val suggestions = mutableListOf(
@@ -599,81 +618,107 @@ class JoyAccessibilityService : AccessibilityService() {
     }
   }
 
-  private fun typeText(input: String?, fieldHint: String? = null): String {
-    val text = input?.trim().orEmpty()
-    if (text.isEmpty()) return "输入失败：缺少 input_text"
+    private fun typeText(input: String?, fieldHint: String? = null): String {
+        val text = input?.trim().orEmpty()
+        if (text.isEmpty()) return "输入失败：缺少 input_text"
 
-    val roots = collectExternalRoots()
+        val roots = collectExternalRoots()
 
-    if (!fieldHint.isNullOrBlank()) {
-      try {
-        resolveEditableField(roots, fieldHint)?.let { target ->
-          return tryTypeIntoNode(target, text, recycleTarget = true)
-        }
-      } finally {
-        roots.forEach { it.recycle() }
-      }
-    }
-
-    if (lastTapNormalized != null) {
-      hideThirdPartyKeyboard()
-      tryImeTypeText(text)?.let { return it }
-      pasteViaClipboard(text)?.let { return it }
-    }
-
-    var focused: AccessibilityNodeInfo? = null
-    var editable: AccessibilityNodeInfo? = null
-    return try {
-      if (roots.isEmpty()) {
-        hideThirdPartyKeyboard()
-        tryImeTypeText(text)?.let { return it }
-        return pasteViaClipboard(text)
-          ?: "输入失败：无法读取页面，请先 tap 输入框坐标再 type"
-      }
-
-      focused = findValidInputFocus()
-      editable = focused
-      if (editable == null) {
-        editable = findEditableAcrossWindows()
-      }
-      if (editable == null) {
-        editable = roots
-          .mapNotNull { root ->
-            NodeFinder.findBestEditable(root)?.also { candidate ->
-              if (UiNodeHeuristics.isImeKeyboardNode(candidate)) {
-                candidate.recycle()
-                return@mapNotNull null
-              }
+        if (!fieldHint.isNullOrBlank()) {
+            try {
+                resolveEditableField(roots, fieldHint)?.let { target ->
+                    return tryTypeIntoNode(target, text, recycleTarget = true)
+                }
+            } finally {
+                roots.forEach { it.recycle() }
             }
-          }
-          .maxByOrNull { node ->
-            val screenHeight = UiNodeHeuristics.screenHeight(
-              roots.firstOrNull() ?: return@maxByOrNull Int.MIN_VALUE,
-            )
-            UiNodeHeuristics.inputScore(node, screenHeight)
-          }
-      }
+        }
 
-      if (editable == null) {
-        editable = pollValidInputFocus(maxAttempts = 6, intervalMs = 250L)
-      }
+        if (lastTapNormalized != null) {
+            hideThirdPartyKeyboard()
+            tryImeTypeText(text)?.let { return it }
+            pasteViaClipboard(text)?.let { return it }
+        }
 
-      if (editable == null) {
-        editable = retryFocusViaLastTap()
-      }
+        var focused: AccessibilityNodeInfo? = null
+        var editable: AccessibilityNodeInfo? = null
+        return try {
+            if (roots.isEmpty()) {
+                hideThirdPartyKeyboard()
+                tryImeTypeText(text)?.let { return it }
+                return pasteViaClipboard(text)
+                    ?: "输入失败：无法读取页面，请先 tap 输入框坐标再 type"
+            }
 
-      if (editable == null) {
-        hideThirdPartyKeyboard()
-        tryImeTypeText(text)?.let { return it }
-        return pasteViaClipboard(text) ?: buildKeyboardBlockingFailureMessage()
-      }
+            focused = findValidInputFocus()
+            editable = focused
+            if (editable == null) {
+                editable = findEditableAcrossWindows()
+            }
+            if (editable == null) {
+                editable = roots
+                    .mapNotNull { root ->
+                        NodeFinder.findBestEditable(root)?.also { candidate ->
+                            if (UiNodeHeuristics.isImeKeyboardNode(candidate)) {
+                                candidate.recycle()
+                                return@mapNotNull null
+                            }
+                        }
+                    }
+                    .maxByOrNull { node ->
+                        val screenHeight = UiNodeHeuristics.screenHeight(
+                            roots.firstOrNull() ?: return@maxByOrNull Int.MIN_VALUE,
+                        )
+                        UiNodeHeuristics.inputScore(node, screenHeight)
+                    }
+            }
 
-      tryTypeIntoNode(editable, text, recycleTarget = false, alsoRecycle = focused)
-    } finally {
-      recycleInputNodes(focused, if (editable !== focused) editable else null)
-      roots.forEach { it.recycle() }
+            if (editable == null) {
+                editable = pollValidInputFocus(maxAttempts = 6, intervalMs = 250L)
+            }
+
+            if (editable == null) {
+                editable = retryFocusViaLastTap()
+            }
+
+            if (editable == null) {
+                hideThirdPartyKeyboard()
+                tryImeTypeText(text)?.let { return it }
+                return pasteViaClipboard(text) ?: buildKeyboardBlockingFailureMessage()
+            }
+
+            tryTypeIntoNode(editable, text, recycleTarget = false, alsoRecycle = focused)
+        } finally {
+            recycleInputNodes(focused, if (editable !== focused) editable else null)
+            roots.forEach { it.recycle() }
+        }
     }
-  }
+
+    /**
+     * 视觉模式：在归一化坐标处点击 → 等待焦点 → Joy IME / 剪贴板注入（原子输入）。
+     */
+    private fun typeTextAtNormalized(xNorm: Int, yNorm: Int, input: String?): String {
+        val text = input?.trim().orEmpty()
+        if (text.isEmpty()) return "输入失败：缺少 input_text"
+
+        lastTapNormalized = xNorm to yNorm
+        tapAtNormalizedCoords(xNorm, yNorm, successMessage = null)
+        Thread.sleep(500L)
+        tapAtNormalizedCoords(xNorm, yNorm, successMessage = null)
+        Thread.sleep(350L)
+
+        hideThirdPartyKeyboard()
+        JoyImeCoordinator.agentInjectionActive = true
+        try {
+            refocusInputForImeInjection()
+            tryImeTypeText(text, maxWaitMs = 5_000L)?.let { return it }
+            pasteViaClipboard(text)?.let { return it }
+        } finally {
+            JoyImeCoordinator.agentInjectionActive = false
+            JoyInputMethodService.switchBackToUserKeyboardIfActive()
+        }
+        return "输入失败：未能在坐标 ($xNorm,$yNorm) 注入文字，请确认 Joy 输入助手为默认输入法"
+    }
 
   private fun buildKeyboardBlockingFailureMessage(): String {
     val imeOpen = isThirdPartyKeyboardVisible()
@@ -739,11 +784,14 @@ class JoyAccessibilityService : AccessibilityService() {
   private fun isThirdPartyKeyboardVisible(): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false
     return windows?.any { window ->
-      val pkg = window.root?.packageName?.toString().orEmpty()
-      pkg.contains("inputmethod", ignoreCase = true) ||
-        window.root?.let { root ->
-          NodeFinder.treeContainsImeKeyboard(root).also { root.recycle() }
-        } == true
+      val root = window.root ?: return@any false
+      try {
+        val pkg = root.packageName?.toString().orEmpty()
+        pkg.contains("inputmethod", ignoreCase = true) ||
+          NodeFinder.treeContainsImeKeyboard(root)
+      } finally {
+        root.recycle()
+      }
     } == true
   }
 
@@ -818,43 +866,50 @@ class JoyAccessibilityService : AccessibilityService() {
 
   private fun pasteViaClipboard(text: String): String? {
     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
-    clipboard.setPrimaryClip(ClipData.newPlainText("joy_input", text))
+    val previousClip = runCatching { clipboard.primaryClip }.getOrNull()
+    try {
+      clipboard.setPrimaryClip(ClipData.newPlainText("joy_input", text))
 
-    prepareInputFocusAtLastTap()
+      prepareInputFocusAtLastTap()
 
-    repeat(10) { attempt ->
-      if (attempt > 0) Thread.sleep(250L)
+      repeat(10) { attempt ->
+        if (attempt > 0) Thread.sleep(250L)
 
-      findValidInputFocus()?.let { focused ->
-        return try {
-          focused.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-          if (focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-            "已粘贴输入：$text"
-          } else {
-            null
+        findValidInputFocus()?.let { focused ->
+          return try {
+            focused.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            if (focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+              "已粘贴输入：$text"
+            } else {
+              null
+            }
+          } finally {
+            focused.recycle()
           }
-        } finally {
-          focused.recycle()
+        }
+
+        findEditableAcrossWindows()?.let { editable ->
+          return try {
+            editable.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            editable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            if (editable.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+              "已粘贴输入：$text"
+            } else {
+              null
+            }
+          } finally {
+            editable.recycle()
+          }
         }
       }
 
-      findEditableAcrossWindows()?.let { editable ->
-        return try {
-          editable.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-          editable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-          if (editable.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
-            "已粘贴输入：$text"
-          } else {
-            null
-          }
-        } finally {
-          editable.recycle()
-        }
+      tryPasteFromContextMenu(text)?.let { return it }
+      return null
+    } finally {
+      if (previousClip != null) {
+        runCatching { clipboard.setPrimaryClip(previousClip) }
       }
     }
-
-    tryPasteFromContextMenu(text)?.let { return it }
-    return null
   }
 
   /** tap 后聚焦：先点上次坐标，必要时再长按唤出粘贴菜单。 */
@@ -920,12 +975,9 @@ class JoyAccessibilityService : AccessibilityService() {
     return collectExternalRoots()
   }
 
-  private fun longPressAtBlocking(x: Float, y: Float): Boolean {
+  private fun dispatchGestureBlocking(gesture: GestureDescription, timeoutMs: Long = 3_000L): Boolean {
     val latch = CountDownLatch(1)
-    val path = Path().apply { moveTo(x, y) }
-    val gesture = GestureDescription.Builder()
-      .addStroke(GestureDescription.StrokeDescription(path, 0, 650))
-      .build()
+    var cancelled = false
     val dispatched = dispatchGesture(
       gesture,
       object : GestureResultCallback() {
@@ -934,15 +986,26 @@ class JoyAccessibilityService : AccessibilityService() {
         }
 
         override fun onCancelled(gestureDescription: GestureDescription?) {
+          cancelled = true
           latch.countDown()
         }
       },
       null,
     )
-    if (dispatched) {
-      latch.await(2, TimeUnit.SECONDS)
+    if (!dispatched) return false
+    val completed = latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+    if (!completed || cancelled) {
+      return false
     }
-    return dispatched
+    return true
+  }
+
+  private fun longPressAtBlocking(x: Float, y: Float): Boolean {
+    val path = Path().apply { moveTo(x, y) }
+    val gesture = GestureDescription.Builder()
+      .addStroke(GestureDescription.StrokeDescription(path, 0, 650))
+      .build()
+    return dispatchGestureBlocking(gesture)
   }
 
   private fun pollInputFocus(maxAttempts: Int, intervalMs: Long): AccessibilityNodeInfo? {
@@ -1009,64 +1072,107 @@ class JoyAccessibilityService : AccessibilityService() {
   }
 
   private fun tapAt(x: Float, y: Float, successMessage: String): String? {
+    val metrics = resources.displayMetrics
+    Log.i(
+      "JoyForOld/Tap",
+      "dispatch tap px=(${x.toInt()},${y.toInt()}) screen=${metrics.widthPixels}x${metrics.heightPixels}",
+    )
     val path = Path().apply {
       moveTo(x, y)
     }
     val gesture = GestureDescription.Builder()
       .addStroke(GestureDescription.StrokeDescription(path, 0, 50))
       .build()
-    val dispatched = dispatchGesture(gesture, null, null)
-    return if (dispatched) successMessage else null
+    return if (dispatchGestureBlocking(gesture)) successMessage else null
   }
 
   private fun scroll(down: Boolean): String {
-    val roots = collectExternalRoots()
-    if (roots.isEmpty()) return "滚动失败：无法读取页面"
-    return try {
-      var scrollable: AccessibilityNodeInfo? = null
-      for (root in roots) {
-        scrollable = NodeFinder.findScrollable(root)
-        if (scrollable != null) break
-      }
-      val node = scrollable ?: return "滚动失败：未找到可滚动区域"
-      val action = if (down) {
-        AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-      } else {
-        AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-      }
-      val ok = node.performAction(action)
-      node.recycle()
-      if (ok) {
-        if (down) "已向下滚动" else "已向上滚动"
-      } else {
-        "滚动失败：系统未接受滚动"
-      }
-    } finally {
-      roots.forEach { it.recycle() }
+    repeat(2) { attempt ->
+      swipeVerticalBlocking(down)?.let { return it }
+      if (attempt == 0) Thread.sleep(80)
     }
+    return if (down) "向下滚动失败，请重试" else "向上滚动失败，请重试"
+  }
+
+  private fun swipeVerticalBlocking(down: Boolean): String? {
+    val metrics = resources.displayMetrics
+    val centerX = metrics.widthPixels / 2f
+    val startY: Float
+    val endY: Float
+    if (down) {
+      startY = metrics.heightPixels * 0.78f
+      endY = metrics.heightPixels * 0.22f
+    } else {
+      startY = metrics.heightPixels * 0.22f
+      endY = metrics.heightPixels * 0.78f
+    }
+    return swipeLineBlocking(centerX, startY, centerX, endY)?.let {
+      if (down) "已向下滑动屏幕" else "已向上滑动屏幕"
+    }
+  }
+
+  fun swipeNormalizedBlocking(x1: Int, y1: Int, x2: Int, y2: Int): String? {
+    val metrics = resources.displayMetrics
+    val maxX = (metrics.widthPixels - 1).coerceAtLeast(0).toFloat()
+    val maxY = (metrics.heightPixels - 1).coerceAtLeast(0).toFloat()
+    val sx = (x1 / 1000f * metrics.widthPixels).coerceIn(0f, maxX)
+    val sy = (y1 / 1000f * metrics.heightPixels).coerceIn(0f, maxY)
+    val ex = (x2 / 1000f * metrics.widthPixels).coerceIn(0f, maxX)
+    val ey = (y2 / 1000f * metrics.heightPixels).coerceIn(0f, maxY)
+    return swipeLineBlocking(sx, sy, ex, ey)?.let { "已滑动画面上对应区域" }
+  }
+
+  private fun swipeLineBlocking(startX: Float, startY: Float, endX: Float, endY: Float): String? {
+    val path = Path().apply {
+      moveTo(startX, startY)
+      lineTo(endX, endY)
+    }
+    val distance = kotlin.math.hypot(
+      (endX - startX).toDouble(),
+      (endY - startY).toDouble(),
+    ).toFloat()
+    val metrics = resources.displayMetrics
+    val durationMs = ((distance / metrics.heightPixels.coerceAtLeast(1)) * 420f)
+      .toLong()
+      .coerceIn(180L, 520L)
+    val gesture = GestureDescription.Builder()
+      .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
+      .build()
+    return if (dispatchGestureBlocking(gesture)) "ok" else null
   }
 
   private fun global(action: Int, successMessage: String): String {
     return if (performGlobalAction(action)) successMessage else "系统操作失败"
   }
 
-  suspend fun swipeDown(): String = suspendCoroutine { continuation ->
+  suspend fun swipeDown(): String = swipeVerticalSuspend(down = true)
+
+  suspend fun swipeUp(): String = swipeVerticalSuspend(down = false)
+
+  private suspend fun swipeVerticalSuspend(down: Boolean): String = suspendCoroutine { continuation ->
     val metrics = resources.displayMetrics
     val centerX = metrics.widthPixels / 2f
-    val startY = metrics.heightPixels * 0.7f
-    val endY = metrics.heightPixels * 0.3f
+    val startY: Float
+    val endY: Float
+    if (down) {
+      startY = metrics.heightPixels * 0.78f
+      endY = metrics.heightPixels * 0.22f
+    } else {
+      startY = metrics.heightPixels * 0.22f
+      endY = metrics.heightPixels * 0.78f
+    }
     val path = Path().apply {
       moveTo(centerX, startY)
       lineTo(centerX, endY)
     }
     val gesture = GestureDescription.Builder()
-      .addStroke(GestureDescription.StrokeDescription(path, 0, 350))
+      .addStroke(GestureDescription.StrokeDescription(path, 0, 420))
       .build()
     val dispatched = dispatchGesture(
       gesture,
       object : GestureResultCallback() {
         override fun onCompleted(gestureDescription: GestureDescription?) {
-          continuation.resume("已执行滑动手势")
+          continuation.resume(if (down) "已执行向下滑动手势" else "已执行向上滑动手势")
         }
 
         override fun onCancelled(gestureDescription: GestureDescription?) {
@@ -1081,7 +1187,11 @@ class JoyAccessibilityService : AccessibilityService() {
   }
 
   companion object {
-    private const val EXTERNAL_CACHE_MS = 30_000L
+    private const val EXTERNAL_CACHE_MS = 8_000L
+    private val UI_MUTATING_ACTIONS = setOf(
+      "click", "tap", "type", "send",
+      "scroll_down", "scroll_up", "back", "home", "open_app",
+    )
 
     @Volatile
     var instance: JoyAccessibilityService? = null
@@ -1092,6 +1202,12 @@ class JoyAccessibilityService : AccessibilityService() {
     private var lastExternalUpdatedAt: Long = 0L
 
     fun lastExternalPackageName(): String? = lastExternalPackage
+
+    fun invalidateExternalRootCache() {
+      lastExternalRoot?.recycle()
+      lastExternalRoot = null
+      lastExternalUpdatedAt = 0L
+    }
   }
 }
 

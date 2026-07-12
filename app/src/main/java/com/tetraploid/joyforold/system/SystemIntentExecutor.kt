@@ -200,20 +200,12 @@ object SystemIntentExecutor {
     }
 
     private fun askFamilyForHelp(context: Context, targetText: String?): ActionExecutionResult {
-        val store = CaregiverSupportStore(context)
-        store.ensureSeededDefaults()
-        val preferred = targetText?.trim().orEmpty().ifBlank { "紧急联系人" }
-        val contact = store.findContact(preferred) ?: store.loadFamilyContacts().firstOrNull()
-            ?: return ActionExecutionResult(false, "家人联系人未配置")
-        if (contact.phoneNumber.isBlank()) {
-            return ActionExecutionResult(
-                false,
-                "家人联系人 ${contact.alias} 尚未配置手机号",
-                suggestions = listOf("先在家人协助中补全手机号"),
-            )
-        }
-        val message = store.loadEmergencyMessage()
-        return sendSms(context, contact.alias, message)
+        com.tetraploid.joyforold.agent.AgentRuntime.startElderAssistSession()
+        return ActionExecutionResult(
+            success = true,
+            summary = "已发起远程协助，请到「协作」页查看协助码并告诉家人",
+            suggestions = listOf("家人在协作页输入协助码即可连接"),
+        )
     }
 
     private fun emergencyHelp(context: Context): ActionExecutionResult {

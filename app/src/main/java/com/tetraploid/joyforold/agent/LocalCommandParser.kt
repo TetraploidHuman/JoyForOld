@@ -7,7 +7,6 @@ object LocalCommandParser {
     private val sendInChatPattern = Regex("""^(发送|发消息|发一条消息)[:：\s]+(.+)$""", RegexOption.IGNORE_CASE)
     private val confirmLastSendPattern =
         Regex("""^(发送上一条消息|发送刚才的消息|确认发送)$""", RegexOption.IGNORE_CASE)
-    private val smsPattern = Regex("""^(给)?(.+?)(发短信|短信)[:：\s]+(.+)$""")
     private val weatherQueryPattern = Regex("""^(查看|查|今天|现在)?天气(怎么样|如何)?$""")
     private val weatherCityPattern = Regex("""^(.+?)的天气(怎么样|如何)?$""")
 
@@ -18,6 +17,8 @@ object LocalCommandParser {
     fun parse(command: String): List<AgentAction>? {
         val text = command.trim()
         if (text.isEmpty()) return null
+
+        SystemIntentLocalParser.parse(text)?.let { return it }
 
         if (confirmLastSendPattern.matches(text)) {
             return listOf(
@@ -30,7 +31,7 @@ object LocalCommandParser {
             val target = match.groupValues[2].trim()
             val message = match.groupValues[4].trim()
             if (target.isNotBlank() && message.isNotBlank()) {
-                return sendMessageSteps(message, contact = target)
+                return null
             }
         }
 
@@ -38,17 +39,6 @@ object LocalCommandParser {
             val message = match.groupValues[2].trim()
             if (message.isNotBlank()) {
                 return sendMessageSteps(message)
-            }
-        }
-
-        smsPattern.find(text)?.let { match ->
-            val target = match.groupValues[2].trim()
-            val body = match.groupValues[4].trim()
-            if (target.isNotBlank() && body.isNotBlank()) {
-                return listOf(
-                    AgentAction(action = "send_sms", targetText = target, inputText = body),
-                    AgentAction(action = "finish", message = "已为 $target 准备短信发送页面", finished = true),
-                )
             }
         }
 
@@ -108,14 +98,6 @@ object LocalCommandParser {
                 AgentAction(action = "scroll_up"),
                 AgentAction(action = "finish", message = "已向上滚动", finished = true),
             )
-            "打开相机", "拍照" -> listOf(
-                AgentAction(action = "open_camera"),
-                AgentAction(action = "finish", message = "已打开相机", finished = true),
-            )
-            "打开相册" -> listOf(
-                AgentAction(action = "open_gallery"),
-                AgentAction(action = "finish", message = "已打开相册", finished = true),
-            )
             "看天气", "打开天气" -> listOf(
                 AgentAction(action = "open_weather"),
                 AgentAction(action = "finish", message = "已打开天气", finished = true),
@@ -138,8 +120,8 @@ object LocalCommandParser {
     }
 
     private fun sendMessageSteps(message: String, contact: String? = null): List<AgentAction> {
-        return buildList {
-            if (!contact.isNullOrBlank()) {
+        if (!contact.isNullOrBlank()) {
+            return buildList {
                 add(AgentAction(action = "click", targetText = contact))
                 add(AgentAction(action = "click", targetText = "输入"))
                 add(AgentAction(action = "type", inputText = message))
@@ -151,13 +133,9 @@ object LocalCommandParser {
                         waitingForUser = true,
                     ),
                 )
-                return@buildList
             }
-
-            add(AgentAction(action = "click", targetText = "输入"))
-            add(AgentAction(action = "type", inputText = message))
-            add(AgentAction(action = "send"))
-            add(AgentAction(action = "finish", message = "已尝试发送：$message", finished = true))
         }
+
+        return AgentActionPlaybook.stepsOnOpenChatPage(message)
     }
 }

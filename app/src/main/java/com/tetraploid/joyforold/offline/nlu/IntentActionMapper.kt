@@ -10,6 +10,8 @@ object SlotExtractor {
     private val DIAL_PATTERN = Regex("""(?:给)?(.+?)(?:打电话|打个电话|拨号|拨打)""")
     private val CITY_WEATHER = Regex("""(.+?)的天气""")
 
+    private val SMS_PATTERN = Regex("""^(给)?(.+?)(发短信|短信)[:：\s]+(.+)$""")
+
     data class Slots(
         val app: String? = null,
         val timeHhmm: String? = null,
@@ -18,6 +20,7 @@ object SlotExtractor {
         val eventTimeIso: String? = null,
         val contact: String? = null,
         val city: String? = null,
+        val smsBody: String? = null,
     )
 
     fun extract(intent: String, command: String, context: Context?): Slots {
@@ -27,6 +30,7 @@ object SlotExtractor {
             "set_alarm" -> extractAlarmSlots(text)
             "add_calendar_event" -> extractCalendarSlots(text)
             "dial_contact" -> Slots(contact = extractContact(text))
+            "send_sms" -> extractSmsSlots(text)
             "query_weather" -> Slots(city = extractCity(text))
             else -> Slots()
         }
@@ -82,6 +86,13 @@ object SlotExtractor {
         return DIAL_PATTERN.find(text)?.groupValues?.get(1)?.trim()?.ifBlank { null }
     }
 
+    private fun extractSmsSlots(text: String): Slots {
+        val match = SMS_PATTERN.find(text.trim()) ?: return Slots()
+        val contact = match.groupValues[2].trim().ifBlank { null }
+        val body = match.groupValues[4].trim().ifBlank { null }
+        return Slots(contact = contact, smsBody = body)
+    }
+
     private fun extractCity(text: String): String? {
         CITY_WEATHER.find(text)?.groupValues?.get(1)?.trim()?.ifBlank { null }?.let { return it }
         return null
@@ -112,6 +123,7 @@ object IntentActionMapper {
         "set_alarm" to "设闹钟",
         "add_calendar_event" to "添加日程",
         "dial_contact" to "打电话",
+        "send_sms" to "发短信",
     )
 
     private val SUMMARIES = mapOf(
@@ -148,6 +160,7 @@ object IntentActionMapper {
             "dial_contact" -> "给${primary.targetText.orEmpty().ifBlank { "联系人" }}打电话"
             "set_alarm" -> "设${primary.targetText.orEmpty().ifBlank { "闹钟" }}"
             "add_calendar_event" -> "添加日程：${primary.targetText.orEmpty().ifBlank { "提醒" }}"
+            "send_sms" -> "给${primary.targetText.orEmpty().ifBlank { "联系人" }}发短信"
             else -> action
         }
     }
@@ -200,6 +213,14 @@ object IntentActionMapper {
                         waitingForUser = true,
                         needsBinaryConfirm = true,
                     ),
+                )
+            }
+            "send_sms" -> {
+                val contact = slots.contact ?: return null
+                val body = slots.smsBody ?: return null
+                listOf(
+                    AgentAction(action = "send_sms", targetText = contact, inputText = body),
+                    AgentAction(action = "finish", message = "已为 $contact 准备短信发送页面", finished = true),
                 )
             }
             "query_weather" -> listOf(

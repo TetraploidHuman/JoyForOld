@@ -31,6 +31,7 @@ object AgentPlanParser {
         "query_weather",
         "back",
         "home",
+        AgentActionPlaybook.ACTION_RUN_PLAYBOOK,
     )
 
     fun parsePlan(json: JSONObject): List<AgentAction> {

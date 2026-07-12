@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.agent.AgentUiState
+import com.tetraploid.joyforold.assist.protocol.AssistRole
+import com.tetraploid.joyforold.assist.protocol.BindingDto
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 import kotlinx.coroutines.flow.StateFlow
 
@@ -89,6 +91,37 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshVisionDebugFrames() = AgentRuntime.refreshVisionDebugFrames()
 
     fun clearVisionDebugFrames() = AgentRuntime.clearVisionDebugFrames()
+
+    fun setAssistRole(role: AssistRole) = AgentRuntime.setAssistRole(role)
+
+    fun setAssistDisplayName(name: String) = AgentRuntime.setAssistDisplayName(name)
+
+    fun setAssistServerHttpUrl(url: String) = AgentRuntime.setAssistServerHttpUrl(url)
+
+    fun setAssistServerWsUrl(url: String) = AgentRuntime.setAssistServerWsUrl(url)
+
+    fun startElderAssistSession() = AgentRuntime.startElderAssistSession()
+
+    fun joinAssistSession(pairCode: String) = AgentRuntime.joinAssistSession(pairCode)
+
+    fun connectAssistBinding(binding: BindingDto) = AgentRuntime.connectAssistBinding(binding)
+
+    fun deleteAssistBinding(bindingId: String) = AgentRuntime.deleteAssistBinding(bindingId)
+
+    fun sendAssistTap(x: Int, y: Int) = AgentRuntime.sendAssistTap(x, y)
+
+    fun sendAssistSwipe(x1: Int, y1: Int, x2: Int, y2: Int) =
+        AgentRuntime.sendAssistSwipe(x1, y1, x2, y2)
+
+    fun sendAssistAction(name: String) = AgentRuntime.sendAssistAction(name)
+
+    fun sendAssistTypeText(text: String) = AgentRuntime.sendAssistTypeText(text)
+
+    fun sendAssistCommand(text: String) = AgentRuntime.sendAssistCommand(text)
+
+    fun endAssistSession() = AgentRuntime.endAssistSession()
+
+    fun refreshAssistConfig() = AgentRuntime.refreshAssistConfig()
 
     fun startVoiceInput() = AgentRuntime.startVoiceInput()
 

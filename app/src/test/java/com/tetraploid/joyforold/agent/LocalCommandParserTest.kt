@@ -9,6 +9,20 @@ import org.junit.Test
 
 class LocalCommandParserTest {
     @Test
+    fun parse_sendSms_viaSystemIntentParser() {
+        val steps = LocalCommandParser.parse("给女儿发短信：我到了")
+        assertNotNull(steps)
+        assertEquals("send_sms", steps!!.first().action)
+    }
+
+    @Test
+    fun parse_dialContact_viaSystemIntentParser() {
+        val steps = LocalCommandParser.parse("打电话给女儿")
+        assertNotNull(steps)
+        assertEquals("dial_contact", steps!!.first().action)
+    }
+
+    @Test
     fun parse_clickCommand() {
         val steps = LocalCommandParser.parse("点击设置")
         assertNotNull(steps)
@@ -24,12 +38,8 @@ class LocalCommandParserTest {
     }
 
     @Test
-    fun parse_sendToPerson_waitsForUser() {
-        val steps = LocalCommandParser.parse("给张三发消息：你好")
-        assertNotNull(steps)
-        val finish = steps!!.last()
-        assertEquals("finish", finish.action)
-        assertTrue(finish.waitingForUser)
+    fun parse_sendToPerson_deferredToAgent() {
+        assertNull(LocalCommandParser.parse("给张三发消息：你好"))
     }
 
     @Test

@@ -73,3 +73,6 @@ ensureLocalSdkDir(settings.rootDir)
 
 rootProject.name = "JoyForOld"
 include(":app")
+include(":assist-protocol")
+include(":assist-server")
+include(":uitreetest")

@@ -1,5 +1,6 @@
 package com.tetraploid.joyforold.agent
 
+import com.tetraploid.joyforold.accessibility.AccessibilityActionDispatcher
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.system.SystemIntentExecutor
 
@@ -31,13 +32,14 @@ object AgentToolRegistry {
         "open_mobile_data_settings", "open_location_settings",
         "navigate_home", "read_unread_messages", "tell_time", "query_weather",
         "ask_family_for_help", "emergency_help",
+        AgentActionPlaybook.ACTION_RUN_PLAYBOOK,
     )
 
     fun descriptionsForPrompt(visionMode: Boolean = false): String = """
         可用工具（action 字段）：
         - click: 点击含 target_text 的可点击元素${if (visionMode) "（当前不可用，请用 tap）" else "（无障碍树可用时优先）"}
         - tap: 按屏幕坐标点击；target_text 填归一化坐标 "x,y"（0~1000，左上为原点）${if (visionMode) "【当前须用 tap】" else "（无障碍树为空、消息带截图时用）"}
-        - type: 在输入框输入 input_text
+        - type: 在输入框输入 input_text；视觉模式下 target_text 可填输入框坐标 "x,y"（将原子点击并注入，优先 Joy IME）
         - send: 点击发送按钮；视觉模式下 target_text 可填发送按钮坐标 "x,y"
         - scroll_down / scroll_up: 在列表内滚动
         - swipe_down: 全屏下滑手势（列表滚不动时用）
@@ -61,6 +63,7 @@ object AgentToolRegistry {
         - find_on_page: ${if (visionMode) "当前不可用（无障碍树为空）" else "仅搜索不点击，target_text 为关键词，结果在下一步反馈里"}
         - read_tree: ${if (visionMode) "当前不可用（无障碍树为空）" else "读取当前页结构树片段（元素找不到时用）"}
         - finish: 结束；waiting_for_user:true 时等待用户回复；needs_binary_confirm:true 时须用户说发送/取消
+        ${AgentActionPlaybook.descriptionsForPrompt()}
         - **finish 与等待用户（由你显式标记，禁止靠标点猜测）**：
           · 闲聊/问候/任务已完成：finished:true, waiting_for_user:false, needs_binary_confirm:false
           · 需用户补充信息（开放问答）：waiting_for_user:true, needs_binary_confirm:false
@@ -75,20 +78,32 @@ object AgentToolRegistry {
         action: AgentAction,
     ): ActionExecutionResult {
         executeSystemIntent(context, action)?.let { return it }
-        return when (action.action.lowercase()) {
-            "swipe_down" -> {
-                val summary = service.swipeDown()
-                ActionExecutionResult(
-                    success = !summary.contains("失败"),
-                    summary = summary,
-                    suggestions = if (summary.contains("失败")) {
-                        listOf("尝试 scroll_down 在列表内滚动")
-                    } else {
-                        emptyList()
-                    },
-                )
-            }
-            else -> service.executeWithResult(action)
+        if (action.action.equals("swipe_down", ignoreCase = true)) {
+            val summary = service.swipeDown()
+            return ActionExecutionResult(
+                success = !summary.contains("失败"),
+                summary = summary,
+                suggestions = if (summary.contains("失败")) {
+                    listOf("尝试 scroll_down 在列表内滚动")
+                } else {
+                    emptyList()
+                },
+            )
+        }
+        if (action.action.equals("swipe_up", ignoreCase = true)) {
+            val summary = service.swipeUp()
+            return ActionExecutionResult(
+                success = !summary.contains("失败"),
+                summary = summary,
+                suggestions = if (summary.contains("失败")) {
+                    listOf("尝试 scroll_up 在列表内滚动")
+                } else {
+                    emptyList()
+                },
+            )
+        }
+        return AccessibilityActionDispatcher.runAction {
+            service.executeWithResult(action)
         }
     }
 

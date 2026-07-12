@@ -13,6 +13,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
+import android.view.Choreographer
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -36,6 +38,8 @@ import com.tetraploid.joyforold.R
 import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.ui.theme.JoyForOldTheme
 import com.tetraploid.joyforold.ui.theme.ThemePreferenceStore
+import com.tetraploid.joyforold.util.ForegroundServicePromoter
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -58,7 +62,10 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
 
         AgentRuntime.initIfNeeded(applicationContext as Application)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        startForeground(NOTIFICATION_ID, createNotification())
+        if (!ForegroundServicePromoter.promote(this, NOTIFICATION_ID, createNotification())) {
+            stopSelf()
+            return
+        }
 
         composeView = ComposeView(this).apply {
             isFocusable = true
@@ -133,6 +140,8 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         if (visible && AgentRuntime.isAppInForeground()) return
 
         composeView.visibility = if (visible) View.VISIBLE else View.GONE
+        layoutParams.alpha = if (visible) 1f else 0f
+        layoutParams.y = if (visible) 0 else 10_000
         layoutParams.flags = if (visible) {
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -140,7 +149,8 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         } else {
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         }
         windowManager.updateViewLayout(composeView, layoutParams)
 
@@ -227,8 +237,9 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
             }
         }
 
-        /** 主线程同步 GONE，通常 1–3ms；截图 API 本身异步，无需再等 layout 帧。 */
-        suspend fun hideDialogAwait() {
+        /** 主线程 GONE；[waitFrame] 时再等一帧合成，供截图使用。 */
+        suspend fun hideDialogAwait(waitFrame: Boolean = false) {
+            awaitInstance()
             val service = instance ?: return
             suspendCancellableCoroutine { cont ->
                 mainHandler.post {
@@ -237,8 +248,22 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
                         return@post
                     }
                     service.setDialogVisible(false)
-                    if (cont.isActive) cont.resume(Unit)
+                    if (waitFrame) {
+                        Choreographer.getInstance().postFrameCallback {
+                            if (cont.isActive) cont.resume(Unit)
+                        }
+                    } else if (cont.isActive) {
+                        cont.resume(Unit)
+                    }
                 }
+            }
+        }
+
+        private suspend fun awaitInstance(timeoutMs: Long = 1_500L) {
+            if (instance != null) return
+            val deadline = SystemClock.uptimeMillis() + timeoutMs
+            while (instance == null && SystemClock.uptimeMillis() < deadline) {
+                delay(16)
             }
         }
 

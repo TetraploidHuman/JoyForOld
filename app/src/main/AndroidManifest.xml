@@ -30,6 +30,7 @@
             android:label="@string/app_name"
             android:roundIcon="@mipmap/ic_launcher_round"
             android:supportsRtl="true"
+            android:usesCleartextTraffic="true"
             android:theme="@style/Theme.JoyForOld">
         <activity
                 android:name=".MainActivity"
@@ -51,15 +52,6 @@
             <property
                     android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                     android:value="elderly_ai_overlay" />
-        </service>
-
-        <service
-                android:name=".overlay.VoiceConfirmOverlayService"
-                android:exported="false"
-                android:foregroundServiceType="specialUse">
-            <property
-                    android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                    android:value="elderly_ai_voice_confirm" />
         </service>
 
         <service

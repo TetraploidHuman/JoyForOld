@@ -2,12 +2,20 @@ package com.tetraploid.joyforold.agent
 
 import android.Manifest
 import android.app.Application
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.view.accessibility.AccessibilityManager
 import com.tetraploid.joyforold.BuildConfig
+import com.tetraploid.joyforold.MainActivity
 import com.tetraploid.joyforold.accessibility.AccessibilityPermission
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
+import com.tetraploid.joyforold.assist.protocol.AssistRole
+import com.tetraploid.joyforold.assist.protocol.BindingDto
+import com.tetraploid.joyforold.collaboration.AssistPairingStore
+import com.tetraploid.joyforold.collaboration.AssistSessionManager
+import com.tetraploid.joyforold.collaboration.AssistSessionPhase
+import com.tetraploid.joyforold.collaboration.AssistSessionSnapshot
 import com.tetraploid.joyforold.ime.JoyImeHelper
 import com.tetraploid.joyforold.data.ApiKeyStore
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
@@ -65,6 +73,7 @@ data class RuntimePermissionPrompt(
     val message: String,
     val resumeEnableWakeWord: Boolean = false,
     val resumeWakeWordVoice: Boolean = false,
+    val resumeVoiceInputAfterPermission: Boolean = false,
 )
 
 data class AgentUiState(
@@ -128,6 +137,24 @@ data class AgentUiState(
     val permissionPrompt: RuntimePermissionPrompt? = null,
     val visionDebugEnabled: Boolean = false,
     val visionDebugFrames: List<VisionDebugFrame> = emptyList(),
+    val assistRole: AssistRole = AssistRole.ELDER,
+    val assistPhase: AssistSessionPhase = AssistSessionPhase.IDLE,
+    val assistPairCode: String = "",
+    val assistSessionId: String = "",
+    val assistStatusMessage: String = "",
+    val assistPeerDisplayName: String = "",
+    val assistLatestFrameBytes: ByteArray? = null,
+    val assistLatestFrameWidth: Int = 0,
+    val assistLatestFrameHeight: Int = 0,
+    val assistLatestFrameFormat: String = "",
+    val assistBindings: List<BindingDto> = emptyList(),
+    val assistServerHttpUrl: String = "",
+    val assistServerWsUrl: String = "",
+    val assistDisplayName: String = "",
+    val assistStreamFps: Float = 0f,
+    val assistStreamLatencyMs: Long = -1L,
+    val assistMode: Boolean = false,
+    val assistNavigateTick: Long = 0L,
 )
 
 object AgentRuntime {
@@ -158,6 +185,12 @@ object AgentRuntime {
     private var asrSpeakerProfileStore: AsrSpeakerProfileStore? = null
     private var proactiveAssistantEngine: ProactiveAssistantEngine? = null
     private var visionDebugStore: VisionDebugStore? = null
+    private var assistPairingStore: AssistPairingStore? = null
+    private var assistSessionManager: AssistSessionManager? = null
+
+    @Volatile
+    private var assistModeActive = false
+    private var remoteAssistCommandRun = false
 
     @Volatile
     private var appInForeground: Boolean = false
@@ -169,6 +202,10 @@ object AgentRuntime {
 
     @Volatile
     private var visionOverlaySuppressionDepth = 0
+
+    /** 视觉 Agent 在外部应用（微信等）执行期间禁止浮层复现，避免挡截图与 tap。 */
+    @Volatile
+    private var visionAgentActive = false
 
     private val recentVoicePrompts = ArrayDeque<String>(6)
 
@@ -197,6 +234,18 @@ object AgentRuntime {
             }
             visionDebugStore = VisionDebugStore(application).also {
                 orchestrator.bindVisionDebugStore(it)
+            }
+            assistPairingStore = AssistPairingStore(application)
+            assistSessionManager = AssistSessionManager(
+                application = application,
+                scope = agentScope,
+                store = assistPairingStore!!,
+                onSnapshot = ::applyAssistSnapshot,
+            ).also {
+                it.refreshConfig(
+                    defaultHttp = BuildConfig.ASSIST_SERVER_URL,
+                    defaultWs = BuildConfig.ASSIST_SERVER_WS,
+                )
             }
             voiceInteractionConfigStore = VoiceInteractionConfigStore(application)
             asrSpeakerProfileStore = AsrSpeakerProfileStore(application)
@@ -351,6 +400,7 @@ object AgentRuntime {
 
     private fun shouldShowOverlay(state: AgentUiState): Boolean {
         if (appInForeground) return false
+        if (visionAgentActive) return false
         return state.isRunning ||
             state.isListening ||
             state.waitingForUserConfirm ||
@@ -411,25 +461,44 @@ object AgentRuntime {
         }
     }
 
-    suspend fun pushVisionOverlaySuppressionAwait() {
+    suspend fun pushVisionOverlaySuppressionAwait(waitFrame: Boolean = false) {
         if (visionOverlaySuppressionDepth++ == 0) {
             val app = application
             if (app != null && OverlayPermission.canDrawOverlays(app)) {
                 FloatingOverlayService.ensureStarted(app)
-                FloatingOverlayService.hideDialogAwait()
+                FloatingOverlayService.hideDialogAwait(waitFrame = waitFrame)
             }
         }
     }
 
     fun popVisionOverlaySuppression() {
         if (visionOverlaySuppressionDepth <= 0) return
-        if (--visionOverlaySuppressionDepth == 0) {
+        if (--visionOverlaySuppressionDepth == 0 && !visionAgentActive) {
             syncOverlayVisibility()
         }
     }
 
+    suspend fun activateVisionAgentMode() {
+        if (visionAgentActive) return
+        visionAgentActive = true
+        val app = application
+        if (app != null && OverlayPermission.canDrawOverlays(app)) {
+            FloatingOverlayService.ensureStarted(app)
+            FloatingOverlayService.hideDialogAwait(waitFrame = false)
+        }
+        syncOverlayVisibility()
+    }
+
+    fun isVisionAgentActive(): Boolean = visionAgentActive
+
+    fun deactivateVisionAgentMode() {
+        visionAgentActive = false
+        visionOverlaySuppressionDepth = 0
+        syncOverlayVisibility()
+    }
+
     fun resetVisionOverlaySuppression() {
-        if (visionOverlaySuppressionDepth == 0) return
+        if (visionOverlaySuppressionDepth == 0 && !visionAgentActive) return
         visionOverlaySuppressionDepth = 0
         syncOverlayVisibility()
     }
@@ -1054,6 +1123,10 @@ object AgentRuntime {
     }
 
     fun startVoiceInput() {
+        if (blocksLocalAgentForCaregiverAssist()) {
+            appendLog("协助进行中：请在协作页远程操作")
+            return
+        }
         application?.let { initIfNeeded(it) }
         voiceSessionActive = true
         startVoiceInputInternal(
@@ -1065,6 +1138,7 @@ object AgentRuntime {
 
     fun resumeWakeWordVoiceSession() {
         val app = application ?: return
+        if (blocksLocalAgentForCaregiverAssist()) return
         initIfNeeded(app)
         if (_state.value.isRunning || _state.value.isListening) return
         voiceSessionActive = true
@@ -1111,6 +1185,11 @@ object AgentRuntime {
     ) {
         if (_state.value.isListening) return
         val app = application ?: this.application
+        if (app != null && !hasRecordAudioPermission(app)) {
+            voiceSessionActive = false
+            requestRecordAudioForVoiceInput(app)
+            return
+        }
         app?.let { ctx ->
             NetworkStatus.offlineHint(ctx)?.let { hint ->
                 appendLog(hint)
@@ -1535,6 +1614,25 @@ object AgentRuntime {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    private fun requestRecordAudioForVoiceInput(application: Application) {
+        appendLog("语音输入需要麦克风权限")
+        showPermissionPrompt(
+            RuntimePermissionPrompt(
+                kind = RuntimePermissionKind.RecordAudio,
+                title = "需要麦克风权限",
+                message = "语音输入需要麦克风权限，请允许后重试。",
+                resumeVoiceInputAfterPermission = true,
+            ),
+        )
+        speakStatus("需要麦克风权限才能语音输入")
+        if (!appInForeground) {
+            val intent = Intent(application, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            application.startActivity(intent)
+        }
+    }
+
     private fun resolvePresetCommand(command: String): String {
         val preset = presetStore?.findByPhrase(command) ?: return command
         return when (preset.action) {
@@ -1545,9 +1643,18 @@ object AgentRuntime {
 
     fun runAgent(application: Application, resumePendingConfirm: Boolean? = null) {
         initIfNeeded(application)
+        if (blocksLocalAgentForCaregiverAssist()) {
+            appendLog("协助进行中：请在协作页远程操作，本地 Agent 已暂停")
+            return
+        }
         recordUserInteraction()
         val current = _state.value
-        if (current.isRunning) return
+        if (current.isRunning) {
+            if (remoteAssistCommandRun) {
+                relayRemoteAssistStatus(success = false, summary = "已有任务在执行")
+            }
+            return
+        }
         val shouldResumePending = resumePendingConfirm == true
         val effectiveCommand = resolvePresetCommand(current.command)
 
@@ -1624,6 +1731,9 @@ object AgentRuntime {
                         maybeAppendInfoCard(message)
                         publishConversationCards()
                         syncOverlayVisibility()
+                        if (remoteAssistCommandRun) {
+                            assistSessionManager?.relayAgentStatus("running", message)
+                        }
                     },
                 )
 
@@ -1677,8 +1787,10 @@ object AgentRuntime {
                 publishConversationCards()
                 syncOverlayVisibility()
                 refreshVisionDebugFrames()
+                relayRemoteAssistStatus(result.success, result.summary)
                 continueVoiceConversation(application, result)
             } catch (_: CancellationException) {
+                relayRemoteAssistStatus(success = false, summary = "已停止")
                 _state.update {
                     it.copy(isRunning = false, isPaused = false, statusMessage = "已停止")
                 }
@@ -1687,7 +1799,7 @@ object AgentRuntime {
             } finally {
                 agentJob = null
                 runContext = null
-                resetVisionOverlaySuppression()
+                deactivateVisionAgentMode()
                 scheduleWakeWordRestoreIfIdle()
             }
         }
@@ -1918,6 +2030,134 @@ object AgentRuntime {
         visionDebugStore?.clearAll()
         _state.update { it.copy(visionDebugFrames = emptyList()) }
         appendLog("已清空视觉调试截图")
+    }
+
+    fun setAssistMode(active: Boolean) {
+        assistModeActive = active
+        _state.update { it.copy(assistMode = active) }
+    }
+
+    fun isAssistModeActive(): Boolean = assistModeActive
+
+    fun refreshAssistConfig() {
+        val app = application ?: return
+        initIfNeeded(app)
+        assistSessionManager?.refreshConfig(
+            defaultHttp = BuildConfig.ASSIST_SERVER_URL,
+            defaultWs = BuildConfig.ASSIST_SERVER_WS,
+        )
+    }
+
+    fun setAssistRole(role: AssistRole) {
+        ensureAssistReady()?.setRole(role)
+    }
+
+    fun setAssistDisplayName(name: String) {
+        ensureAssistReady()?.setDisplayName(name)
+    }
+
+    fun setAssistServerHttpUrl(url: String) {
+        ensureAssistReady()?.setServerHttpUrl(url)
+    }
+
+    fun setAssistServerWsUrl(url: String) {
+        ensureAssistReady()?.setServerWsUrl(url)
+    }
+
+    fun startElderAssistSession() {
+        ensureAssistReady()?.startElderSession()
+        requestAssistNavigation()
+    }
+
+    fun joinAssistSession(pairCode: String) {
+        ensureAssistReady()?.joinWithPairCode(pairCode)
+    }
+
+    fun connectAssistBinding(binding: BindingDto) {
+        ensureAssistReady()?.connectBinding(binding)
+    }
+
+    fun deleteAssistBinding(bindingId: String) {
+        ensureAssistReady()?.deleteBinding(bindingId)
+    }
+
+    fun sendAssistTap(x: Int, y: Int) {
+        ensureAssistReady()?.sendTap(x, y)
+    }
+
+    fun sendAssistSwipe(x1: Int, y1: Int, x2: Int, y2: Int) {
+        ensureAssistReady()?.sendSwipe(x1, y1, x2, y2)
+    }
+
+    fun sendAssistAction(name: String) {
+        ensureAssistReady()?.sendAction(name)
+    }
+
+    fun sendAssistTypeText(text: String) {
+        ensureAssistReady()?.sendTypeText(text)
+    }
+
+    fun sendAssistCommand(text: String) {
+        ensureAssistReady()?.sendCommand(text)
+    }
+
+    fun endAssistSession() {
+        ensureAssistReady()?.endSession()
+    }
+
+    private fun ensureAssistReady(): AssistSessionManager? {
+        val app = application ?: return null
+        initIfNeeded(app)
+        return assistSessionManager
+    }
+
+    private fun requestAssistNavigation() {
+        _state.update { it.copy(assistNavigateTick = it.assistNavigateTick + 1) }
+    }
+
+    private fun applyAssistSnapshot(snapshot: AssistSessionSnapshot) {
+        _state.update {
+            it.copy(
+                assistRole = snapshot.role,
+                assistPhase = snapshot.phase,
+                assistPairCode = snapshot.pairCode,
+                assistSessionId = snapshot.sessionId,
+                assistStatusMessage = snapshot.statusMessage,
+                assistPeerDisplayName = snapshot.peerDisplayName,
+                assistLatestFrameBytes = snapshot.latestFrameBytes,
+                assistLatestFrameWidth = snapshot.latestFrameWidth,
+                assistLatestFrameHeight = snapshot.latestFrameHeight,
+                assistLatestFrameFormat = snapshot.latestFrameFormat,
+                assistBindings = snapshot.bindings,
+                assistServerHttpUrl = snapshot.serverHttpUrl,
+                assistServerWsUrl = snapshot.serverWsUrl,
+                assistDisplayName = snapshot.displayName,
+                assistStreamFps = snapshot.streamFps,
+                assistStreamLatencyMs = snapshot.streamLatencyMs,
+            )
+        }
+    }
+
+    fun submitRemoteAssistCommand(application: Application, command: String) {
+        initIfNeeded(application)
+        remoteAssistCommandRun = true
+        updateCommand(command)
+        runAgent(application)
+    }
+
+    private fun blocksLocalAgentForCaregiverAssist(): Boolean {
+        val state = _state.value
+        return state.assistRole == AssistRole.CAREGIVER &&
+            state.assistPhase == AssistSessionPhase.ACTIVE
+    }
+
+    private fun relayRemoteAssistStatus(success: Boolean, summary: String) {
+        if (!remoteAssistCommandRun) return
+        remoteAssistCommandRun = false
+        assistSessionManager?.relayAgentStatus(
+            status = if (success) "done" else "failed",
+            message = summary.ifBlank { if (success) "执行完成" else "执行失败" },
+        )
     }
 
     fun previewPageTree() {

@@ -12,6 +12,8 @@ import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 无障碍树不可读时，用 AccessibilityService 截屏供多模态模型观察。
@@ -19,6 +21,7 @@ import kotlinx.coroutines.delay
 object PageScreenshotCapture {
     const val JPEG_QUALITY = 72
     const val MAX_WIDTH_PX = 720
+    const val ASSIST_MIN_INTERVAL_MS = 180L
     private const val TAG = "JoyForOld/Vision"
     private const val MIN_INTERVAL_MS = 1_200L
     private const val RETRY_DELAY_MS = 1_300L
@@ -27,18 +30,40 @@ object PageScreenshotCapture {
     private var lastCaptureAtMs = 0L
 
     @Volatile
+    private var assistLastCaptureAtMs = 0L
+
+    @Volatile
     private var cachedBase64: String? = null
 
-    suspend fun captureBase64Jpeg(service: AccessibilityService): String? {
+    private val captureMutex = Mutex()
+
+    fun invalidateCache() {
+        cachedBase64 = null
+        lastCaptureAtMs = 0L
+    }
+
+    suspend fun captureBase64Jpeg(
+        service: AccessibilityService,
+        forceFresh: Boolean = false,
+    ): String? = captureMutex.withLock {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             Log.w(TAG, "takeScreenshot 需要 Android 11+")
-            return cachedBase64
+            return@withLock cachedBase64
+        }
+
+        if (forceFresh) {
+            invalidateCache()
         }
 
         val now = SystemClock.elapsedRealtime()
+        val sinceLast = now - lastCaptureAtMs
+        if (sinceLast in 1 until MIN_INTERVAL_MS) {
+            delay(MIN_INTERVAL_MS - sinceLast)
+        }
+
         val cached = cachedBase64
-        if (!cached.isNullOrBlank() && now - lastCaptureAtMs < MIN_INTERVAL_MS) {
-            return cached
+        if (!forceFresh && !cached.isNullOrBlank() && SystemClock.elapsedRealtime() - lastCaptureAtMs < MIN_INTERVAL_MS) {
+            return@withLock cached
         }
 
         var result = captureBase64JpegApi30(service)
@@ -51,15 +76,49 @@ object PageScreenshotCapture {
             cachedBase64 = result
             lastCaptureAtMs = SystemClock.elapsedRealtime()
             Log.i(TAG, "screenshot ok (${result.length} chars base64)")
-            return result
+            return@withLock result
         }
 
         Log.w(TAG, "screenshot failed; ${if (cached.isNullOrBlank()) "no cache" else "reuse cache"}")
-        return cached
+        cached
+    }
+
+    /** 远程协助推帧：更短间隔、直接返回 Bitmap，不走 Agent 截图缓存。 */
+    suspend fun captureBitmapForAssist(
+        service: AccessibilityService,
+        minIntervalMs: Long = ASSIST_MIN_INTERVAL_MS,
+        force: Boolean = false,
+    ): Bitmap? = captureMutex.withLock {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            Log.w(TAG, "takeScreenshot 需要 Android 11+")
+            return@withLock null
+        }
+        if (!force) {
+            val now = SystemClock.elapsedRealtime()
+            val sinceLast = now - assistLastCaptureAtMs
+            if (sinceLast in 1 until minIntervalMs) {
+                delay(minIntervalMs - sinceLast)
+            }
+        }
+        val bitmap = captureBitmapApi30(service)
+        if (bitmap != null) {
+            assistLastCaptureAtMs = SystemClock.elapsedRealtime()
+        }
+        bitmap
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
-    private suspend fun captureBase64JpegApi30(service: AccessibilityService): String? =
+    private suspend fun captureBase64JpegApi30(service: AccessibilityService): String? {
+        val bitmap = captureBitmapApi30(service) ?: return null
+        return try {
+            encodeJpegBase64(bitmap)
+        } finally {
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    private suspend fun captureBitmapApi30(service: AccessibilityService): Bitmap? =
         suspendCoroutine { continuation ->
             service.takeScreenshot(
                 Display.DEFAULT_DISPLAY,
@@ -76,11 +135,9 @@ object PageScreenshotCapture {
                                 continuation.resume(null)
                                 return
                             }
-                            val encoded = encodeJpegBase64(bitmap)
-                            if (!bitmap.isRecycled) bitmap.recycle()
-                            continuation.resume(encoded)
+                            continuation.resume(bitmap)
                         } catch (error: Exception) {
-                            Log.w(TAG, "screenshot encode error: ${error.message}")
+                            Log.w(TAG, "screenshot bitmap error: ${error.message}")
                             continuation.resume(null)
                         } finally {
                             screenshot.hardwareBuffer.close()
@@ -115,7 +172,6 @@ object PageScreenshotCapture {
     }
 
     internal fun clearCacheForTests() {
-        cachedBase64 = null
-        lastCaptureAtMs = 0L
+        invalidateCache()
     }
 }

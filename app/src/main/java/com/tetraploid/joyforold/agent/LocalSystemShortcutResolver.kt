@@ -66,6 +66,13 @@ object LocalSystemShortcutResolver {
             summary = "已打开显示设置",
         ),
         SettingsShortcut(
+            action = "open_font_settings",
+            phrases = setOf(
+                "放大字体", "字体调大", "字体设置", "字太小", "调大字体", "打开字体设置",
+            ),
+            summary = "已打开字体显示设置",
+        ),
+        SettingsShortcut(
             action = "open_settings",
             phrases = setOf(
                 "打开设置", "系统设置", "手机设置", "进入设置",

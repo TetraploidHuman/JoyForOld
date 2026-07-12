@@ -26,6 +26,12 @@ object PageReadiness {
         return !isReadable(snapshot)
     }
 
+    /** 仅当无障碍树不可用且截屏成功时进入视觉模式；不因应用包名写死。 */
+    fun shouldEnterVisionMode(
+        snapshot: StructuredPageSnapshot?,
+        screenshotBase64: String?,
+    ): Boolean = needsVisionFallback(snapshot) && !screenshotBase64.isNullOrBlank()
+
     fun isWrongChromeTree(detail: String): Boolean =
         ExternalWindowFilter.isSystemChromeTreeSnippet(detail)
 }

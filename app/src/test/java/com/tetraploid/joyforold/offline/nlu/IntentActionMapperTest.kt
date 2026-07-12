@@ -29,4 +29,14 @@ class IntentActionMapperTest {
         assertEquals("set_alarm", steps!!.first().action)
         assertEquals("7:30", steps.first().targetText)
     }
+
+    @Test
+    fun toSteps_sendSms() {
+        val steps = IntentActionMapper.toSteps("send_sms", "给女儿发短信：我到了", context = null)
+        assertNotNull(steps)
+        assertEquals("send_sms", steps!!.first().action)
+        assertEquals("女儿", steps.first().targetText)
+        assertEquals("我到了", steps.first().inputText)
+        assertTrue(AgentToolRegistry.isSystemIntentOnly(steps))
+    }
 }
