@@ -15,6 +15,13 @@ object AgentStepAdvisor {
     ): String? {
         MediaPlaybackHeuristics.plannerHint(session, snapshot, rootCommand)?.let { return it }
 
+        SearchTaskHeuristics.postStepNudge(
+            command = rootCommand,
+            steps = session.stepRecords,
+            snapshot = snapshot,
+            lastAction = action,
+        )?.let { return it }
+
         VisionTaskHint.postStepNudge(
             command = rootCommand,
             steps = session.stepRecords,

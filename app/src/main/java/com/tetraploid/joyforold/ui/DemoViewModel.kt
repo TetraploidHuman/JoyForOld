@@ -83,6 +83,13 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun previewPageTree() = AgentRuntime.previewPageTree()
 
+    fun setVisionDebugEnabled(enabled: Boolean) =
+        AgentRuntime.setVisionDebugEnabled(getApplication(), enabled)
+
+    fun refreshVisionDebugFrames() = AgentRuntime.refreshVisionDebugFrames()
+
+    fun clearVisionDebugFrames() = AgentRuntime.clearVisionDebugFrames()
+
     fun startVoiceInput() = AgentRuntime.startVoiceInput()
 
     fun resumeWakeWordVoiceSession() = AgentRuntime.resumeWakeWordVoiceSession()

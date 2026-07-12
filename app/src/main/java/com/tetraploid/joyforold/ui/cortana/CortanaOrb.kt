@@ -46,6 +46,10 @@ fun CortanaOrb(
         label = "innerSpin",
     )
     val glowAlpha = if (active) 0.32f else 0.14f
+    val accent = CortanaColors.Accent
+    val accentGlow = CortanaColors.AccentGlow
+    val background = CortanaColors.Background
+    val onBackground = CortanaColors.OnBackground
 
     Canvas(modifier = modifier.size(size)) {
         val center = Offset(this.size.width / 2f, this.size.height / 2f)
@@ -55,9 +59,9 @@ fun CortanaOrb(
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    CortanaColors.AccentGlow.copy(alpha = glowAlpha),
-                    CortanaColors.Accent.copy(alpha = glowAlpha * 0.45f),
-                    CortanaColors.Background,
+                    accentGlow.copy(alpha = glowAlpha),
+                    accent.copy(alpha = glowAlpha * 0.45f),
+                    background,
                 ),
                 center = center,
                 radius = outerRadius * 1.55f,
@@ -68,13 +72,13 @@ fun CortanaOrb(
 
         rotate(outerSpin, center) {
             drawCircle(
-                color = CortanaColors.Accent.copy(alpha = if (active) 0.95f else 0.45f),
+                color = accent.copy(alpha = if (active) 0.95f else 0.45f),
                 radius = outerRadius,
                 center = center,
                 style = Stroke(width = 5.5.dp.toPx(), cap = StrokeCap.Round),
             )
             drawArc(
-                color = CortanaColors.AccentGlow.copy(alpha = if (active) 0.85f else 0.35f),
+                color = accentGlow.copy(alpha = if (active) 0.85f else 0.35f),
                 startAngle = 20f,
                 sweepAngle = 110f,
                 useCenter = false,
@@ -86,13 +90,13 @@ fun CortanaOrb(
 
         rotate(innerSpin, center) {
             drawCircle(
-                color = CortanaColors.AccentGlow.copy(alpha = if (active) 0.75f else 0.32f),
+                color = accentGlow.copy(alpha = if (active) 0.75f else 0.32f),
                 radius = innerRadius,
                 center = center,
                 style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round),
             )
             drawArc(
-                color = CortanaColors.OnBackground.copy(alpha = if (active) 0.55f else 0.25f),
+                color = onBackground.copy(alpha = if (active) 0.55f else 0.25f),
                 startAngle = 200f,
                 sweepAngle = 80f,
                 useCenter = false,
@@ -103,7 +107,7 @@ fun CortanaOrb(
         }
 
         drawCircle(
-            color = CortanaColors.Background,
+            color = background,
             radius = innerRadius * 0.48f,
             center = center,
         )

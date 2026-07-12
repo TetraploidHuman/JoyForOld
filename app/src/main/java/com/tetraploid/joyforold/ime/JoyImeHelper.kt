@@ -4,29 +4,31 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import android.view.inputmethod.InputMethodInfo
 import android.view.inputmethod.InputMethodManager
 
 object JoyImeHelper {
     private const val IME_CLASS = "com.tetraploid.joyforold.ime.JoyInputMethodService"
 
-    fun imeId(packageName: String): String = "$packageName/$IME_CLASS"
-
     fun componentName(context: Context): ComponentName =
         ComponentName(context.packageName, IME_CLASS)
 
+    /** 与 [InputMethodInfo.getId] / 系统设置里存的 ID 一致（flattenToShortString）。 */
+    fun imeId(context: Context): String = componentName(context).flattenToShortString()
+
     fun isEnabled(context: Context): Boolean {
         val imm = context.getSystemService(InputMethodManager::class.java) ?: return false
-        val id = imeId(context.packageName)
-        return imm.enabledInputMethodList.any { it.id == id }
+        val ours = componentName(context)
+        return imm.enabledInputMethodList.any { it.component == ours }
     }
 
     fun isSelectedAsDefault(context: Context): Boolean {
-        val imm = context.getSystemService(InputMethodManager::class.java) ?: return false
         val selected = Settings.Secure.getString(
             context.contentResolver,
             Settings.Secure.DEFAULT_INPUT_METHOD,
         ) ?: return false
-        return selected == imeId(context.packageName)
+        val parsed = ComponentName.unflattenFromString(selected) ?: return false
+        return parsed == componentName(context)
     }
 
     fun createSettingsIntent(): Intent =

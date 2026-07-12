@@ -4,9 +4,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.ui.cortana.MainPivotScreen
 import com.tetraploid.joyforold.ui.theme.JoyForOldTheme
+import com.tetraploid.joyforold.ui.theme.ThemePreferenceStore
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -14,8 +19,16 @@ class MainActivity : ComponentActivity() {
         AgentRuntime.initIfNeeded(application)
         enableEdgeToEdge()
         setContent {
-            JoyForOldTheme {
-                MainPivotScreen()
+            val themeStore = remember { ThemePreferenceStore(this) }
+            var darkTheme by remember { mutableStateOf(themeStore.isDarkTheme()) }
+            JoyForOldTheme(darkTheme = darkTheme) {
+                MainPivotScreen(
+                    darkTheme = darkTheme,
+                    onDarkThemeChange = { enabled ->
+                        darkTheme = enabled
+                        themeStore.setDarkTheme(enabled)
+                    },
+                )
             }
         }
     }

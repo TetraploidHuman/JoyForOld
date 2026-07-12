@@ -16,8 +16,17 @@ object ExternalWindowFilter {
         "com.miui.home",
         "com.huawei.android.launcher",
         "com.oppo.launcher",
-        "com.sec.android.app.launcher",
+        "com.sec.android.launcher",
         "com.ss.squarehome",
+        // 第三方输入法窗口（键盘弹出时勿当成目标 App 页面）
+        "com.google.android.inputmethod",
+        "com.android.inputmethod",
+        "com.sohu.inputmethod",
+        "com.baidu.input",
+        "com.iflytek.inputmethod",
+        "com.microsoft.swiftkey",
+        "com.tencent.qqpinyin",
+        "com.huawei.ohos.inputmethod",
     )
 
     private val systemChromeMarkers = listOf(

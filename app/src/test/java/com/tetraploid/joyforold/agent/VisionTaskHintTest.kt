@@ -14,7 +14,7 @@ class VisionTaskHintTest {
     @Test
     fun nudges_type_after_repeated_taps() {
         val cmd = "打开微信，给大女儿发消息，发一条测试消息"
-        val steps = (1..3).map { i ->
+        val steps = (1..1).map { i ->
             AgentStepRecord(
                 step = i,
                 action = AgentAction(action = "tap", targetText = "500,200"),

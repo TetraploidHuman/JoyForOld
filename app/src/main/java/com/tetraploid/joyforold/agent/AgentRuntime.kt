@@ -126,6 +126,8 @@ data class AgentUiState(
     val cloudContextConsentGranted: Boolean = false,
     val voiceBargeInEnabled: Boolean = true,
     val permissionPrompt: RuntimePermissionPrompt? = null,
+    val visionDebugEnabled: Boolean = false,
+    val visionDebugFrames: List<VisionDebugFrame> = emptyList(),
 )
 
 object AgentRuntime {
@@ -155,6 +157,7 @@ object AgentRuntime {
     private var voiceInteractionConfigStore: VoiceInteractionConfigStore? = null
     private var asrSpeakerProfileStore: AsrSpeakerProfileStore? = null
     private var proactiveAssistantEngine: ProactiveAssistantEngine? = null
+    private var visionDebugStore: VisionDebugStore? = null
 
     @Volatile
     private var appInForeground: Boolean = false
@@ -163,6 +166,9 @@ object AgentRuntime {
 
     @Volatile
     private var voiceSessionActive = false
+
+    @Volatile
+    private var visionOverlaySuppressionDepth = 0
 
     private val recentVoicePrompts = ArrayDeque<String>(6)
 
@@ -188,6 +194,9 @@ object AgentRuntime {
             }
             contextConsentStore = ContextConsentStore(application).also {
                 orchestrator.bindContextConsentStore(it)
+            }
+            visionDebugStore = VisionDebugStore(application).also {
+                orchestrator.bindVisionDebugStore(it)
             }
             voiceInteractionConfigStore = VoiceInteractionConfigStore(application)
             asrSpeakerProfileStore = AsrSpeakerProfileStore(application)
@@ -232,6 +241,8 @@ object AgentRuntime {
                     notificationAccessGranted = NotificationAccessPermission.isEnabled(application),
                     cloudContextConsentGranted = contextConsentStore?.hasConsented() == true,
                     voiceBargeInEnabled = voiceInteractionConfigStore?.isBargeInEnabled() != false,
+                    visionDebugEnabled = visionDebugStore?.isEnabled() == true,
+                    visionDebugFrames = visionDebugStore?.listFrames().orEmpty(),
                 )
             }
             preloadWakeWordModelIfNeeded()
@@ -387,12 +398,40 @@ object AgentRuntime {
     private fun syncOverlayVisibility() {
         val app = application ?: return
         if (!OverlayPermission.canDrawOverlays(app)) return
+        if (visionOverlaySuppressionDepth > 0) {
+            FloatingOverlayService.ensureStarted(app)
+            FloatingOverlayService.hideDialog()
+            return
+        }
         if (shouldShowOverlay(_state.value)) {
             FloatingOverlayService.ensureStarted(app)
             FloatingOverlayService.showDialog()
         } else if (FloatingOverlayService.isRunning()) {
             FloatingOverlayService.hideDialog()
         }
+    }
+
+    suspend fun pushVisionOverlaySuppressionAwait() {
+        if (visionOverlaySuppressionDepth++ == 0) {
+            val app = application
+            if (app != null && OverlayPermission.canDrawOverlays(app)) {
+                FloatingOverlayService.ensureStarted(app)
+                FloatingOverlayService.hideDialogAwait()
+            }
+        }
+    }
+
+    fun popVisionOverlaySuppression() {
+        if (visionOverlaySuppressionDepth <= 0) return
+        if (--visionOverlaySuppressionDepth == 0) {
+            syncOverlayVisibility()
+        }
+    }
+
+    fun resetVisionOverlaySuppression() {
+        if (visionOverlaySuppressionDepth == 0) return
+        visionOverlaySuppressionDepth = 0
+        syncOverlayVisibility()
     }
 
     private val sessionCards = mutableListOf<ConversationCard>()
@@ -1637,15 +1676,18 @@ object AgentRuntime {
                 finalizeSessionCards(result)
                 publishConversationCards()
                 syncOverlayVisibility()
+                refreshVisionDebugFrames()
                 continueVoiceConversation(application, result)
             } catch (_: CancellationException) {
                 _state.update {
                     it.copy(isRunning = false, isPaused = false, statusMessage = "已停止")
                 }
                 syncOverlayVisibility()
+                refreshVisionDebugFrames()
             } finally {
                 agentJob = null
                 runContext = null
+                resetVisionOverlaySuppression()
                 scheduleWakeWordRestoreIfIdle()
             }
         }
@@ -1858,6 +1900,24 @@ object AgentRuntime {
                 wakeWordActivation = true,
             )
         }
+    }
+
+    fun setVisionDebugEnabled(application: Application, enabled: Boolean) {
+        initIfNeeded(application)
+        visionDebugStore?.setEnabled(enabled)
+        _state.update { it.copy(visionDebugEnabled = enabled) }
+        appendLog(if (enabled) "视觉调试已开启：Agent 将保存带坐标标记的截图" else "视觉调试已关闭")
+    }
+
+    fun refreshVisionDebugFrames() {
+        val frames = visionDebugStore?.listFrames().orEmpty()
+        _state.update { it.copy(visionDebugFrames = frames) }
+    }
+
+    fun clearVisionDebugFrames() {
+        visionDebugStore?.clearAll()
+        _state.update { it.copy(visionDebugFrames = emptyList()) }
+        appendLog("已清空视觉调试截图")
     }
 
     fun previewPageTree() {

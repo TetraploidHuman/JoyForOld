@@ -34,8 +34,24 @@ class AppHintStoreTest {
         )
         store.ensureSeededDefaults()
         val hints = store.hintsFor(packageName)
-        assertTrue(hints.any { it.contains("tap") && it.contains("无障碍树") })
+        assertTrue(hints.any { it.contains("tap") || it.contains("快览为空") })
         assertFalse(hints.any { it.contains("click 右上角") })
+    }
+
+    @Test
+    fun filters_stale_vision_hints_when_a11y_readable() {
+        val context: Context = RuntimeEnvironment.getApplication()
+        val store = AppHintStore(context)
+        val packageName = "com.ruanmei.ithome"
+        store.addHint(
+            packageName,
+            "无障碍树不可用：根据截图用 tap 坐标操作，输入前 tap 输入框再 type；勿用 click/read_tree",
+        )
+        store.addHint(packageName, "曾通过 click「搜索框」完成操作")
+        val filtered = store.formatForPrompt(packageName, a11yReadable = true)
+        assertFalse(filtered.contains("无障碍树不可用"))
+        assertFalse(filtered.contains("勿用 click"))
+        assertTrue(filtered.contains("搜索框"))
     }
 
     @Test
@@ -49,7 +65,7 @@ class AppHintStoreTest {
         )
         store.ensureSeededDefaults()
         val hints = store.hintsFor(packageName)
-        assertTrue(hints.any { it.contains("tap") && it.contains("无障碍树") })
+        assertTrue(hints.any { it.contains("tap") || it.contains("快览为空") })
         assertFalse(hints.any { it.contains("右上角") })
     }
 }

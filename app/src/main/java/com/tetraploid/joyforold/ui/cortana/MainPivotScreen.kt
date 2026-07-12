@@ -37,7 +37,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-fun MainPivotScreen(viewModel: DemoViewModel = viewModel()) {
+fun MainPivotScreen(
+    viewModel: DemoViewModel = viewModel(),
+    darkTheme: Boolean = false,
+    onDarkThemeChange: (Boolean) -> Unit = {},
+) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -262,6 +266,8 @@ fun MainPivotScreen(viewModel: DemoViewModel = viewModel()) {
                     )
                     1 -> SettingsPage(
                         uiState = uiState,
+                        darkTheme = darkTheme,
+                        onDarkThemeChange = onDarkThemeChange,
                         overlayRunning = overlayRunning.value,
                         onRequestAudioPermission = {
                             showRecordAudioDialog("语音识别与本地唤醒需要麦克风权限。") {}
@@ -301,6 +307,11 @@ fun MainPivotScreen(viewModel: DemoViewModel = viewModel()) {
                         onUpdateCommand = viewModel::updateCommand,
                         onRunAgent = viewModel::runAgent,
                         onPreviewPage = viewModel::previewPageTree,
+                        onSetVisionDebugEnabled = { enabled ->
+                            viewModel.setVisionDebugEnabled(enabled)
+                        },
+                        onRefreshVisionDebug = viewModel::refreshVisionDebugFrames,
+                        onClearVisionDebug = viewModel::clearVisionDebugFrames,
                     )
                     2 -> CollaborationPage(
                         uiState = uiState,

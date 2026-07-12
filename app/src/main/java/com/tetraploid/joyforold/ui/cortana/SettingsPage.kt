@@ -38,6 +38,8 @@ import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 @Composable
 fun SettingsPage(
     uiState: AgentUiState,
+    darkTheme: Boolean,
+    onDarkThemeChange: (Boolean) -> Unit,
     overlayRunning: Boolean,
     onRequestAudioPermission: () -> Unit,
     onRequestContactsPermission: () -> Unit,
@@ -65,6 +67,9 @@ fun SettingsPage(
     onUpdateCommand: (String) -> Unit,
     onRunAgent: () -> Unit,
     onPreviewPage: () -> Unit,
+    onSetVisionDebugEnabled: (Boolean) -> Unit,
+    onRefreshVisionDebug: () -> Unit,
+    onClearVisionDebug: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -87,6 +92,33 @@ fun SettingsPage(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        SectionTitle("外观")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "深色模式",
+                color = CortanaColors.OnBackground,
+                fontSize = 15.sp,
+            )
+            Switch(
+                checked = darkTheme,
+                onCheckedChange = onDarkThemeChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = CortanaColors.Accent,
+                    checkedTrackColor = CortanaColors.SurfaceElevated,
+                ),
+            )
+        }
+        Text(
+            text = if (darkTheme) "当前为深色界面" else "当前为亮色界面",
+            color = CortanaColors.OnBackgroundMuted,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(start = 4.dp),
+        )
+        SectionDivider()
         SectionTitle("权限与服务")
         StatusLine("无障碍", uiState.accessibilityEnabled)
         if (uiState.accessibilityEnabled && !uiState.accessibilityServiceConnected) {
@@ -107,10 +139,13 @@ fun SettingsPage(
         StatusLine("联系人", uiState.readContactsGranted)
         StatusLine("通知使用权", uiState.notificationAccessGranted)
         StatusLine("悬浮助手", overlayRunning)
-        StatusLine("Joy 输入助手", uiState.joyImeEnabled)
+        JoyImeStatusLine(
+            enabled = uiState.joyImeEnabled,
+            selectedAsDefault = uiState.joyImeSelectedAsDefault,
+        )
         if (uiState.joyImeEnabled && !uiState.joyImeSelectedAsDefault) {
             Text(
-                text = "已启用但未设为默认输入法，自动输入可能失败。",
+                text = "已启用但未设默认：助手会用粘贴输入；设为默认可提高微信等自动输入成功率。",
                 color = CortanaColors.OnBackgroundSecondary,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 4.dp),
@@ -133,9 +168,9 @@ fun SettingsPage(
         ) {
             Text(
                 if (uiState.joyImeSelectedAsDefault) {
-                    "Joy 输入助手已设为默认"
+                    "Joy 输入助手（已设默认）"
                 } else {
-                    "设置 Joy 输入助手（自动输入）"
+                    "启用 Joy 输入助手（可选）"
                 },
             )
         }
@@ -407,6 +442,16 @@ fun SettingsPage(
         }
 
         SectionDivider()
+        SectionTitle("视觉调试")
+        VisionDebugGallery(
+            enabled = uiState.visionDebugEnabled,
+            frames = uiState.visionDebugFrames,
+            onEnabledChange = onSetVisionDebugEnabled,
+            onClear = onClearVisionDebug,
+            onRefresh = onRefreshVisionDebug,
+        )
+
+        SectionDivider()
         SectionTitle("运行日志")
         uiState.logs.takeLast(20).forEach { line ->
             Text(line, color = CortanaColors.OnBackgroundMuted, fontSize = 11.sp)
@@ -428,6 +473,18 @@ private fun SectionTitle(text: String) {
 @Composable
 private fun SectionDivider() {
     HorizontalDivider(color = CortanaColors.Divider, modifier = Modifier.padding(vertical = 4.dp))
+}
+
+@Composable
+private fun JoyImeStatusLine(enabled: Boolean, selectedAsDefault: Boolean) {
+    val (text, color) = when {
+        selectedAsDefault ->
+            "Joy 输入助手：已就绪（自己打字会自动切回原键盘）" to CortanaColors.Success
+        enabled ->
+            "Joy 输入助手：已启用（可选设为默认）" to CortanaColors.OnBackgroundSecondary
+        else -> "Joy 输入助手：未启用（可选）" to CortanaColors.OnBackgroundMuted
+    }
+    Text(text = text, color = color, fontSize = 13.sp)
 }
 
 @Composable

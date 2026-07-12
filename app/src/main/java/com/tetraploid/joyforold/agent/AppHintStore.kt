@@ -29,10 +29,23 @@ class AppHintStore(context: Context) {
         }.getOrDefault(emptyList())
     }
 
-    fun formatForPrompt(packageName: String): String {
-        val hints = hintsFor(packageName)
+    fun formatForPrompt(packageName: String, a11yReadable: Boolean = false): String {
+        val hints = if (a11yReadable) {
+            hintsFor(packageName).filterNot(::isStaleVisionOnlyHint)
+        } else {
+            hintsFor(packageName)
+        }
         if (hints.isEmpty()) return ""
         return hints.joinToString("；", prefix = "【本应用经验】")
+    }
+
+    /** 无障碍可用时勿注入「禁用 click」类旧经验，避免误导 Agent 盲目 tap。 */
+    private fun isStaleVisionOnlyHint(hint: String): Boolean {
+        val lower = hint.lowercase()
+        return lower.contains("无障碍树不可用") ||
+            lower.contains("勿用 click") ||
+            lower.contains("勿用 read_tree") ||
+            (lower.contains("tap 坐标") && lower.contains("勿用"))
     }
 
     fun addHint(packageName: String, hint: String) {
@@ -98,7 +111,7 @@ class AppHintStore(context: Context) {
         private const val MAX_HINTS_PER_APP = 6
         private const val MAX_HINT_CHARS = 120
         private const val GENERIC_VISION_HINT =
-            "无障碍树不可用：根据截图用 tap 坐标操作，输入前 tap 输入框再 type；勿用 click/read_tree"
+            "快览为空时用 tap 坐标操作；有可点击项时优先 click，输入前聚焦输入框再 type"
         private val STALE_POSITION_MARKERS = listOf(
             "右上角",
             "左上角",

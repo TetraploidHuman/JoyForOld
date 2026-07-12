@@ -13,6 +13,7 @@ import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import android.view.inputmethod.InputMethodManager
 import com.tetraploid.joyforold.app.InstalledAppResolver
 import com.tetraploid.joyforold.agent.AgentContextLimits
 import com.tetraploid.joyforold.agent.ActionExecutionResult
@@ -27,6 +28,7 @@ import com.tetraploid.joyforold.agent.StructuredPageSnapshot
 import com.tetraploid.joyforold.agent.UiNodeHeuristics
 import com.tetraploid.joyforold.agent.UiPageProbe
 import com.tetraploid.joyforold.agent.UiTreeSerializer
+import com.tetraploid.joyforold.ime.JoyImeCoordinator
 import com.tetraploid.joyforold.ime.JoyImeHelper
 import com.tetraploid.joyforold.ime.JoyInputMethodService
 import kotlin.coroutines.resume
@@ -161,7 +163,7 @@ class JoyAccessibilityService : AccessibilityService() {
     return when (action.action.lowercase()) {
       "click" -> clickByTextResult(action.targetText)
       "tap" -> tapAtNormalizedResult(action.targetText)
-      "type" -> typeTextResult(action.inputText)
+      "type" -> typeTextResult(action.inputText, action.targetText)
       "send" -> clickSendResult(action.targetText)
       "scroll_down" -> scrollResult(true)
       "scroll_up" -> scrollResult(false)
@@ -466,18 +468,28 @@ class JoyAccessibilityService : AccessibilityService() {
     return x to y
   }
 
-  private fun typeTextResult(input: String?): ActionExecutionResult {
-    val msg = typeText(input)
+  private fun typeTextResult(input: String?, fieldHint: String? = null): ActionExecutionResult {
+    val msg = typeText(input, fieldHint)
     val success = !msg.contains("失败")
     return ActionExecutionResult(
       success = success,
       summary = msg,
-      suggestions = if (success) {
-        emptyList()
-      } else {
-        listOf("先 tap 输入框坐标再 type", "根据截图估算输入框位置")
-      },
+      suggestions = if (success) emptyList() else buildInputFailureSuggestions(),
     )
+  }
+
+  private fun buildInputFailureSuggestions(): List<String> {
+    val suggestions = mutableListOf(
+      "先 tap 输入框坐标再 type",
+      "根据截图估算输入框位置",
+    )
+    when {
+      !JoyImeHelper.isEnabled(this) ->
+        suggestions += "在设置中启用 Joy 输入助手并设为默认输入法"
+      !JoyImeHelper.isSelectedAsDefault(this) ->
+        suggestions += "在设置中将 Joy 输入助手设为默认输入法（无无障碍树时必需）"
+    }
+    return suggestions
   }
 
   private fun clickSendResult(targetText: String? = null): ActionExecutionResult {
@@ -578,6 +590,7 @@ class JoyAccessibilityService : AccessibilityService() {
         if (found != null) break
       }
       val node = found ?: return "点击失败：未找到包含「$text」的可点击元素"
+      recordTapFromNode(node)
       val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
       node.recycle()
       if (clicked) "已点击：$matchedLabel" else "点击失败：系统未接受点击操作"
@@ -586,42 +599,63 @@ class JoyAccessibilityService : AccessibilityService() {
     }
   }
 
-  private fun typeText(input: String?): String {
+  private fun typeText(input: String?, fieldHint: String? = null): String {
     val text = input?.trim().orEmpty()
     if (text.isEmpty()) return "输入失败：缺少 input_text"
 
+    val roots = collectExternalRoots()
+
+    if (!fieldHint.isNullOrBlank()) {
+      try {
+        resolveEditableField(roots, fieldHint)?.let { target ->
+          return tryTypeIntoNode(target, text, recycleTarget = true)
+        }
+      } finally {
+        roots.forEach { it.recycle() }
+      }
+    }
+
     if (lastTapNormalized != null) {
-      prepareInputFocusAtLastTap()
+      hideThirdPartyKeyboard()
       tryImeTypeText(text)?.let { return it }
       pasteViaClipboard(text)?.let { return it }
     }
 
-    val roots = collectExternalRoots()
     var focused: AccessibilityNodeInfo? = null
     var editable: AccessibilityNodeInfo? = null
     return try {
       if (roots.isEmpty()) {
+        hideThirdPartyKeyboard()
+        tryImeTypeText(text)?.let { return it }
         return pasteViaClipboard(text)
           ?: "输入失败：无法读取页面，请先 tap 输入框坐标再 type"
       }
 
-      focused = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+      focused = findValidInputFocus()
       editable = focused
       if (editable == null) {
         editable = findEditableAcrossWindows()
       }
       if (editable == null) {
         editable = roots
-          .mapNotNull { NodeFinder.findBestEditable(it) }
+          .mapNotNull { root ->
+            NodeFinder.findBestEditable(root)?.also { candidate ->
+              if (UiNodeHeuristics.isImeKeyboardNode(candidate)) {
+                candidate.recycle()
+                return@mapNotNull null
+              }
+            }
+          }
           .maxByOrNull { node ->
-            val rect = Rect()
-            node.getBoundsInScreen(rect)
-            rect.bottom * 3 + rect.width()
+            val screenHeight = UiNodeHeuristics.screenHeight(
+              roots.firstOrNull() ?: return@maxByOrNull Int.MIN_VALUE,
+            )
+            UiNodeHeuristics.inputScore(node, screenHeight)
           }
       }
 
       if (editable == null) {
-        editable = pollInputFocus(maxAttempts = 6, intervalMs = 250L)
+        editable = pollValidInputFocus(maxAttempts = 6, intervalMs = 250L)
       }
 
       if (editable == null) {
@@ -629,10 +663,35 @@ class JoyAccessibilityService : AccessibilityService() {
       }
 
       if (editable == null) {
+        hideThirdPartyKeyboard()
         tryImeTypeText(text)?.let { return it }
-        return pasteViaClipboard(text) ?: "输入失败：未找到输入区域，请先 tap 输入框坐标再 type"
+        return pasteViaClipboard(text) ?: buildKeyboardBlockingFailureMessage()
       }
 
+      tryTypeIntoNode(editable, text, recycleTarget = false, alsoRecycle = focused)
+    } finally {
+      recycleInputNodes(focused, if (editable !== focused) editable else null)
+      roots.forEach { it.recycle() }
+    }
+  }
+
+  private fun buildKeyboardBlockingFailureMessage(): String {
+    val imeOpen = isThirdPartyKeyboardVisible()
+    return if (imeOpen) {
+      "输入失败：当前焦点在系统键盘上，无法写入应用输入框。请先 back 收起键盘，或将 Joy 输入助手设为默认输入法后重试"
+    } else {
+      "输入失败：未找到输入区域，请先 tap 输入框坐标再 type"
+    }
+  }
+
+  private fun tryTypeIntoNode(
+    editable: AccessibilityNodeInfo,
+    text: String,
+    recycleTarget: Boolean,
+    alsoRecycle: AccessibilityNodeInfo? = null,
+  ): String {
+    return try {
+      recordTapFromNode(editable)
       editable.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
       editable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
 
@@ -649,27 +708,112 @@ class JoyAccessibilityService : AccessibilityService() {
       if (ok) {
         "已输入：$text"
       } else {
+        hideThirdPartyKeyboard()
         tryImeTypeText(text)
           ?: pasteViaClipboard(text)
           ?: "输入失败：系统未接受输入，可先 tap 输入框再试"
       }
     } finally {
-      recycleInputNodes(focused, editable)
-      roots.forEach { it.recycle() }
+      if (recycleTarget) editable.recycle()
+      alsoRecycle?.recycle()
     }
   }
 
-  /** 通过隐藏 IME 注入文字；需用户已将 Joy 输入助手设为默认输入法。 */
-  private fun tryImeTypeText(text: String, maxWaitMs: Long = 2_000L): String? {
-    if (!JoyImeHelper.isSelectedAsDefault(this)) return null
-    val deadline = SystemClock.uptimeMillis() + maxWaitMs
-    while (SystemClock.uptimeMillis() < deadline) {
-      if (JoyInputMethodService.typeText(text)) {
-        return "已输入法注入：$text"
-      }
-      Thread.sleep(100L)
+  private fun resolveEditableField(
+    roots: List<AccessibilityNodeInfo>,
+    fieldHint: String,
+  ): AccessibilityNodeInfo? {
+    if (roots.isEmpty()) return null
+    return NodeFinder.findEditableByTarget(roots, fieldHint)
+  }
+
+  /** Agent 注入前收起搜狗/Gboard 等，避免 InputConnection 在键盘侧。 */
+  private fun hideThirdPartyKeyboard() {
+    if (!isThirdPartyKeyboardVisible()) return
+    val imm = getSystemService(InputMethodManager::class.java) ?: return
+    @Suppress("DEPRECATION")
+    imm.toggleSoftInput(InputMethodManager.HIDE_IMPLICIT_ONLY, 0)
+    Thread.sleep(200L)
+  }
+
+  private fun isThirdPartyKeyboardVisible(): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false
+    return windows?.any { window ->
+      val pkg = window.root?.packageName?.toString().orEmpty()
+      pkg.contains("inputmethod", ignoreCase = true) ||
+        window.root?.let { root ->
+          NodeFinder.treeContainsImeKeyboard(root).also { root.recycle() }
+        } == true
+    } == true
+  }
+
+  private fun recordTapFromNode(node: AccessibilityNodeInfo) {
+    val rect = Rect()
+    node.getBoundsInScreen(rect)
+    if (rect.width() <= 0 || rect.height() <= 0) return
+    val metrics = resources.displayMetrics
+    val xNorm = (rect.exactCenterX() / metrics.widthPixels * 1000f).toInt().coerceIn(0, 1000)
+    val yNorm = (rect.exactCenterY() / metrics.heightPixels * 1000f).toInt().coerceIn(0, 1000)
+    lastTapNormalized = xNorm to yNorm
+  }
+
+  private fun findValidInputFocus(): AccessibilityNodeInfo? {
+    val focused = findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
+    if (UiNodeHeuristics.isImeKeyboardNode(focused)) {
+      focused.recycle()
+      return null
+    }
+    return focused
+  }
+
+  private fun pollValidInputFocus(maxAttempts: Int, intervalMs: Long): AccessibilityNodeInfo? {
+    repeat(maxAttempts) { attempt ->
+      if (attempt > 0) Thread.sleep(intervalMs)
+      findValidInputFocus()?.let { return it }
     }
     return null
+  }
+
+  /**
+   * 通过隐藏 IME 注入；需已启用且设为默认。
+   * 必须先置 [JoyImeCoordinator.agentInjectionActive]，再聚焦输入框，否则
+   * [JoyInputMethodService] 会在 onStartInputView 中立刻切回原键盘，导致无 InputConnection。
+   */
+  private fun tryImeTypeText(text: String, maxWaitMs: Long = 3_000L): String? {
+    if (!JoyImeHelper.isEnabled(this) || !JoyImeHelper.isSelectedAsDefault(this)) return null
+    hideThirdPartyKeyboard()
+    JoyImeCoordinator.agentInjectionActive = true
+    try {
+      refocusInputForImeInjection()
+      val deadline = SystemClock.uptimeMillis() + maxWaitMs
+      while (SystemClock.uptimeMillis() < deadline) {
+        if (JoyInputMethodService.typeText(text)) {
+          return "已输入法注入：$text"
+        }
+        Thread.sleep(100L)
+      }
+      return null
+    } finally {
+      JoyImeCoordinator.agentInjectionActive = false
+      JoyInputMethodService.switchBackToUserKeyboardIfActive()
+    }
+  }
+
+  /** Agent 注入前重新聚焦；须在 agentInjectionActive=true 之后调用。 */
+  private fun refocusInputForImeInjection() {
+    if (lastTapNormalized != null) {
+      prepareInputFocusAtLastTap()
+      return
+    }
+    pollValidInputFocus(maxAttempts = 2, intervalMs = 100L)?.let { focused ->
+      try {
+        focused.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        focused.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+      } finally {
+        focused.recycle()
+      }
+      Thread.sleep(400L)
+    }
   }
 
   private fun pasteViaClipboard(text: String): String? {
@@ -681,7 +825,7 @@ class JoyAccessibilityService : AccessibilityService() {
     repeat(10) { attempt ->
       if (attempt > 0) Thread.sleep(250L)
 
-      findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { focused ->
+      findValidInputFocus()?.let { focused ->
         return try {
           focused.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
           if (focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
@@ -725,6 +869,8 @@ class JoyAccessibilityService : AccessibilityService() {
   private fun findEditableAcrossWindows(): AccessibilityNodeInfo? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return null
     windows?.forEach { window ->
+      val pkg = window.root?.packageName?.toString()
+      if (ExternalWindowFilter.isIgnoredPackage(pkg)) return@forEach
       val root = window.root ?: return@forEach
       try {
         NodeFinder.findBestEditable(root)?.let { return it }
@@ -810,7 +956,7 @@ class JoyAccessibilityService : AccessibilityService() {
 
   private fun retryFocusViaLastTap(): AccessibilityNodeInfo? {
     prepareInputFocusAtLastTap()
-    return pollInputFocus(maxAttempts = 10, intervalMs = 200L)
+    return pollValidInputFocus(maxAttempts = 10, intervalMs = 200L)
       ?: findEditableAcrossWindows()
   }
 
@@ -1027,11 +1173,13 @@ private object NodeFinder {
 
     while (queue.isNotEmpty()) {
       val node = queue.removeFirst()
-      val score = UiNodeHeuristics.inputScore(node, screenHeight)
-      if (score > bestScore) {
-        best?.recycle()
-        best = AccessibilityNodeInfo.obtain(node)
-        bestScore = score
+      if (!UiNodeHeuristics.isImeKeyboardNode(node)) {
+        val score = UiNodeHeuristics.inputScore(node, screenHeight)
+        if (score > bestScore) {
+          best?.recycle()
+          best = AccessibilityNodeInfo.obtain(node)
+          bestScore = score
+        }
       }
       for (i in 0 until node.childCount) {
         node.getChild(i)?.let(queue::add)
@@ -1039,6 +1187,62 @@ private object NodeFinder {
       node.recycle()
     }
     return best
+  }
+
+  fun findEditableByTarget(roots: List<AccessibilityNodeInfo>, target: String): AccessibilityNodeInfo? {
+    val candidates = ClickTargetNormalizer.clickCandidates(target)
+    val tokens = candidates.map { it.lowercase() }.filter { it.isNotBlank() }
+    if (tokens.isEmpty()) return null
+
+    var best: AccessibilityNodeInfo? = null
+    var bestScore = Int.MIN_VALUE
+    for (root in roots) {
+      val screenHeight = UiNodeHeuristics.screenHeight(root)
+      val queue = ArrayDeque<AccessibilityNodeInfo>()
+      queue.add(AccessibilityNodeInfo.obtain(root))
+      while (queue.isNotEmpty()) {
+        val node = queue.removeFirst()
+        if (!UiNodeHeuristics.isImeKeyboardNode(node)) {
+          val viewId = node.viewIdResourceName?.substringAfterLast('/').orEmpty().lowercase()
+          val label = UiNodeHeuristics.nodeLabel(node).lowercase()
+          val matched = tokens.any { token ->
+            viewId.contains(token) ||
+              label.contains(token) ||
+              (token.length >= 2 && label.contains(token))
+          }
+          if (matched && (node.isEditable || UiNodeHeuristics.isInputLike(node, screenHeight))) {
+            val score = UiNodeHeuristics.inputScore(node, screenHeight) + 10_000
+            if (score > bestScore) {
+              best?.recycle()
+              best = AccessibilityNodeInfo.obtain(node)
+              bestScore = score
+            }
+          }
+        }
+        for (i in 0 until node.childCount) {
+          node.getChild(i)?.let(queue::add)
+        }
+        node.recycle()
+      }
+    }
+    return best
+  }
+
+  fun treeContainsImeKeyboard(root: AccessibilityNodeInfo): Boolean {
+    val queue = ArrayDeque<AccessibilityNodeInfo>()
+    queue.add(AccessibilityNodeInfo.obtain(root))
+    while (queue.isNotEmpty()) {
+      val node = queue.removeFirst()
+      if (UiNodeHeuristics.isImeKeyboardNode(node)) {
+        node.recycle()
+        return true
+      }
+      for (i in 0 until node.childCount) {
+        node.getChild(i)?.let(queue::add)
+      }
+      node.recycle()
+    }
+    return false
   }
 
   fun findSendButton(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {

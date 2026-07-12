@@ -20,7 +20,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.agent.ConversationCard
 import com.tetraploid.joyforold.agent.ConversationCardKind
+import com.tetraploid.joyforold.ui.theme.CortanaColorPalette
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.LocalCortanaColors
 
 @Composable
 fun ConversationCardList(
@@ -98,6 +100,7 @@ private fun ConversationCardItem(
     modifier: Modifier = Modifier,
 ) {
     var expandedDetails by rememberSaveable(card.id) { mutableStateOf(false) }
+    val palette = LocalCortanaColors.current
 
     val background = when (card.kind) {
         ConversationCardKind.Confirm -> CortanaColors.SurfaceElevated
@@ -116,7 +119,7 @@ private fun ConversationCardItem(
     ) {
         Text(
             text = card.title,
-            color = kindTitleColor(card.kind),
+            color = kindTitleColor(card.kind, palette),
             fontSize = 12.sp,
         )
         if (card.body.isNotBlank()) {
@@ -218,14 +221,14 @@ private fun ConversationCardItem(
     }
 }
 
-private fun kindTitleColor(kind: ConversationCardKind) = when (kind) {
-    ConversationCardKind.User -> CortanaColors.AccentMuted
-    ConversationCardKind.Assistant -> CortanaColors.AccentMuted
-    ConversationCardKind.Plan -> CortanaColors.OnBackgroundMuted
-    ConversationCardKind.Progress -> CortanaColors.Accent
-    ConversationCardKind.Info -> CortanaColors.AccentMuted
-    ConversationCardKind.Confirm -> CortanaColors.Accent
-    ConversationCardKind.Disambiguation -> CortanaColors.Accent
-    ConversationCardKind.Preview -> CortanaColors.Accent
-    ConversationCardKind.Undo -> CortanaColors.OnBackgroundMuted
+private fun kindTitleColor(kind: ConversationCardKind, colors: CortanaColorPalette) = when (kind) {
+    ConversationCardKind.User -> colors.accentMuted
+    ConversationCardKind.Assistant -> colors.accentMuted
+    ConversationCardKind.Plan -> colors.onBackgroundMuted
+    ConversationCardKind.Progress -> colors.accent
+    ConversationCardKind.Info -> colors.accentMuted
+    ConversationCardKind.Confirm -> colors.accent
+    ConversationCardKind.Disambiguation -> colors.accent
+    ConversationCardKind.Preview -> colors.accent
+    ConversationCardKind.Undo -> colors.onBackgroundMuted
 }

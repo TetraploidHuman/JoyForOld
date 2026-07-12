@@ -12,6 +12,8 @@ import com.tetraploid.joyforold.preset.PresetCommandStore
 
 import com.tetraploid.joyforold.privacy.PageContextRedactor
 
+import com.tetraploid.joyforold.overlay.VisionOverlayGuard
+
 import kotlinx.coroutines.CancellationException
 
 import kotlinx.coroutines.delay
@@ -35,6 +37,8 @@ class AgentOrchestrator(
     private var appHintStore: AppHintStore? = null,
 
     private var presetStore: PresetCommandStore? = null,
+
+    private var visionDebugStore: VisionDebugStore? = null,
 
 ) {
 
@@ -73,6 +77,14 @@ class AgentOrchestrator(
     fun bindPresetStore(store: PresetCommandStore) {
 
         presetStore = store
+
+    }
+
+
+
+    fun bindVisionDebugStore(store: VisionDebugStore) {
+
+        visionDebugStore = store
 
     }
 
@@ -852,6 +864,9 @@ class AgentOrchestrator(
 
         suspend fun captureObservation(phase: String = "规划前"): PageObservationPayload {
 
+            suspend fun captureVisionScreenshot(): String? =
+                VisionOverlayGuard.withHidden { service.captureScreenshotBase64() }
+
             if (pageContextNeed == IntentCapabilityMatrix.PageContextNeed.NONE) {
 
                 return PageObservationPayload(
@@ -870,7 +885,7 @@ class AgentOrchestrator(
 
             val merged = service.captureBestStructuredSnapshot()
             if (merged == null) {
-                val screenshot = service.captureScreenshotBase64()
+                val screenshot = captureVisionScreenshot()
                 val visionMode = !screenshot.isNullOrBlank()
                 val currentVisionFp = VisionScreenChange.fingerprint(screenshot)
                 val baseDiff = "无法读取页面"
@@ -916,7 +931,7 @@ class AgentOrchestrator(
             val enriched = enrichWithAppHints(merged)
             val readable = PageReadiness.isReadable(enriched)
             val visionFallback = PageReadiness.needsVisionFallback(enriched)
-            val screenshot = if (visionFallback) service.captureScreenshotBase64() else null
+            val screenshot = if (visionFallback) captureVisionScreenshot() else null
             val visionOnlyApp = VisionOnlyApps.isVisionOnly(enriched.packageName)
             val visionMode = visionFallback && (
                 !screenshot.isNullOrBlank() || visionOnlyApp
@@ -989,6 +1004,13 @@ class AgentOrchestrator(
                                         "确认 pageContext 已是目标应用后再规划下一步。",
                                 )
                             }
+                            SearchTaskHeuristics.plannerSupplement(
+                                command = session.rootCommand,
+                                snapshot = enriched,
+                            ).takeIf { it.isNotBlank() }?.let { supplement ->
+                                appendLine()
+                                append(supplement)
+                            }
                         }
                     },
                 ),
@@ -1012,6 +1034,21 @@ class AgentOrchestrator(
 
 
 
+        var lastLlmScreenshotBase64: String? = null
+
+        fun rememberLlmScreenshot(observation: PageObservationPayload, phase: String) {
+            val shot = observation.screenshotBase64?.takeIf { it.isNotBlank() } ?: return
+            lastLlmScreenshotBase64 = shot
+            VisionDebugRecorder.recordLlmInput(
+                store = visionDebugStore,
+                stepNo = stepNo,
+                phase = phase,
+                screenshotBase64 = shot,
+            )
+        }
+
+
+
         suspend fun continuePlanning(
 
             stepFeedback: String,
@@ -1019,6 +1056,8 @@ class AgentOrchestrator(
         ): JSONObject {
 
             val observation = captureObservation(phase = "规划续步")
+
+            rememberLlmScreenshot(observation, phase = "规划续步")
 
             val loopContext = AgentLoopState.formatPlannerContext(
                 state = loopState,
@@ -1065,6 +1104,8 @@ class AgentOrchestrator(
 
                 val observation = captureObservation(phase = "用户续跑")
 
+                rememberLlmScreenshot(observation, phase = "用户续跑")
+
                 runContext.awaitContinuation()
 
                 val resumeLoopContext = AgentLoopState.formatPlannerContext(
@@ -1103,6 +1144,8 @@ class AgentOrchestrator(
             } else {
 
                 val observation = captureObservation(phase = "任务开始")
+
+                rememberLlmScreenshot(observation, phase = "任务开始")
 
                 val effectiveCommand = if (loopCommand != rootCommand) loopCommand else session.rootCommand
 
@@ -1190,6 +1233,18 @@ class AgentOrchestrator(
                     action = action,
                 )?.let { finishInstead ->
                     action = finishInstead
+                }
+
+                val tapCoords = VisionTapAnnotator.parseNormalizedCoords(action.targetText)
+                if (action.action.equals("tap", ignoreCase = true) ||
+                    (action.action.equals("send", ignoreCase = true) && tapCoords != null)
+                ) {
+                    VisionDebugRecorder.recordTapPlan(
+                        store = visionDebugStore,
+                        stepNo = stepNo,
+                        action = action,
+                        screenshotBase64 = lastLlmScreenshotBase64,
+                    )
                 }
 
                 if (action.action.equals("finish", ignoreCase = true) || action.finished) {
@@ -1280,7 +1335,18 @@ class AgentOrchestrator(
 
 
 
-                when (val outcome = executeGuardedAction(service, service, session, action, previousSnapshot)) {
+                val hideOverlayForVision = VisionOverlayGuard.actionNeedsHiddenOverlay(
+                    action = action,
+                    snapshot = preActionSnapshot,
+                )
+                val outcome = if (hideOverlayForVision) {
+                    VisionOverlayGuard.withHidden {
+                        executeGuardedAction(service, service, session, action, previousSnapshot)
+                    }
+                } else {
+                    executeGuardedAction(service, service, session, action, previousSnapshot)
+                }
+                when (outcome) {
 
                     is GuardOutcome.Blocked -> {
 
@@ -1534,6 +1600,8 @@ class AgentOrchestrator(
 
         } catch (_: CancellationException) {
 
+            AgentRuntime.resetVisionOverlaySuppression()
+
             session.status = "cancelled"
 
             session.finalSummary = "用户已停止"
@@ -1567,6 +1635,8 @@ class AgentOrchestrator(
             return cancelResult
 
         } catch (error: Exception) {
+
+            AgentRuntime.resetVisionOverlaySuppression()
 
             session.status = "failed"
 
@@ -2101,15 +2171,11 @@ class AgentOrchestrator(
 
 
     private fun enrichWithAppHints(snapshot: StructuredPageSnapshot): StructuredPageSnapshot {
-
-        val stored = appHintStore?.formatForPrompt(snapshot.packageName).orEmpty()
-
+        val a11yReadable = PageReadiness.isReadable(snapshot)
+        val stored = appHintStore?.formatForPrompt(snapshot.packageName, a11yReadable).orEmpty()
         if (stored.isBlank()) return snapshot
-
         val combined = listOf(snapshot.appHint, stored).filter { it.isNotBlank() }.joinToString("\n")
-
         return snapshot.copy(appHint = combined)
-
     }
 
 

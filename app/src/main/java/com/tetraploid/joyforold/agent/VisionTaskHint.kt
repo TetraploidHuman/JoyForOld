@@ -23,7 +23,7 @@ object VisionTaskHint {
         val successfulTaps = steps.count {
             it.action.action.equals("tap", ignoreCase = true) && it.result.success
         }
-        if (successfulTypes > 0 || successfulTaps < 2) return ""
+        if (successfulTypes > 0 || successfulTaps < 1) return ""
         return "【视觉提示】用户指令似乎需要输入文字，但近期只有坐标点击。" +
             "请根据截图定位输入框，先 tap 再 type；若关键信息（联系人/内容）在指令中不清楚，" +
             "用 finish+waiting_for_user 向用户确认，勿猜测。"
@@ -41,7 +41,7 @@ object VisionTaskHint {
         val taps = steps.count {
             it.action.action.equals("tap", ignoreCase = true) && it.result.success
         }
-        if (types > 0 || taps < 3) return null
+        if (types > 0 || taps < 2) return null
         return "【视觉提醒】任务需要输入文字，不能只用 tap。请根据截图 tap 输入框后 type。"
     }
 }

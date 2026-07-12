@@ -31,7 +31,35 @@ object UiNodeHeuristics {
         }
     }.trim()
 
+    /** 系统输入法（Gboard/搜狗等）键盘按键，不是应用内真实输入框。 */
+    fun isImeKeyboardNode(node: AccessibilityNodeInfo): Boolean {
+        val viewId = node.viewIdResourceName?.substringAfterLast('/').orEmpty().lowercase()
+        if (viewId.startsWith("key_pos_") ||
+            viewId.contains("keyboard_") ||
+            viewId.contains("input_method_") ||
+            viewId == "inputarea" ||
+            viewId == "input_area"
+        ) {
+            return true
+        }
+        if (viewId.matches(Regex("^[a-z]\\d{2}$")) || viewId.matches(Regex("^[a-z][0-9]{2}$"))) {
+            return true
+        }
+        val desc = node.contentDescription?.toString().orEmpty().trim()
+        if (desc in setOf("空格键", "删除", "Shift", "Enter 键", "符号键盘", "QWERTY", "?123")) {
+            return true
+        }
+        if (desc.length == 1 && desc[0].isLetterOrDigit()) {
+            val cls = node.className?.toString().orEmpty()
+            if (cls.contains("FrameLayout", ignoreCase = true) && node.isClickable) return true
+        }
+        val cls = node.className?.toString().orEmpty()
+        if (cls.contains("Keyboard", ignoreCase = true)) return true
+        return false
+    }
+
     fun isInputLike(node: AccessibilityNodeInfo, screenHeight: Int): Boolean {
+        if (isImeKeyboardNode(node)) return false
         if (node.isEditable) return true
         val className = node.className?.toString().orEmpty()
         if (className.contains("EditText", ignoreCase = true)) return true

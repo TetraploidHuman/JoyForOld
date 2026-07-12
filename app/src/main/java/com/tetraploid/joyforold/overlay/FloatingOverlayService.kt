@@ -35,6 +35,9 @@ import com.tetraploid.joyforold.MainActivity
 import com.tetraploid.joyforold.R
 import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.ui.theme.JoyForOldTheme
+import com.tetraploid.joyforold.ui.theme.ThemePreferenceStore
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
 
@@ -64,7 +67,8 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
             setViewTreeViewModelStoreOwner(this@FloatingOverlayService)
             setViewTreeSavedStateRegistryOwner(this@FloatingOverlayService)
             setContent {
-                JoyForOldTheme {
+                val darkTheme = ThemePreferenceStore(this@FloatingOverlayService).isDarkTheme()
+                JoyForOldTheme(darkTheme = darkTheme) {
                     FloatingOverlayContent(
                         onRun = { AgentRuntime.runAgent(applicationContext as Application) },
                         onStartVoice = { AgentRuntime.startVoiceInput() },
@@ -220,6 +224,21 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
                 service.setDialogVisible(false)
             } else {
                 mainHandler.post { service.setDialogVisible(false) }
+            }
+        }
+
+        /** 主线程同步 GONE，通常 1–3ms；截图 API 本身异步，无需再等 layout 帧。 */
+        suspend fun hideDialogAwait() {
+            val service = instance ?: return
+            suspendCancellableCoroutine { cont ->
+                mainHandler.post {
+                    if (!service::composeView.isInitialized) {
+                        cont.resume(Unit)
+                        return@post
+                    }
+                    service.setDialogVisible(false)
+                    if (cont.isActive) cont.resume(Unit)
+                }
             }
         }
 

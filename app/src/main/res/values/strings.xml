@@ -2,7 +2,7 @@
     <string name="app_name">JoyForOld</string>
     <string name="accessibility_service_description">JoyForOld 需要无障碍权限来读取屏幕内容并帮老人执行点击、输入等操作。</string>
     <string name="joy_ime_label">Joy 输入助手</string>
-    <string name="joy_ime_settings_hint">用于在微信等应用里自动输入文字。请在系统输入法设置中启用「Joy 输入助手」，并设为默认输入法。</string>
+    <string name="joy_ime_settings_hint">可选优化：在系统输入法里启用「Joy 输入助手」并设为默认，助手自动输入微信等更稳。Joy 没有可见键盘——您自己点输入框打字时，会自动切回原来的搜狗/系统键盘，不影响日常输入。不设默认也可以，助手会优先用粘贴方式输入。</string>
     <string name="overlay_channel_name">JoyForOld 悬浮助手</string>
     <string name="overlay_notification_title">JoyForOld 助手运行中</string>
     <string name="overlay_notification_text">可在其他应用上使用 AI 辅助操作</string>
