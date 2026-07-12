@@ -10,6 +10,7 @@ class AgentActionWhitelistTest {
     @Test
     fun allows_registered_tools() {
         assertTrue(AgentActionWhitelist.isAllowed("click"))
+        assertTrue(AgentActionWhitelist.isAllowed("tap"))
         assertTrue(AgentActionWhitelist.isAllowed("finish"))
     }
 

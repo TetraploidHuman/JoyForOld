@@ -70,4 +70,48 @@ class IntentCapabilityMatrixTest {
       ),
     )
   }
+
+  @Test
+  fun isMultiStepUtterance_detectsOpenAppPlusMessage() {
+    assertTrue(
+      IntentCapabilityMatrix.isMultiStepUtterance("打开微信，给大女儿发消息说今晚回家吃饭"),
+    )
+    assertFalse(IntentCapabilityMatrix.isMultiStepUtterance("打开微信"))
+  }
+
+  @Test
+  fun shouldExecuteRouteLocally_blocksOpenAppOnlyOnMultiStep() {
+    val route = CommandRouteResolver.Route(
+      steps = listOf(
+        AgentAction(action = "open_app", targetText = "微信"),
+        AgentAction(action = "finish", message = "已打开", finished = true),
+      ),
+      source = "offline_nlu",
+      confidence = 0.94,
+    )
+    assertFalse(
+      IntentCapabilityMatrix.shouldExecuteRouteLocally(
+        "打开微信，给大女儿发消息说今晚回家吃饭",
+        route,
+      ),
+    )
+    assertTrue(
+      IntentCapabilityMatrix.shouldExecuteRouteLocally("打开微信", route),
+    )
+  }
+
+  @Test
+  fun shouldExecuteRouteLocally_keepsExactTemplate() {
+    val route = CommandRouteResolver.Route(
+      steps = listOf(
+        AgentAction(action = "open_app", targetText = "微信"),
+        AgentAction(action = "finish", message = "已打开微信", finished = true),
+      ),
+      source = "template",
+      confidence = 1.0,
+    )
+    assertTrue(
+      IntentCapabilityMatrix.shouldExecuteRouteLocally("给儿子发微信", route),
+    )
+  }
 }

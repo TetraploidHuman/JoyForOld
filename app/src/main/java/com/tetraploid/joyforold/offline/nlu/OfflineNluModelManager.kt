@@ -1,6 +1,8 @@
 package com.tetraploid.joyforold.offline.nlu
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 object OfflineNluModelManager {
@@ -15,18 +17,14 @@ object OfflineNluModelManager {
 
     fun isReady(context: Context): Boolean = resolveModelFile(context).exists()
 
-    fun getClassifier(context: Context): OnnxIntentClassifier? {
+    suspend fun getClassifier(context: Context): OnnxIntentClassifier? {
         classifier?.let { return it }
-        synchronized(this) {
-            classifier?.let { return it }
-            val appContext = context.applicationContext
-            val modelFile = ensureModelFile(appContext) ?: return null
-            val labels = readAssetText(appContext, "$ASSET_DIR/$LABELS_FILE") ?: return null
-            val config = readAssetText(appContext, "$ASSET_DIR/$CONFIG_FILE") ?: return null
-            val bytes = runCatching { modelFile.readBytes() }.getOrNull() ?: return null
-            val vocabLines = readAssetLines(appContext, "$ASSET_DIR/$VOCAB_FILE")
-            classifier = OnnxIntentClassifier.create(bytes, labels, config, vocabLines)
-            return classifier
+        return withContext(Dispatchers.IO) {
+            synchronized(this@OfflineNluModelManager) {
+                classifier?.let { return@withContext it }
+                classifier = loadClassifier(context.applicationContext)
+                classifier
+            }
         }
     }
 
@@ -35,6 +33,15 @@ object OfflineNluModelManager {
             classifier?.close()
             classifier = null
         }
+    }
+
+    private fun loadClassifier(appContext: Context): OnnxIntentClassifier? {
+        val modelFile = ensureModelFile(appContext) ?: return null
+        val labels = readAssetText(appContext, "$ASSET_DIR/$LABELS_FILE") ?: return null
+        val config = readAssetText(appContext, "$ASSET_DIR/$CONFIG_FILE") ?: return null
+        val bytes = runCatching { modelFile.readBytes() }.getOrNull() ?: return null
+        val vocabLines = readAssetLines(appContext, "$ASSET_DIR/$VOCAB_FILE")
+        return OnnxIntentClassifier.create(bytes, labels, config, vocabLines)
     }
 
     private fun ensureModelFile(context: Context): File? {

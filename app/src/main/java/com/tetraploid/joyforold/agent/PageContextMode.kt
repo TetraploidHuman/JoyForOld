@@ -16,7 +16,14 @@ data class PageObservationPayload(
     val pageDiff: String,
     val minimalPageContext: String,
     val mode: PageContextMode,
-)
+    val screenshotBase64: String? = null,
+    val visionMode: Boolean = false,
+    /** 无障碍树无可用 UI 信号（与是否附带截图无关） */
+    val a11yUnavailable: Boolean = false,
+) {
+    /** 传给 LLM 规划器：视觉兜底或无障碍不可用 */
+    fun plannerVisionMode(): Boolean = visionMode || a11yUnavailable
+}
 
 object PageContextSelector {
     fun modeFor(
@@ -24,15 +31,7 @@ object PageContextSelector {
         current: StructuredPageSnapshot,
         pageDiff: String,
     ): PageContextMode {
-        if (previous == null) return PageContextMode.FULL
-        if (previous.fingerprint == current.fingerprint ||
-            pageDiff.contains("页面指纹未变")
-        ) {
-            return PageContextMode.DIFF_ONLY
-        }
-        if (PageObservation.isMinorChange(previous, current)) {
-            return PageContextMode.COMPACT
-        }
+        // 效果优先：每轮规划都传完整页面快览 + diff，不因指纹未变而省略
         return PageContextMode.FULL
     }
 }

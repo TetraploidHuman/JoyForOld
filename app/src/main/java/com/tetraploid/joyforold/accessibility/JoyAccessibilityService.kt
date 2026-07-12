@@ -1,5 +1,8 @@
 package com.tetraploid.joyforold.accessibility
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
@@ -10,18 +13,26 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.tetraploid.joyforold.app.InstalledAppResolver
+import com.tetraploid.joyforold.agent.AgentContextLimits
 import com.tetraploid.joyforold.agent.ActionExecutionResult
 import com.tetraploid.joyforold.agent.AgentAction
 import com.tetraploid.joyforold.agent.AgentToolRegistry
+import com.tetraploid.joyforold.agent.ClickTargetNormalizer
+import com.tetraploid.joyforold.agent.ExternalWindowFilter
 import com.tetraploid.joyforold.agent.PageObservation
+import com.tetraploid.joyforold.agent.PageReadiness
+import com.tetraploid.joyforold.agent.PageScreenshotCapture
 import com.tetraploid.joyforold.agent.StructuredPageSnapshot
 import com.tetraploid.joyforold.agent.UiNodeHeuristics
 import com.tetraploid.joyforold.agent.UiPageProbe
 import com.tetraploid.joyforold.agent.UiTreeSerializer
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class JoyAccessibilityService : AccessibilityService() {
+  private var lastTapNormalized: Pair<Int, Int>? = null
 
   override fun onServiceConnected() {
     super.onServiceConnected()
@@ -59,10 +70,7 @@ class JoyAccessibilityService : AccessibilityService() {
   }
 
   override fun onInterrupt() {
-    if (instance === this) {
-      instance = null
-      com.tetraploid.joyforold.agent.AgentRuntime.refreshAccessibilityState()
-    }
+    // 系统临时打断，服务仍保持连接；勿清空 instance，否则 Agent 会误判无障碍已关闭。
   }
 
   fun isReady(): Boolean = instance != null
@@ -72,6 +80,7 @@ class JoyAccessibilityService : AccessibilityService() {
     if (roots.isEmpty()) return emptyList()
     return try {
       roots.map { PageObservation.capture(it) }
+          .filter { ExternalWindowFilter.isUsableSnapshot(it) }
     } finally {
       roots.forEach { it.recycle() }
     }
@@ -86,16 +95,40 @@ class JoyAccessibilityService : AccessibilityService() {
   }
 
   fun mergeSnapshots(snapshots: List<StructuredPageSnapshot>): StructuredPageSnapshot? {
-    if (snapshots.isEmpty()) return null
-    if (snapshots.size == 1) return snapshots.first()
-    val primary = snapshots.maxByOrNull { it.clickables.size + it.visibleTexts.size } ?: snapshots.first()
+    val usable = snapshots.filter { ExternalWindowFilter.isUsableSnapshot(it) }
+    if (usable.isEmpty()) return null
+    if (usable.size == 1) return usable.first()
+    val primary = usable.maxByOrNull { it.clickables.size + it.visibleTexts.size } ?: usable.first()
     return primary.copy(
-      clickables = snapshots.flatMap { it.clickables }.distinct(),
-      editables = snapshots.flatMap { it.editables }.distinct(),
-      visibleTexts = snapshots.flatMap { it.visibleTexts }.distinct(),
-      sendButtons = snapshots.flatMap { it.sendButtons }.distinct(),
-      fingerprint = snapshots.joinToString("|") { it.fingerprint },
+      clickables = usable.flatMap { it.clickables }.distinct(),
+      editables = usable.flatMap { it.editables }.distinct(),
+      visibleTexts = usable.flatMap { it.visibleTexts }.distinct(),
+      sendButtons = usable.flatMap { it.sendButtons }.distinct(),
+      fingerprint = usable.joinToString("|") { it.fingerprint },
     )
+  }
+
+  /** merge 失败时回退到单窗口最佳 root（与 read_tree 同源），避免 open_app 后误判无页面。 */
+  fun captureBestStructuredSnapshot(): StructuredPageSnapshot? {
+    mergeSnapshots(captureStructuredSnapshots())?.let { return it }
+    val root = getTargetRoot() ?: return null
+    return try {
+      val snap = PageObservation.capture(root)
+      if (ExternalWindowFilter.isUsableSnapshot(snap)) snap else null
+    } finally {
+      root.recycle()
+    }
+  }
+
+  suspend fun captureScreenshotBase64(): String? = PageScreenshotCapture.captureBase64Jpeg(this)
+
+  fun snapshotTreeForDebug(): String {
+    val root = getTargetRoot() ?: return "(无法读取结构树：当前无外部窗口)"
+    return try {
+      UiTreeSerializer.serialize(root)
+    } finally {
+      root.recycle()
+    }
   }
 
   fun snapshotForAgent(): String {
@@ -124,8 +157,9 @@ class JoyAccessibilityService : AccessibilityService() {
   fun executeWithResult(action: AgentAction): ActionExecutionResult {
     return when (action.action.lowercase()) {
       "click" -> clickByTextResult(action.targetText)
+      "tap" -> tapAtNormalizedResult(action.targetText)
       "type" -> typeTextResult(action.inputText)
-      "send" -> clickSendResult()
+      "send" -> clickSendResult(action.targetText)
       "scroll_down" -> scrollResult(true)
       "scroll_up" -> scrollResult(false)
       "back" -> globalResult(AccessibilityService.GLOBAL_ACTION_BACK, "已执行返回", "返回失败")
@@ -134,6 +168,8 @@ class JoyAccessibilityService : AccessibilityService() {
       "list_apps" -> listAppsResult(action.targetText)
       "wait" -> ActionExecutionResult(true, "等待界面刷新")
       "finish" -> ActionExecutionResult(true, action.message ?: "任务结束")
+      "find_on_page" -> findOnPage(action.targetText)
+      "read_tree" -> readTreeSnippet()
       else -> ActionExecutionResult(
         success = false,
         summary = "未知操作: ${action.action}",
@@ -156,7 +192,11 @@ class JoyAccessibilityService : AccessibilityService() {
     return try {
       val matches = linkedSetOf<String>()
       for (root in roots) {
-        matches += NodeFinder.findMatchingLabels(root, query, limit = 20)
+        matches += NodeFinder.findMatchingLabels(
+          root,
+          query,
+          limit = AgentContextLimits.MATCHED_ELEMENTS_CAP,
+        )
       }
       if (matches.isEmpty()) {
         ActionExecutionResult(
@@ -181,15 +221,45 @@ class JoyAccessibilityService : AccessibilityService() {
       success = false,
       summary = "读取失败",
       detail = "无法读取页面",
+      suggestions = listOf("确认无障碍服务已开启", "确认目标应用已在前台"),
     )
     return try {
+      val pkg = root.packageName?.toString().orEmpty()
+      if (ExternalWindowFilter.isIgnoredPackage(pkg)) {
+        return ActionExecutionResult(
+          success = false,
+          summary = "读到系统界面（$pkg），不是目标应用",
+          detail = "当前窗口为系统状态栏/启动动画，请 wait 等待微信等应用完全打开",
+          suggestions = listOf("先 wait", "不要连续 click", "确认目标应用已在前台"),
+        )
+      }
       val tree = UiTreeSerializer.serialize(root)
-      val snippet = if (tree.length > 1200) tree.take(1200) + "\n...(已截断)" else tree
-      ActionExecutionResult(
-        success = true,
-        summary = "已读取结构树片段",
-        detail = snippet,
-      )
+            val maxChars = AgentContextLimits.READ_TREE_SNIPPET_MAX_CHARS
+            val snippet = if (tree.length > maxChars) tree.take(maxChars) + "\n...(已截断)" else tree
+      val emptyTree = PageReadiness.isEmptyTreeSnippet(tree)
+      val wrongChrome = PageReadiness.isWrongChromeTree(tree)
+      if (emptyTree || wrongChrome) {
+        ActionExecutionResult(
+          success = false,
+          summary = if (wrongChrome) "读到系统启动动画，不是目标应用" else "页面结构为空，应用可能仍在加载",
+          detail = if (emptyTree) {
+            "无障碍树为空（结构树内容已省略，请根据截图用 tap 操作）"
+          } else {
+            snippet
+          },
+          suggestions = listOf(
+            "先 wait 等待界面刷新",
+            "确认目标应用已在前台",
+            "视觉模式下用 tap 坐标，勿 read_tree",
+          ),
+        )
+      } else {
+        ActionExecutionResult(
+          success = true,
+          summary = "已读取结构树片段",
+          detail = snippet,
+        )
+      }
     } finally {
       root.recycle()
     }
@@ -198,24 +268,46 @@ class JoyAccessibilityService : AccessibilityService() {
   private fun getTargetRoot(): AccessibilityNodeInfo? {
     val roots = collectExternalRoots()
     if (roots.isEmpty()) return null
-    val best = roots.maxByOrNull { UiPageProbe.windowScore(it) } ?: return null
+    val best = roots
+        .filter { !ExternalWindowFilter.isIgnoredPackage(it.packageName?.toString()) }
+        .maxByOrNull { UiPageProbe.windowScore(it) }
+        ?: return null
     roots.filter { it !== best }.forEach { it.recycle() }
     return best
   }
 
   private fun collectExternalRoots(): List<AccessibilityNodeInfo> {
     val results = mutableListOf<AccessibilityNodeInfo>()
+    val seenPackages = linkedSetOf<String>()
+
+    fun addRoot(root: AccessibilityNodeInfo) {
+      val pkg = root.packageName?.toString().orEmpty()
+      if (pkg.isBlank() || pkg == packageName || pkg in seenPackages || ExternalWindowFilter.isIgnoredPackage(pkg)) {
+        root.recycle()
+        return
+      }
+      seenPackages += pkg
+      results += AccessibilityNodeInfo.obtain(root)
+      root.recycle()
+    }
+
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
       windows?.forEach { window ->
-        if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) return@forEach
+        if (window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) return@forEach
         val root = window.root ?: return@forEach
-        val pkg = root.packageName?.toString().orEmpty()
-        if (pkg == packageName || pkg.isBlank()) {
-          root.recycle()
-          return@forEach
-        }
-        results += AccessibilityNodeInfo.obtain(root)
-        root.recycle()
+        addRoot(root)
+      }
+    }
+
+    findExternalRoot()?.let { cached ->
+      val pkg = cached.packageName?.toString().orEmpty()
+      if (pkg.isNotBlank() && pkg != packageName && pkg !in seenPackages &&
+          !ExternalWindowFilter.isIgnoredPackage(pkg)
+      ) {
+        seenPackages += pkg
+        results += cached
+      } else {
+        cached.recycle()
       }
     }
 
@@ -234,7 +326,7 @@ class JoyAccessibilityService : AccessibilityService() {
   private fun queryFreshExternalRoot(): AccessibilityNodeInfo? {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
       windows?.forEach { window ->
-        if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) return@forEach
+        if (window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) return@forEach
         val root = window.root ?: return@forEach
         val pkg = root.packageName?.toString()
         if (!pkg.isNullOrBlank() && pkg != packageName) {
@@ -334,20 +426,82 @@ class JoyAccessibilityService : AccessibilityService() {
     )
   }
 
+  private fun tapAtNormalizedResult(targetText: String?): ActionExecutionResult {
+    val coords = parseNormalizedCoords(targetText)
+    if (coords == null) {
+      return ActionExecutionResult(
+        success = false,
+        summary = "点击失败：tap 需要 target_text 为归一化坐标 x,y（0~1000）",
+        suggestions = listOf("根据截图估算元素中心坐标", "例：target_text=\"520,340\""),
+      )
+    }
+    val (xNorm, yNorm) = coords
+    val metrics = resources.displayMetrics
+    val x = (xNorm / 1000f * metrics.widthPixels).coerceIn(0f, metrics.widthPixels - 1f)
+    val y = (yNorm / 1000f * metrics.heightPixels).coerceIn(0f, metrics.heightPixels - 1f)
+    val msg = tapAt(x, y, "已在归一化坐标 ($xNorm,$yNorm) 点击")
+    return if (msg != null) {
+      lastTapNormalized = xNorm to yNorm
+      ActionExecutionResult(success = true, summary = msg)
+    } else {
+      ActionExecutionResult(
+        success = false,
+        summary = "点击失败：系统未接受手势",
+        suggestions = listOf("换附近坐标重试", "先 wait 等页面稳定"),
+      )
+    }
+  }
+
+  private fun parseNormalizedCoords(targetText: String?): Pair<Int, Int>? {
+    val raw = targetText?.trim().orEmpty()
+    if (raw.isBlank()) return null
+    val parts = raw.split(',', '，', ' ').map { it.trim() }.filter { it.isNotBlank() }
+    if (parts.size < 2) return null
+    val x = parts[0].toIntOrNull() ?: return null
+    val y = parts[1].toIntOrNull() ?: return null
+    if (x !in 0..1000 || y !in 0..1000) return null
+    return x to y
+  }
+
   private fun typeTextResult(input: String?): ActionExecutionResult {
     val msg = typeText(input)
     val success = !msg.contains("失败")
     return ActionExecutionResult(
       success = success,
       summary = msg,
-      suggestions = if (success) emptyList() else listOf("先 click 输入框", "用 read_tree 找输入区"),
+      suggestions = if (success) {
+        emptyList()
+      } else {
+        listOf("先 tap 输入框坐标再 type", "根据截图估算输入框位置")
+      },
     )
   }
 
-  private fun clickSendResult(): ActionExecutionResult {
+  private fun clickSendResult(targetText: String? = null): ActionExecutionResult {
+    parseNormalizedCoords(targetText)?.let { (xNorm, yNorm) ->
+      val msg = tapAtNormalizedCoords(xNorm, yNorm, "已在归一化坐标 ($xNorm,$yNorm) 点击发送")
+      return if (msg != null) {
+        ActionExecutionResult(success = true, summary = msg)
+      } else {
+        ActionExecutionResult(success = false, summary = "发送失败：tap 发送按钮未成功")
+      }
+    }
     val msg = clickSend()
+    if (msg.contains("失败")) {
+      tapSendNearLastTap()?.let { fallback ->
+        return ActionExecutionResult(success = true, summary = fallback)
+      }
+    }
     val success = !msg.contains("失败")
-    return ActionExecutionResult(success = success, summary = msg)
+    return ActionExecutionResult(
+      success = success,
+      summary = msg,
+      suggestions = if (success) {
+        emptyList()
+      } else {
+        listOf("视觉模式可 send + target_text=\"x,y\" 指定发送按钮坐标")
+      },
+    )
   }
 
   private fun scrollResult(down: Boolean): ActionExecutionResult {
@@ -409,14 +563,21 @@ class JoyAccessibilityService : AccessibilityService() {
     if (roots.isEmpty()) return "点击失败：无法读取页面"
     return try {
       var found: AccessibilityNodeInfo? = null
-      for (root in roots) {
-        found = NodeFinder.findClickableByText(root, text)
+      var matchedLabel = text
+      for (candidate in ClickTargetNormalizer.clickCandidates(text)) {
+        for (root in roots) {
+          found = NodeFinder.findClickableByText(root, candidate)
+          if (found != null) {
+            matchedLabel = candidate
+            break
+          }
+        }
         if (found != null) break
       }
       val node = found ?: return "点击失败：未找到包含「$text」的可点击元素"
       val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
       node.recycle()
-      if (clicked) "已点击：$text" else "点击失败：系统未接受点击操作"
+      if (clicked) "已点击：$matchedLabel" else "点击失败：系统未接受点击操作"
     } finally {
       roots.forEach { it.recycle() }
     }
@@ -426,13 +587,25 @@ class JoyAccessibilityService : AccessibilityService() {
     val text = input?.trim().orEmpty()
     if (text.isEmpty()) return "输入失败：缺少 input_text"
 
+    // 视觉 tap 后输入：优先剪贴板+粘贴菜单，避免误绑 IME/假 editable
+    if (lastTapNormalized != null) {
+        pasteViaClipboard(text)?.let { return it }
+    }
+
     val roots = collectExternalRoots()
-    if (roots.isEmpty()) return "输入失败：无法读取页面"
     var focused: AccessibilityNodeInfo? = null
     var editable: AccessibilityNodeInfo? = null
     return try {
+      if (roots.isEmpty()) {
+        return pasteViaClipboard(text)
+          ?: "输入失败：无法读取页面，请先 tap 输入框坐标再 type"
+      }
+
       focused = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
       editable = focused
+      if (editable == null) {
+        editable = findEditableAcrossWindows()
+      }
       if (editable == null) {
         editable = roots
           .mapNotNull { NodeFinder.findBestEditable(it) }
@@ -444,7 +617,15 @@ class JoyAccessibilityService : AccessibilityService() {
       }
 
       if (editable == null) {
-        return "输入失败：未找到输入区域，可先 click 底部输入框或联系人"
+        editable = pollInputFocus(maxAttempts = 6, intervalMs = 250L)
+      }
+
+      if (editable == null) {
+        editable = retryFocusViaLastTap()
+      }
+
+      if (editable == null) {
+        return pasteViaClipboard(text) ?: "输入失败：未找到输入区域，请先 tap 输入框坐标再 type"
       }
 
       editable.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
@@ -460,11 +641,175 @@ class JoyAccessibilityService : AccessibilityService() {
       if (!ok) {
         ok = editable.performAction(AccessibilityNodeInfo.ACTION_PASTE)
       }
-      if (ok) "已输入：$text" else "输入失败：系统未接受输入，可先 click 输入框再试"
+      if (ok) {
+        "已输入：$text"
+      } else {
+        pasteViaClipboard(text) ?: "输入失败：系统未接受输入，可先 tap 输入框再试"
+      }
     } finally {
       recycleInputNodes(focused, editable)
       roots.forEach { it.recycle() }
     }
+  }
+
+  private fun pasteViaClipboard(text: String): String? {
+    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
+    clipboard.setPrimaryClip(ClipData.newPlainText("joy_input", text))
+
+    prepareInputFocusAtLastTap()
+
+    repeat(10) { attempt ->
+      if (attempt > 0) Thread.sleep(250L)
+
+      findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { focused ->
+        return try {
+          focused.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+          if (focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+            "已粘贴输入：$text"
+          } else {
+            null
+          }
+        } finally {
+          focused.recycle()
+        }
+      }
+
+      findEditableAcrossWindows()?.let { editable ->
+        return try {
+          editable.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+          editable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+          if (editable.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+            "已粘贴输入：$text"
+          } else {
+            null
+          }
+        } finally {
+          editable.recycle()
+        }
+      }
+    }
+
+    tryPasteFromContextMenu(text)?.let { return it }
+    return null
+  }
+
+  /** tap 后聚焦：先点上次坐标，必要时再长按唤出粘贴菜单。 */
+  private fun prepareInputFocusAtLastTap() {
+    val coords = lastTapNormalized ?: return
+    tapAtNormalizedCoords(coords.first, coords.second, successMessage = null)
+    Thread.sleep(350L)
+    tapAtNormalizedCoords(coords.first, coords.second, successMessage = null)
+    Thread.sleep(450L)
+  }
+
+  private fun findEditableAcrossWindows(): AccessibilityNodeInfo? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return null
+    windows?.forEach { window ->
+      val root = window.root ?: return@forEach
+      try {
+        NodeFinder.findBestEditable(root)?.let { return it }
+      } finally {
+        root.recycle()
+      }
+    }
+    return null
+  }
+
+  private fun tryPasteFromContextMenu(text: String): String? {
+    val coords = lastTapNormalized ?: return null
+    val metrics = resources.displayMetrics
+    val x = (coords.first / 1000f * metrics.widthPixels).coerceIn(0f, metrics.widthPixels - 1f)
+    val y = (coords.second / 1000f * metrics.heightPixels).coerceIn(0f, metrics.heightPixels - 1f)
+
+    if (!longPressAtBlocking(x, y)) return null
+    Thread.sleep(1000L)
+
+    val pasteLabels = listOf("粘贴", "Paste", "paste")
+    val roots = collectAllWindowRoots()
+    return try {
+      for (label in pasteLabels) {
+        for (root in roots) {
+          val node = NodeFinder.findClickableByText(root, label)
+          if (node != null) {
+            val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            node.recycle()
+            if (clicked) return "已通过粘贴菜单输入：$text"
+          }
+        }
+      }
+      null
+    } finally {
+      roots.forEach { it.recycle() }
+    }
+  }
+
+  private fun collectAllWindowRoots(): List<AccessibilityNodeInfo> {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+      return collectExternalRoots()
+    }
+    val fromWindows = windows?.mapNotNull { window ->
+      window.root?.let { AccessibilityNodeInfo.obtain(it) }
+    }.orEmpty()
+    if (fromWindows.isNotEmpty()) return fromWindows
+    return collectExternalRoots()
+  }
+
+  private fun longPressAtBlocking(x: Float, y: Float): Boolean {
+    val latch = CountDownLatch(1)
+    val path = Path().apply { moveTo(x, y) }
+    val gesture = GestureDescription.Builder()
+      .addStroke(GestureDescription.StrokeDescription(path, 0, 650))
+      .build()
+    val dispatched = dispatchGesture(
+      gesture,
+      object : GestureResultCallback() {
+        override fun onCompleted(gestureDescription: GestureDescription?) {
+          latch.countDown()
+        }
+
+        override fun onCancelled(gestureDescription: GestureDescription?) {
+          latch.countDown()
+        }
+      },
+      null,
+    )
+    if (dispatched) {
+      latch.await(2, TimeUnit.SECONDS)
+    }
+    return dispatched
+  }
+
+  private fun pollInputFocus(maxAttempts: Int, intervalMs: Long): AccessibilityNodeInfo? {
+    repeat(maxAttempts) { attempt ->
+      if (attempt > 0) Thread.sleep(intervalMs)
+      val focused = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+      if (focused != null) return focused
+    }
+    return null
+  }
+
+  private fun retryFocusViaLastTap(): AccessibilityNodeInfo? {
+    prepareInputFocusAtLastTap()
+    return pollInputFocus(maxAttempts = 10, intervalMs = 200L)
+      ?: findEditableAcrossWindows()
+  }
+
+  private fun tapAtNormalizedCoords(xNorm: Int, yNorm: Int, successMessage: String?): String? {
+    val metrics = resources.displayMetrics
+    val x = (xNorm / 1000f * metrics.widthPixels).coerceIn(0f, metrics.widthPixels - 1f)
+    val y = (yNorm / 1000f * metrics.heightPixels).coerceIn(0f, metrics.heightPixels - 1f)
+    return tapAt(
+      x,
+      y,
+      successMessage ?: "已在归一化坐标 ($xNorm,$yNorm) 点击",
+    )
+  }
+
+  /** 无障碍树为空时，在上次 tap 输入区右侧尝试点击发送区域。 */
+  private fun tapSendNearLastTap(): String? {
+    val coords = lastTapNormalized ?: return null
+    val sendX = (coords.first + 120).coerceAtMost(980)
+    return tapAtNormalizedCoords(sendX, coords.second, "已在上次输入区域附近点击发送")
   }
 
   private fun recycleInputNodes(
@@ -588,7 +933,7 @@ private object NodeFinder {
   fun findMatchingLabels(
     root: AccessibilityNodeInfo,
     query: String,
-    limit: Int = 20,
+    limit: Int = AgentContextLimits.MATCHED_ELEMENTS_CAP,
   ): List<String> {
     val lower = query.lowercase()
     val tokens = lower.split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -597,13 +942,16 @@ private object NodeFinder {
     queue.add(AccessibilityNodeInfo.obtain(root))
     var walked = 0
 
-    while (queue.isNotEmpty() && results.size < limit && walked < 1200) {
+    while (queue.isNotEmpty() && results.size < limit && walked < AgentContextLimits.SNAPSHOT_WALK_MAX_NODES) {
       walked++
       val node = queue.removeFirst()
-      val label = UiNodeHeuristics.nodeLabel(node)
+      val label = UiNodeHeuristics.displayLabel(node)
       val nodeLower = label.lowercase()
+      val fullLabel = UiNodeHeuristics.nodeLabel(node)
+      val fullLower = fullLabel.lowercase()
       val matched = nodeLower.contains(lower) ||
-        tokens.any { token -> token.length >= 1 && nodeLower.contains(token) }
+        fullLower.contains(lower) ||
+        tokens.any { token -> token.length >= 1 && (nodeLower.contains(token) || fullLower.contains(token)) }
 
       if (matched && label.isNotBlank()) {
         val suffix = when {

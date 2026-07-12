@@ -12,6 +12,27 @@ val localProperties = Properties().apply {
     }
 }
 
+val llmBaseUrl = localProperties.getProperty("llm.base_url")
+    ?: "https://ark.cn-beijing.volces.com/api/v3/responses"
+val usesVolcResponses = llmBaseUrl.contains("/api/v3/responses", ignoreCase = true)
+
+val llmApiKey = localProperties.getProperty("llm.api.key")
+    ?: localProperties.getProperty("volc.llm.api.key")
+    ?: if (!usesVolcResponses) {
+        localProperties.getProperty("zhipu.api.key")
+            ?: localProperties.getProperty("deepseek.api.key", "")
+    } else {
+        ""
+    }
+
+val llmModel = localProperties.getProperty("llm.model")
+    ?: localProperties.getProperty("volc.llm.model")
+    ?: if (usesVolcResponses) {
+        "doubao-seed-2-0-mini-260428"
+    } else {
+        localProperties.getProperty("zhipu.model", "glm-4.6v-flash")
+    }
+
 android {
     namespace = "com.tetraploid.joyforold"
     compileSdk {
@@ -31,13 +52,18 @@ android {
 
         buildConfigField(
             "String",
-            "DEEPSEEK_API_KEY",
-            "\"${localProperties.getProperty("deepseek.api.key", "")}\"",
+            "LLM_API_KEY",
+            "\"$llmApiKey\"",
         )
         buildConfigField(
             "String",
-            "DEEPSEEK_MODEL",
-            "\"${localProperties.getProperty("deepseek.model", "deepseek-v4-flash")}\"",
+            "LLM_MODEL",
+            "\"$llmModel\"",
+        )
+        buildConfigField(
+            "String",
+            "LLM_BASE_URL",
+            "\"$llmBaseUrl\"",
         )
         buildConfigField(
             "String",

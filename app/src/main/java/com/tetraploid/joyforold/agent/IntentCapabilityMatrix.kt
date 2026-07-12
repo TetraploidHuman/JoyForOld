@@ -348,6 +348,27 @@ object IntentCapabilityMatrix {
         """(点击|输入|发送|滑动|搜索|查找|读消息|念|短信|聊天|微信|支付宝|视频通话|发消息)""",
     )
 
+    /** 逗号/连词拆成多段，或「打开应用 + 应用内操作」等一句话多步任务。 */
+    private val multiStepConnectors = Regex("""[,，；;、]|然后|接着|再然后|之后再|之后|完后|以后|并且|还要""")
+
+    private val openThenInAppGoal = Regex(
+        """打开.{1,16}(给|跟|和|向|发消息|告诉|通知|找|搜)""",
+    )
+
+    private val contactMessageGoal = Regex(
+        """(给|跟|和|向).{1,20}(发消息|发短信|发信息|发微信|发qq|说|告诉|通知)""",
+    )
+
+    /** 系统 Intent 一步即可完成、无需进 App 内自动化。 */
+    private val systemCompleteActions = setOf(
+        "dial_contact", "send_sms", "set_alarm", "add_calendar_event",
+        "tell_time", "query_weather", "navigate_home", "emergency_help",
+        "ask_family_for_help", "open_bluetooth_settings", "open_wifi_settings",
+        "open_settings", "open_sound_settings", "open_mobile_data_settings",
+        "open_location_settings", "open_display_settings", "open_font_settings",
+        "open_health_code", "open_payment_code", "open_weather",
+    )
+
     fun forIntent(intentId: String): Capability? = byId[intentId.lowercase()]
 
     fun forAction(action: String): Capability? = byId[action.lowercase()]
@@ -395,6 +416,39 @@ object IntentCapabilityMatrix {
         return text.length > 24 && text.contains("怎么")
     }
 
+    /**
+     * 用户一句话里包含多个子任务（如「打开微信，给大女儿发消息说…」）。
+     * 离线 NLU 只能标一个 intent，此类必须整句走云端 Agent。
+     */
+    fun isMultiStepUtterance(command: String): Boolean {
+        val text = command.trim()
+        if (text.isBlank()) return false
+        val segments = text.split(multiStepConnectors).map { it.trim() }.filter { it.length >= 2 }
+        if (segments.size >= 2) return true
+        if (openThenInAppGoal.containsMatchIn(text)) return true
+        if (contactMessageGoal.containsMatchIn(text)) return true
+        return false
+    }
+
+    /**
+     * 本地快路径是否只覆盖了复合指令的第一段（常见：仅 open_app）。
+     * 精确模板（confidence=1）仍走本地；其余交给 Agent 循环。
+     */
+    fun shouldExecuteRouteLocally(command: String, route: CommandRouteResolver.Route): Boolean {
+        if (route.source == "template" && route.confidence >= 1.0) return true
+        if (!isMultiStepUtterance(command)) return true
+        val primarySteps = route.steps.filterNot { it.action.equals("finish", ignoreCase = true) }
+        if (primarySteps.isEmpty()) return true
+        if (primarySteps.size == 1) {
+            val action = primarySteps.first().action.lowercase()
+            if (action in systemCompleteActions) return true
+            if (action == "open_app" || action == "open_camera" || action == "open_gallery") {
+                return false
+            }
+        }
+        return true
+    }
+
     fun isRouteAllowed(route: CommandRouteResolver.Route, env: RouteEnvironment): Boolean {
         if (route.source == "offline_nlu" || route.source == "local_system" || route.source == "template") {
             // Handled by dedicated gates; viability checked via step capabilities.
@@ -420,6 +474,7 @@ object IntentCapabilityMatrix {
         val cap = forIntent(intentId) ?: return false
         if (!cap.allowedOfflineNlu) return false
         if (isComplexQuery(command)) return false
+        if (isMultiStepUtterance(command)) return false
         if (env.online && routeConfidence < 0.94) return false
         return true
     }

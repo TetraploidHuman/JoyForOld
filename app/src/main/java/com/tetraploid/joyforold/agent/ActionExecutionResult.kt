@@ -17,7 +17,12 @@ data class ActionExecutionResult(
         }
         if (matchedElements.isNotEmpty()) {
             appendLine()
-            append("匹配项：").append(matchedElements.take(12).joinToString(" | "))
+            append("匹配项：").append(
+                AgentContextLimits.capList(
+                    matchedElements,
+                    AgentContextLimits.MATCHED_ELEMENTS_CAP,
+                ).joinToString(" | "),
+            )
         }
         if (suggestions.isNotEmpty()) {
             appendLine()

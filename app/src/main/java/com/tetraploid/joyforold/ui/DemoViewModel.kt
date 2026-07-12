@@ -104,6 +104,18 @@ class DemoViewModel(application: Application) : AndroidViewModel(application) {
 
     fun submitBinaryConfirm(approved: Boolean) = AgentRuntime.submitBinaryConfirm(approved)
 
+    fun setCloudContextConsent(granted: Boolean) =
+        AgentRuntime.setCloudContextConsent(getApplication(), granted)
+
+    fun setVoiceBargeInEnabled(enabled: Boolean) =
+        AgentRuntime.setVoiceBargeInEnabled(getApplication(), enabled)
+
+    fun selectDisambiguationOption(intentId: String) = AgentRuntime.selectDisambiguationOption(intentId)
+
+    fun undoLastLocalAction() = AgentRuntime.undoLastLocalAction()
+
+    fun dismissUndoOffer() = AgentRuntime.dismissUndoOffer()
+
     fun clearInteraction() = AgentRuntime.clearInteraction()
 
     fun cancelAgent() = AgentRuntime.cancelAgent()

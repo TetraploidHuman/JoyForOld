@@ -10,8 +10,8 @@ class AppHintStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun ensureSeededDefaults() {
-        seedIfEmpty(PKG_WECHAT, listOf("发消息可先 click 右上角搜索或通讯录中的联系人"))
-        seedIfEmpty(PKG_QQ, listOf("发消息可先 click 联系人或顶部搜索"))
+        migrateAllLegacyClickHints()
+        migrateAllStaleCoordinateHints()
         seedIfEmpty(PKG_ALIPAY, listOf("付款码/健康码通常在首页顶部入口"))
     }
 
@@ -50,12 +50,62 @@ class AppHintStore(context: Context) {
         defaults.forEach { addHint(packageName, it) }
     }
 
-    private fun key(packageName: String) = "hints_$packageName"
+    /** 旧版 hint 写 click/read_tree，需升级为 tap 视觉指引。 */
+    private fun migrateLegacyClickHints(packageName: String) {
+        val hints = hintsFor(packageName)
+        if (hints.isEmpty()) return
+        val stale = hints.any {
+            it.contains("click", ignoreCase = true) &&
+                !it.contains("tap", ignoreCase = true)
+        }
+        if (!stale) return
+        prefs.edit().remove(key(packageName)).apply()
+        addHint(packageName, GENERIC_VISION_HINT)
+    }
+
+    /** 清除含固定 UI 位置描述的旧 hint（坐标由 LLM 看截图决定）。 */
+    private fun migrateStaleCoordinateHints(packageName: String) {
+        val hints = hintsFor(packageName)
+        if (hints.isEmpty()) return
+        val stale = hints.any { hint ->
+            STALE_POSITION_MARKERS.any { marker -> hint.contains(marker) }
+        }
+        if (!stale) return
+        prefs.edit().remove(key(packageName)).apply()
+        addHint(packageName, GENERIC_VISION_HINT)
+    }
+
+    private fun migrateAllLegacyClickHints() {
+        allStoredPackageNames().forEach { migrateLegacyClickHints(it) }
+    }
+
+    private fun migrateAllStaleCoordinateHints() {
+        allStoredPackageNames().forEach { migrateStaleCoordinateHints(it) }
+    }
+
+    private fun allStoredPackageNames(): List<String> =
+        prefs.all.keys
+            .mapNotNull { rawKey ->
+                if (!rawKey.startsWith(HINT_KEY_PREFIX)) return@mapNotNull null
+                rawKey.removePrefix(HINT_KEY_PREFIX).trim().takeIf { it.isNotBlank() }
+            }
+
+    private fun key(packageName: String) = "$HINT_KEY_PREFIX$packageName"
 
     companion object {
         private const val PREFS = "joy_app_hints"
+        private const val HINT_KEY_PREFIX = "hints_"
         private const val MAX_HINTS_PER_APP = 6
         private const val MAX_HINT_CHARS = 120
+        private const val GENERIC_VISION_HINT =
+            "无障碍树不可用：根据截图用 tap 坐标操作，输入前 tap 输入框再 type；勿用 click/read_tree"
+        private val STALE_POSITION_MARKERS = listOf(
+            "右上角",
+            "左上角",
+            "右下角",
+            "左下角",
+            "会话列表在中部",
+        )
         const val PKG_WECHAT = "com.tencent.mm"
         const val PKG_QQ = "com.tencent.mobileqq"
         const val PKG_ALIPAY = "com.eg.android.AlipayGphone"

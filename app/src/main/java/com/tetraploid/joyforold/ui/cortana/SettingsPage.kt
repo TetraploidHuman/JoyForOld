@@ -21,6 +21,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -54,6 +55,8 @@ fun SettingsPage(
     onSetWakeWordSileroVad: (Boolean) -> Unit,
     onSetWakeWordSecondStage: (Boolean) -> Unit,
     onSaveWakeWordConfig: () -> Unit,
+    onSetCloudContextConsent: (Boolean) -> Unit,
+    onSetVoiceBargeIn: (Boolean) -> Unit,
     onTestWakeWord: () -> Unit,
     onStartCalibration: () -> Unit,
     onRecordCalibrationStep: () -> Unit,
@@ -149,17 +152,75 @@ fun SettingsPage(
         }
 
         SectionDivider()
+        SectionTitle("隐私与权限")
+        Text(
+            text = "开启后，助手可将当前屏幕结构发送到云端，用于微信发消息、点按钮等 UI 自动化。仅在使用相关功能时上传，不会持续上传。",
+            color = CortanaColors.OnBackgroundMuted,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "允许云端理解屏幕内容",
+                color = CortanaColors.OnBackground,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(
+                checked = uiState.cloudContextConsentGranted,
+                onCheckedChange = onSetCloudContextConsent,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = CortanaColors.Accent,
+                    checkedTrackColor = CortanaColors.SurfaceElevated,
+                ),
+            )
+        }
+
+        SectionDivider()
+        SectionTitle("语音对话")
+        Text(
+            text = "开启后，助手播报时可直接说话打断，无需等播完。本地检测人声后停播并开麦；若仍有回声，会自动过滤已播报内容。",
+            color = CortanaColors.OnBackgroundMuted,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "播报时可语音打断",
+                color = CortanaColors.OnBackground,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(
+                checked = uiState.voiceBargeInEnabled,
+                onCheckedChange = onSetVoiceBargeIn,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = CortanaColors.Accent,
+                    checkedTrackColor = CortanaColors.SurfaceElevated,
+                ),
+            )
+        }
+
+        SectionDivider()
         SectionTitle("API 配置")
         Text("模型：${uiState.modelName}", color = CortanaColors.OnBackgroundMuted, fontSize = 12.sp)
         OutlinedTextField(
             value = uiState.apiKey,
             onValueChange = onUpdateApiKey,
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("DeepSeek API Key") },
+            label = { Text("LLM API Key（火山方舟）") },
             singleLine = true,
             colors = fieldColors,
         )
-        TextButton(onClick = onSaveApiKey) { Text("保存 DeepSeek", color = CortanaColors.Accent) }
+        TextButton(onClick = onSaveApiKey) { Text("保存 LLM Key", color = CortanaColors.Accent) }
 
         SectionDivider()
         SectionTitle("豆包语音识别")

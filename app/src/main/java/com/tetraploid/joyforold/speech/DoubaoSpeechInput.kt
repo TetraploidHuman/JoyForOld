@@ -70,7 +70,16 @@ class DoubaoSpeechInput(
     }
 
     override fun cancelPreparedConnection() {
+        if (active) return
         client.cancelPrepare()
+    }
+
+    override fun cancelActiveSession() {
+        retryHandler.removeCallbacksAndMessages(null)
+        if (!active && client.isSessionIdle()) return
+        client.cancelSession()
+        active = false
+        sessionDelivered = false
     }
 
     override suspend fun stop(onFinalText: (String) -> Unit) {

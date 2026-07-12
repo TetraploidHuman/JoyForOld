@@ -13,4 +13,15 @@ class PageContextRedactorTest {
         assertTrue(out.contains("[手机号]"))
         assertTrue(out.contains("[验证码]"))
     }
+
+    @Test
+    fun redactForLog_keepsOperationalNumbers() {
+        val out = PageContextRedactor.redactForLog(
+            "唤醒监听统计：frames=1004, vadPass=884, hits=0\n" +
+                "...（工具详情已截断，共 1234 字）",
+        )
+        assertTrue(out.contains("frames=1004"))
+        assertTrue(out.contains("共 1234 字"))
+        assertFalse(out.contains("[验证码]"))
+    }
 }

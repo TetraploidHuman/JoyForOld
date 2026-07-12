@@ -7,6 +7,18 @@
 deepseek.api.key=
 deepseek.model=deepseek-v4-flash
 
+# 火山方舟 LLM（Responses API，推荐用于截图 Agent）
+# 1. 控制台 → 火山方舟 → 开通模型 doubao-seed-2.0-mini（或创建推理接入点）
+# 2. llm.model 填「推理接入点 ID」（ep-xxxx）或已开通的模型名（如 doubao-seed-2-0-mini-260428）
+# 3. 账户需充值后调用（余额为 0 会失败）
+llm.api.key=
+llm.model=doubao-seed-2-0-mini-260428
+llm.base_url=https://ark.cn-beijing.volces.com/api/v3/responses
+
+# 智谱（旧配置，仍可作为 llm.api.key 的回退）
+zhipu.api.key=
+zhipu.model=glm-4.6v-flash
+
 # 豆包 / 火山引擎 语音识别（二选一鉴权方式）
 #
 # 新版：只填 api_key

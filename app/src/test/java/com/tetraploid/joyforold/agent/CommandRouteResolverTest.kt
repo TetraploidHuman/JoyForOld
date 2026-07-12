@@ -68,6 +68,37 @@ class CommandRouteResolverTest {
     }
 
     @Test
+    fun shouldUseOfflineNlu_skipsMultiStepComposableCommand() {
+        val offline = OfflineNluRouter.Match(
+            steps = listOf(AgentAction(action = "open_app", targetText = "微信")),
+            confidence = 0.94,
+            intent = "open_app",
+        )
+        assertEquals(
+            false,
+            CommandRouteResolver.shouldUseOfflineNlu(
+                "打开微信，给大女儿发消息说今晚回家吃饭",
+                offline,
+                appContext = null,
+            ),
+        )
+    }
+
+    @Test
+    fun looksLikeMultiStep_detectsComposableWeChatMessage() {
+        assertEquals(
+            true,
+            CommandRouteResolver.looksLikeMultiStepUtterance("打开微信，给大女儿发消息说今晚回家吃饭"),
+        )
+        assertEquals(
+            true,
+            CommandRouteResolver.looksLikeMultiStepUtterance("打开微信给大女儿发消息说回家吃饭"),
+        )
+        assertEquals(false, CommandRouteResolver.looksLikeMultiStepUtterance("打开微信"))
+        assertEquals(false, CommandRouteResolver.looksLikeMultiStepUtterance("打开蓝牙"))
+    }
+
+    @Test
     fun buildClarifyMessage_usesFinishHint() {
         val route = CommandRouteResolver.Route(
             steps = listOf(

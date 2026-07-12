@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -39,6 +40,7 @@ class WakeWordService : Service() {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
+        micReleased = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -69,7 +71,9 @@ class WakeWordService : Service() {
         isRunning = false
         listenJob?.cancel()
         listenJob = null
+        scope.cancel()
         releaseRecorder()
+        micReleased = true
         super.onDestroy()
     }
 
@@ -131,7 +135,15 @@ class WakeWordService : Service() {
         )
         val bufferSize = max(min, SAMPLE_RATE * 2)
         val audio = createAudioRecord(bufferSize)
+        if (audio.state != AudioRecord.STATE_INITIALIZED) {
+            audio.release()
+            AgentRuntime.appendLog("本地唤醒录音设备初始化失败")
+            detector.release()
+            sileroGate?.release()
+            return false
+        }
         record = audio
+        micReleased = false
         runCatching { audio.startRecording() }
             .onFailure {
                 AgentRuntime.appendLog("本地唤醒录音启动失败：${it.message}")
@@ -172,15 +184,16 @@ class WakeWordService : Service() {
                 if (detector.feed(buf, boostedLen)) {
                     if (now - lastHitAt < WAKE_COOLDOWN_MS) continue
                     if (secondStage != null && !secondStage.verify(ringBuffer)) {
-                        AgentRuntime.appendLog("唤醒候选未通过二阶段校验")
+                        Log.d(logTag, "wake candidate rejected by second stage")
                         continue
                     }
                     if (!hitConfirmer.onCandidateHit(now)) continue
                     hitConfirmer.reset()
                     lastHitAt = now
                     hitCount++
+                    WakeChainedAudioBridge.offer(ringBuffer.snapshot())
                     ringBuffer.clear()
-                    AgentRuntime.appendLog("唤醒命中：$phrase (#$hitCount)")
+                    Log.d(logTag, "wake hit: $phrase (#$hitCount)")
                     AgentRuntime.onWakeWordDetected()
                 }
                 lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
@@ -212,13 +225,14 @@ class WakeWordService : Service() {
         )
         if (preferred.state == AudioRecord.STATE_INITIALIZED) return preferred
         preferred.release()
-        return AudioRecord(
+        val fallback = AudioRecord(
             MediaRecorder.AudioSource.MIC,
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
             bufferSize,
         )
+        return fallback
     }
 
     private fun maybeReportStats(
@@ -241,6 +255,7 @@ class WakeWordService : Service() {
             release()
         }
         record = null
+        micReleased = true
     }
 
     private fun hasRecordAudioPermission(): Boolean {
@@ -278,6 +293,10 @@ class WakeWordService : Service() {
     companion object {
         @Volatile
         var isRunning: Boolean = false
+            private set
+
+        @Volatile
+        var micReleased: Boolean = true
             private set
 
         private const val SAMPLE_RATE = 16000

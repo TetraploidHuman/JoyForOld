@@ -15,21 +15,33 @@ data class StructuredPageSnapshot(
     val sendButtons: List<String>,
     val fingerprint: String,
 ) {
-    fun toCompactSummary(maxChars: Int = 2_400): String {
+    fun toCompactSummary(
+        maxChars: Int = AgentContextLimits.PAGE_COMPACT_SUMMARY_MAX_CHARS,
+    ): String {
         val snap = this
+        val cap = AgentContextLimits.SUMMARY_LIST_CAP
         val raw = buildString {
             appendLine("=== 页面快览 ===")
             if (snap.appHint.isNotBlank()) appendLine(snap.appHint)
             appendLine("package: ${snap.packageName}")
-            appendLine("可点击(${snap.clickables.size}): ${snap.clickables.take(50).joinToString(" | ")}")
+            appendLine(
+                "可点击(${snap.clickables.size}): " +
+                    AgentContextLimits.capList(snap.clickables, cap).joinToString(" | "),
+            )
             PageSnapshotHints.linesFor(snap).forEach { hint ->
                 appendLine(hint)
             }
             if (snap.sendButtons.isNotEmpty()) {
                 appendLine("发送相关(${snap.sendButtons.size}): ${snap.sendButtons.joinToString(" | ")}")
             }
-            appendLine("可输入(${snap.editables.size}): ${snap.editables.take(20).joinToString(" | ")}")
-            appendLine("可见文字(${snap.visibleTexts.size}): ${snap.visibleTexts.take(50).joinToString(" | ")}")
+            appendLine(
+                "可输入(${snap.editables.size}): " +
+                    AgentContextLimits.capList(snap.editables, cap).joinToString(" | "),
+            )
+            appendLine(
+                "可见文字(${snap.visibleTexts.size}): " +
+                    AgentContextLimits.capList(snap.visibleTexts, cap).joinToString(" | "),
+            )
         }.trimEnd()
         return if (raw.length <= maxChars) {
             raw
@@ -82,9 +94,9 @@ data class StructuredPageSnapshot(
 }
 
 object PageObservation {
-    private const val MAX_WALK_NODES = 1_500
+    private const val MAX_WALK_NODES = AgentContextLimits.SNAPSHOT_WALK_MAX_NODES
     private const val MAX_DEPTH = 55
-    const val COMPACT_SUMMARY_MAX_CHARS = 2_400
+    const val COMPACT_SUMMARY_MAX_CHARS = AgentContextLimits.PAGE_COMPACT_SUMMARY_MAX_CHARS
 
     fun capture(root: AccessibilityNodeInfo): StructuredPageSnapshot {
         val screenHeight = UiNodeHeuristics.screenHeight(root)
@@ -156,6 +168,7 @@ object PageObservation {
         val appHint = when {
             pkg.contains("tencent.mobileqq") -> "当前为 QQ"
             pkg.contains("com.tencent.mm") -> "当前为微信"
+            pkg.contains("danmaku.bili") -> "当前为哔哩哔哩"
             else -> ""
         }
 
@@ -163,7 +176,7 @@ object PageObservation {
             append(pkg).append('|')
             append(clickables.size).append('|')
             append(editables.size).append('|')
-            append(visibleTexts.take(20).joinToString(","))
+            append(visibleTexts.take(AgentContextLimits.FINGERPRINT_VISIBLE_TEXTS).joinToString(","))
         }
 
         return StructuredPageSnapshot(
@@ -189,6 +202,7 @@ object PageObservation {
         val newEditables = current.editables.filter { it !in previous.editables.toSet() }
         val unchanged = previous.fingerprint == current.fingerprint
 
+        val listCap = AgentContextLimits.SUMMARY_LIST_CAP
         return buildString {
             appendLine("=== 页面变化 ===")
             if (packageChanged) {
@@ -200,16 +214,28 @@ object PageObservation {
                 appendLine("页面指纹未变（可能仍在同一屏或变化较小）")
             }
             if (newClickables.isNotEmpty()) {
-                appendLine("新增可点击(${newClickables.size}): ${newClickables.take(15).joinToString(" | ")}")
+                appendLine(
+                    "新增可点击(${newClickables.size}): " +
+                        AgentContextLimits.capList(newClickables, listCap).joinToString(" | "),
+                )
             }
             if (removedClickables.isNotEmpty()) {
-                appendLine("消失可点击(${removedClickables.size}): ${removedClickables.take(15).joinToString(" | ")}")
+                appendLine(
+                    "消失可点击(${removedClickables.size}): " +
+                        AgentContextLimits.capList(removedClickables, listCap).joinToString(" | "),
+                )
             }
             if (newEditables.isNotEmpty()) {
-                appendLine("新增输入区: ${newEditables.take(8).joinToString(" | ")}")
+                appendLine(
+                    "新增输入区: " +
+                        AgentContextLimits.capList(newEditables, listCap).joinToString(" | "),
+                )
             }
             if (newTexts.isNotEmpty()) {
-                appendLine("新增可见文字(${newTexts.size}): ${newTexts.take(12).joinToString(" | ")}")
+                appendLine(
+                    "新增可见文字(${newTexts.size}): " +
+                        AgentContextLimits.capList(newTexts, listCap).joinToString(" | "),
+                )
             }
             if (!packageChanged && newClickables.isEmpty() && removedClickables.isEmpty() &&
                 newTexts.isEmpty() && newEditables.isEmpty() && !unchanged

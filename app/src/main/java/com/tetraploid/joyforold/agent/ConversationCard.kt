@@ -9,6 +9,9 @@ enum class ConversationCardKind {
     Progress,
     Info,
     Confirm,
+    Disambiguation,
+    Preview,
+    Undo,
 }
 
 data class ConversationCard(
@@ -19,6 +22,8 @@ data class ConversationCard(
     val bullets: List<String> = emptyList(),
     val detailBullets: List<String> = emptyList(),
     val showBinaryActions: Boolean = false,
+    /** Disambiguation: intent id per bullet label */
+    val optionIds: List<String> = emptyList(),
 )
 
 object ConversationCardFactory {
@@ -80,6 +85,29 @@ object ConversationCardFactory {
         title = if (binary) "请确认" else "等待您的回复",
         body = prompt,
         showBinaryActions = binary,
+    )
+
+    fun disambiguation(prompt: String, options: List<DisambiguationOption>): ConversationCard =
+        ConversationCard(
+            kind = ConversationCardKind.Disambiguation,
+            title = "请选一下",
+            body = prompt,
+            bullets = options.map { it.label },
+            optionIds = options.map { it.intentId },
+        )
+
+    fun preview(prompt: String): ConversationCard = ConversationCard(
+        kind = ConversationCardKind.Preview,
+        title = "执行前确认",
+        body = prompt,
+        showBinaryActions = true,
+    )
+
+    fun undo(message: String): ConversationCard = ConversationCard(
+        kind = ConversationCardKind.Undo,
+        title = "可撤销",
+        body = message,
+        showBinaryActions = true,
     )
 
     fun overlayInteraction(state: AgentUiState): ConversationCard? {

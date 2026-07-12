@@ -92,6 +92,9 @@ fun FloatingOverlayContent(
                 onBinaryConfirm = { AgentRuntime.submitBinaryConfirm(approved = true) },
                 onBinaryCancel = { AgentRuntime.submitBinaryConfirm(approved = false) },
                 onDismissConfirm = { AgentRuntime.clearPendingConfirmUI() },
+                onDisambiguationSelect = AgentRuntime::selectDisambiguationOption,
+                onUndo = AgentRuntime::undoLastLocalAction,
+                onDismissUndo = AgentRuntime::dismissUndoOffer,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(modifier = Modifier.height(8.dp))

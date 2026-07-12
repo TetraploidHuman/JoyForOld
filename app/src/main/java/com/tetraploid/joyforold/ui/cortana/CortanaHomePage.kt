@@ -36,8 +36,7 @@ import com.tetraploid.joyforold.ui.theme.CortanaColors
 
 private val CortanaBottomDockReservedHeight = 180.dp
 
-private val primarySuggestion = "发送消息给家人"
-private val extraSuggestions = listOf(
+private val fallbackSuggestions = listOf(
     "我要回家",
     "帮我读一下未读消息",
     "几点了",
@@ -57,6 +56,9 @@ fun CortanaHomePage(
     onClearConfirm: () -> Unit,
     onBinaryConfirm: () -> Unit,
     onBinaryCancel: () -> Unit,
+    onDisambiguationSelect: (String) -> Unit = {},
+    onUndo: () -> Unit = {},
+    onDismissUndo: () -> Unit = {},
     onSendClick: () -> Unit,
     onCancelClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -64,6 +66,9 @@ fun CortanaHomePage(
     val scrollState = rememberScrollState()
     var selectedCategory by rememberSaveable { mutableStateOf<CortanaSearchCategory?>(null) }
     var expandedHints by rememberSaveable { mutableStateOf(false) }
+    val suggestionChips = uiState.suggestionChips.ifEmpty { fallbackSuggestions }
+    val primarySuggestion = suggestionChips.firstOrNull() ?: "发送消息给家人"
+    val dockSuggestions = suggestionChips.drop(1).ifEmpty { fallbackSuggestions.drop(1) }
 
     val greeting = when {
         uiState.isRunning -> "正在为您处理…"
@@ -130,6 +135,9 @@ fun CortanaHomePage(
                         onBinaryConfirm = onBinaryConfirm,
                         onBinaryCancel = onBinaryCancel,
                         onDismissConfirm = onClearConfirm,
+                        onDisambiguationSelect = onDisambiguationSelect,
+                        onUndo = onUndo,
+                        onDismissUndo = onDismissUndo,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (uiState.isRunning) {
@@ -198,7 +206,7 @@ fun CortanaHomePage(
             isRunning = uiState.isRunning,
             expandedHints = expandedHints && !uiState.isRunning && !hasContentPanel,
             onExpandHints = { expandedHints = !expandedHints },
-            extraSuggestions = extraSuggestions,
+            extraSuggestions = dockSuggestions,
             onSuggestionClick = onSuggestionClick,
             onSendClick = onSendClick,
             onCancelClick = onCancelClick,

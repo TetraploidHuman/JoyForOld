@@ -26,6 +26,9 @@ class JoyTtsSpeaker(context: Context) {
     @Volatile
     private var speaking = false
 
+    @Volatile
+    private var pendingSpeakContinuation: kotlinx.coroutines.CancellableContinuation<Boolean>? = null
+
     val isSpeaking: Boolean
         get() = speaking
 
@@ -68,11 +71,12 @@ class JoyTtsSpeaker(context: Context) {
         val message = text.trim()
         if (message.isBlank()) return true
         ensureReady()
+        if (!awaitReady()) return false
         val engine = tts ?: return false
-        if (!ready) return false
 
         markSpeaking(message)
         val ok = suspendCancellableCoroutine { continuation ->
+            pendingSpeakContinuation = continuation
             val expectedId = UUID.randomUUID().toString()
             engine.setOnUtteranceProgressListener(
                 object : UtteranceProgressListener() {
@@ -80,6 +84,7 @@ class JoyTtsSpeaker(context: Context) {
 
                     override fun onDone(utteranceId: String?) {
                         if (utteranceId == expectedId && continuation.isActive) {
+                            pendingSpeakContinuation = null
                             continuation.resume(true)
                         }
                     }
@@ -87,12 +92,14 @@ class JoyTtsSpeaker(context: Context) {
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
                         if (utteranceId == expectedId && continuation.isActive) {
+                            pendingSpeakContinuation = null
                             continuation.resume(false)
                         }
                     }
 
                     override fun onError(utteranceId: String?, errorCode: Int) {
                         if (utteranceId == expectedId && continuation.isActive) {
+                            pendingSpeakContinuation = null
                             continuation.resume(false)
                         }
                     }
@@ -107,9 +114,11 @@ class JoyTtsSpeaker(context: Context) {
                 engine.speak(message, mode, null)
             }
             if (queued == TextToSpeech.ERROR && continuation.isActive) {
+                pendingSpeakContinuation = null
                 continuation.resume(false)
             }
             continuation.invokeOnCancellation {
+                pendingSpeakContinuation = null
                 engine.stop()
                 clearSpeaking()
             }
@@ -127,8 +136,23 @@ class JoyTtsSpeaker(context: Context) {
         }
     }
 
+    private suspend fun awaitReady(timeoutMs: Long = 3_000L): Boolean {
+        if (ready) return true
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (!ready && System.currentTimeMillis() < deadline) {
+            delay(50)
+        }
+        return ready
+    }
+
     fun stop() {
         tts?.stop()
+        pendingSpeakContinuation?.let { continuation ->
+            if (continuation.isActive) {
+                pendingSpeakContinuation = null
+                continuation.resume(false)
+            }
+        }
         clearSpeaking()
     }
 

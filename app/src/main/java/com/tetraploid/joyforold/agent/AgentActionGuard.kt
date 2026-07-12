@@ -21,14 +21,25 @@ object AgentActionGuard {
         }
     }
 
-    /** 相同操作已连续失败达到阈值 → 不再执行，直接反馈 AI 换策略 */
-    fun blockedRepeatReason(session: AgentConversationSession, action: AgentAction): String? {
+    /** 相同操作已成功且页面指纹未变 → 不再执行（DroidLM/Mantis 思路：重复 + 无进展） */
+    fun blockedRepeatReason(
+        session: AgentConversationSession,
+        action: AgentAction,
+        pageUnchangedSinceLastStep: Boolean = false,
+        a11yUnavailable: Boolean = false,
+    ): String? {
         if (action.action.equals("finish", ignoreCase = true)) return null
-        if (action.action.equals("find_on_page", ignoreCase = true) ||
-            action.action.equals("read_tree", ignoreCase = true) ||
-            action.action.equals("list_apps", ignoreCase = true)
-        ) {
+        if (action.action.equals("list_apps", ignoreCase = true)) {
             return null
+        }
+
+        if (action.action.equals("read_tree", ignoreCase = true) && pageUnchangedSinceLastStep) {
+            val recentReadTrees = session.stepRecords.takeLast(4).count {
+                it.action.action.equals("read_tree", ignoreCase = true) && it.result.success
+            }
+            if (recentReadTrees >= 2) {
+                return "页面未变化，禁止重复 read_tree。若已在视频详情页且标题匹配，请直接 finish。"
+            }
         }
 
         val key = actionKey(action)
@@ -37,9 +48,32 @@ object AgentActionGuard {
             .filter { !it.result.success && actionKey(it.action) == key }
 
         if (recentFails.size >= 2) {
-            return "相同操作「${describe(action)}」已连续失败 ${recentFails.size} 次，禁止再次尝试。请换策略：" +
-                "find_on_page 搜索、read_tree 看结构、scroll/swipe 滚动、open_app 切换应用，" +
-                "或 finish+waiting_for_user 询问用户。"
+            return "相同操作「${describe(action)}」已连续失败 ${recentFails.size} 次，禁止再次尝试。" +
+                replanHint(a11yUnavailable, action)
+        }
+
+        if (pageUnchangedSinceLastStep) {
+            val priorSuccess = session.stepRecords.takeLast(8).any {
+                it.result.success && actionKey(it.action) == key
+            }
+            if (priorSuccess) {
+                return "相同操作「${describe(action)}」已成功执行过且【页面变化】显示无进展，禁止重复。" +
+                    replanHint(a11yUnavailable, action)
+            }
+        }
+
+        val recentSameSuccess = session.stepRecords.takeLast(6).count {
+            it.result.success && actionKey(it.action) == key
+        }
+        if (recentSameSuccess >= 2 &&
+            action.action.equals("click", ignoreCase = true)
+        ) {
+            return "相同点击「${describe(action)}」已连续成功 $recentSameSuccess 次仍未推进任务，禁止再次重复。" +
+                if (a11yUnavailable) {
+                    "请换 tap 坐标或 scroll。"
+                } else {
+                    "请 read_tree 换目标或 scroll。"
+                }
         }
 
         val sameTypeFails = session.stepRecords
@@ -129,6 +163,35 @@ object AgentActionGuard {
             needsBinaryConfirm = needsBinaryConfirm,
         )
     }
+
+    fun pageDiffIndicatesNoChange(pageDiff: String): Boolean =
+        VisionScreenChange.indicatesNoProgress(pageDiff)
+
+    /** 仅依据无障碍 diff 文案（不含视觉截图信号） */
+    fun pageDiffIndicatesNoChangeA11yOnly(pageDiff: String): Boolean {
+        if (pageDiff.isBlank()) return false
+        return pageDiff.contains("无明显变化") ||
+            pageDiff.contains("指纹未变") ||
+            pageDiff.contains("页面指纹未变")
+    }
+
+    /** 无障碍树不可用时的 action 拦截（视觉模式） */
+    fun blockedInVisionMode(action: AgentAction): String? = when (action.action.lowercase()) {
+        "read_tree" ->
+            "当前应用无障碍树不可用，请勿 read_tree；请根据截图用 tap 坐标操作。"
+        "click" ->
+            "当前应用无障碍树不可用，请用 tap（归一化坐标）代替 click。"
+        "find_on_page" ->
+            "当前应用无障碍树不可用，find_on_page 无效；请根据截图规划 tap。"
+        else -> null
+    }
+
+    private fun replanHint(a11yUnavailable: Boolean, action: AgentAction): String =
+        if (a11yUnavailable || action.action.equals("tap", ignoreCase = true)) {
+            "请根据截图换完全不同 tap 坐标，或 finish+waiting_for_user 询问用户。"
+        } else {
+            "请根据页面快览/read_tree 换完全不同策略，或 finish+waiting_for_user 询问用户。"
+        }
 
     private fun describe(action: AgentAction): String {
         val target = action.targetText?.let { "「$it」" }.orEmpty()

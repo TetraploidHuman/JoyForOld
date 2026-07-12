@@ -127,6 +127,9 @@ object CommandRouteResolver {
     internal fun looksLikeComplexQuery(command: String): Boolean =
         IntentCapabilityMatrix.isComplexQuery(command)
 
+    internal fun looksLikeMultiStepUtterance(command: String): Boolean =
+        IntentCapabilityMatrix.isMultiStepUtterance(command)
+
     fun buildClarifyMessage(command: String, route: Route): String {
         route.clarifyMessage?.trim()?.takeIf { it.isNotBlank() }?.let { aiHint ->
             return if (aiHint.contains("确认")) {

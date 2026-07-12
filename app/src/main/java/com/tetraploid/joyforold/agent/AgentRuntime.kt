@@ -18,9 +18,15 @@ import com.tetraploid.joyforold.preset.PresetTextNormalizer
 import com.tetraploid.joyforold.privacy.SafeLog
 import com.tetraploid.joyforold.speech.DoubaoAsrClient
 import com.tetraploid.joyforold.speech.AndroidTtsOutput
+import com.tetraploid.joyforold.speech.AsrSpeakerAdaptation
+import com.tetraploid.joyforold.speech.AsrSpeakerProfileStore
 import com.tetraploid.joyforold.speech.DoubaoSpeechInput
 import com.tetraploid.joyforold.speech.SpeechEchoFilter
+import com.tetraploid.joyforold.speech.VoiceBargeInHelper
+import com.tetraploid.joyforold.speech.BargeInSpeakOutcome
 import com.tetraploid.joyforold.speech.VoiceTurnCoordinator
+import com.tetraploid.joyforold.voice.WakeEarconPlayer
+import com.tetraploid.joyforold.wakeword.WakeChainedAudioBridge
 import com.tetraploid.joyforold.speech.api.SpeechInputSession
 import com.tetraploid.joyforold.speech.api.VoiceInteractionState
 import com.tetraploid.joyforold.system.ContactResolver
@@ -38,11 +44,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class RuntimePermissionKind {
     RecordAudio,
@@ -111,6 +119,9 @@ data class AgentUiState(
     val emergencyMessage: String = "",
     val homeAddress: String = "",
     val presetPhraseGoHome: String = "我要回家, 导航回家, 送我回家",
+    val suggestionChips: List<String> = emptyList(),
+    val cloudContextConsentGranted: Boolean = false,
+    val voiceBargeInEnabled: Boolean = true,
     val permissionPrompt: RuntimePermissionPrompt? = null,
 )
 
@@ -137,6 +148,10 @@ object AgentRuntime {
     private var cachedAsrParams: AsrParams? = null
     private var caregiverStore: CaregiverSupportStore? = null
     private var presetStore: PresetCommandStore? = null
+    private var contextConsentStore: ContextConsentStore? = null
+    private var voiceInteractionConfigStore: VoiceInteractionConfigStore? = null
+    private var asrSpeakerProfileStore: AsrSpeakerProfileStore? = null
+    private var proactiveAssistantEngine: ProactiveAssistantEngine? = null
 
     @Volatile
     private var appInForeground: Boolean = false
@@ -168,6 +183,12 @@ object AgentRuntime {
                 it.ensureSeededDefaults()
                 orchestrator.bindPresetStore(it)
             }
+            contextConsentStore = ContextConsentStore(application).also {
+                orchestrator.bindContextConsentStore(it)
+            }
+            voiceInteractionConfigStore = VoiceInteractionConfigStore(application)
+            asrSpeakerProfileStore = AsrSpeakerProfileStore(application)
+            proactiveAssistantEngine = ProactiveAssistantEngine(application)
             refreshMemories()
             restorePendingUiIfNeeded()
             mainScope.launch(Dispatchers.IO) {
@@ -206,6 +227,8 @@ object AgentRuntime {
                     recordAudioGranted = hasRecordAudioPermission(application),
                     readContactsGranted = ContactResolver.hasContactsPermission(application),
                     notificationAccessGranted = NotificationAccessPermission.isEnabled(application),
+                    cloudContextConsentGranted = contextConsentStore?.hasConsented() == true,
+                    voiceBargeInEnabled = voiceInteractionConfigStore?.isBargeInEnabled() != false,
                 )
             }
             preloadWakeWordModelIfNeeded()
@@ -213,6 +236,7 @@ object AgentRuntime {
             migrateWakeWordAntiFalsePositiveIfNeeded()
             migrateWakeWordQualityIfNeeded()
             syncWakeWordService()
+            refreshSuggestionChips()
         }
         ensureAccessibilityStateListener(application)
         refreshAccessibilityState()
@@ -281,6 +305,17 @@ object AgentRuntime {
     private fun refreshMemories() {
         val summaries = memoryStore?.loadRecentMemories()?.map { it.summary }.orEmpty()
         _state.update { it.copy(recentMemories = summaries) }
+        refreshSuggestionChips()
+    }
+
+    private fun refreshSuggestionChips() {
+        _state.update { state ->
+            state.copy(suggestionChips = SuggestionEngine.suggestions(state))
+        }
+    }
+
+    private fun recordUserInteraction() {
+        proactiveAssistantEngine?.recordInteraction()
     }
 
     private fun restorePendingUiIfNeeded() {
@@ -309,6 +344,28 @@ object AgentRuntime {
     fun setAppInForeground(inForeground: Boolean) {
         appInForeground = inForeground
         syncOverlayVisibility()
+        if (inForeground) {
+            maybeDeliverProactiveNudge()
+        }
+    }
+
+    private fun maybeDeliverProactiveNudge() {
+        val app = application ?: return
+        if (_state.value.isRunning || _state.value.isListening) return
+        val nudge = proactiveAssistantEngine?.peekNudge(_state.value.recentMemories) ?: return
+        appendSessionCard(ConversationCardFactory.assistantMessage(nudge.spokenMessage))
+        publishConversationCards()
+        mainScope.launch {
+            androidTtsOutput?.speakAndAwait(nudge.spokenMessage, flush = true)
+        }
+        nudge.suggestionChip?.let { chip ->
+            _state.update { state ->
+                val merged = linkedSetOf<String>()
+                merged += chip
+                merged += state.suggestionChips
+                state.copy(suggestionChips = merged.take(6))
+            }
+        }
     }
 
     fun clearInteraction() {
@@ -358,6 +415,9 @@ object AgentRuntime {
                     ConversationCardKind.Plan,
                     ConversationCardKind.Progress,
                     ConversationCardKind.Confirm,
+                    ConversationCardKind.Disambiguation,
+                    ConversationCardKind.Preview,
+                    ConversationCardKind.Undo,
                 )
             ) {
                 sessionCards[kindIndex] = card
@@ -396,17 +456,38 @@ object AgentRuntime {
     private fun finalizeSessionCards(result: AgentRunResult) {
         removeSessionCardsByKind(ConversationCardKind.Progress)
         if (result.waitingForUserConfirm && !result.confirmPrompt.isNullOrBlank()) {
-            upsertSessionCard(
-                ConversationCardFactory.confirm(
-                    result.confirmPrompt.orEmpty(),
-                    result.needsBinaryConfirm,
-                ),
-            )
+            when (orchestrator.peekPendingKind()) {
+                PendingKind.INTENT_DISAMBIGUATION -> {
+                    val options = orchestrator.peekDisambiguationOptions()
+                    upsertSessionCard(
+                        ConversationCardFactory.disambiguation(
+                            result.confirmPrompt.orEmpty(),
+                            options,
+                        ),
+                    )
+                }
+                PendingKind.LOCAL_PREVIEW -> {
+                    upsertSessionCard(ConversationCardFactory.preview(result.confirmPrompt.orEmpty()))
+                }
+                else -> {
+                    upsertSessionCard(
+                        ConversationCardFactory.confirm(
+                            result.confirmPrompt.orEmpty(),
+                            result.needsBinaryConfirm,
+                        ),
+                    )
+                }
+            }
         } else {
             removeSessionCardsByKind(ConversationCardKind.Confirm)
+            removeSessionCardsByKind(ConversationCardKind.Disambiguation)
+            removeSessionCardsByKind(ConversationCardKind.Preview)
             if (result.success && result.summary.isNotBlank()) {
                 appendSessionCard(ConversationCardFactory.assistantMessage(result.summary))
                 maybeAppendInfoCard(result.summary)
+            }
+            LocalUndoRegistry.peek()?.let {
+                upsertSessionCard(ConversationCardFactory.undo("刚才的操作可以撤销，要撤销吗？"))
             }
         }
     }
@@ -430,30 +511,124 @@ object AgentRuntime {
     }
 
     private fun continueVoiceConversation(application: Application, result: AgentRunResult) {
-        if (!voiceSessionActive) return
+        if (!voiceSessionActive) {
+            scheduleWakeWordRestoreIfIdle()
+            return
+        }
         mainScope.launch {
             androidTtsOutput?.awaitIdle()
             when {
-                result.waitingForUserConfirm && result.needsBinaryConfirm ->
-                    startVoiceReplyToConfirm(application)
-                result.waitingForUserConfirm && !result.needsBinaryConfirm ->
-                    startVoiceOpenFollowUp(application)
-                !result.waitingForUserConfirm && result.success && shouldContinueConversation(result.summary) ->
+                result.waitingForUserConfirm -> {
+                    voiceSessionActive = true
+                    startVoiceInputInternal(
+                        confirmReplyMode = true,
+                        application = application,
+                        skipPrompt = true,
+                    )
+                }
+                result.success && shouldContinueConversation(result.summary) -> {
                     startVoiceInputInternal(
                         confirmReplyMode = false,
                         application = application,
                         skipPrompt = true,
                     )
+                }
+                else -> scheduleWakeWordRestoreIfIdle()
             }
         }
     }
 
+    private fun scheduleWakeWordRestoreIfIdle() {
+        if (!voiceSessionActive && !_state.value.isListening && !_state.value.isRunning) {
+            ensureWakeWordServiceRunning()
+        }
+    }
+
+    fun setCloudContextConsent(application: Application, granted: Boolean) {
+        initIfNeeded(application)
+        if (granted) {
+            contextConsentStore?.grantConsent()
+        } else {
+            contextConsentStore?.revokeConsent()
+        }
+        _state.update { it.copy(cloudContextConsentGranted = granted) }
+        appendLog(
+            if (granted) "已开启：允许云端理解屏幕内容" else "已关闭：云端屏幕理解",
+        )
+    }
+
+    fun setVoiceBargeInEnabled(application: Application, enabled: Boolean) {
+        initIfNeeded(application)
+        voiceInteractionConfigStore?.setBargeInEnabled(enabled)
+        _state.update { it.copy(voiceBargeInEnabled = enabled) }
+        appendLog(if (enabled) "已开启：播报期间可直接说话打断" else "已关闭：需等播报结束再说话")
+    }
+
     fun submitBinaryConfirm(approved: Boolean) {
         val app = application ?: return
-        val text = if (approved) "发送" else "取消"
+        val text = if (approved) "确认" else "取消"
         voiceSessionActive = true
         _state.update { it.copy(command = text, speechText = text) }
         runAgent(app, resumePendingConfirm = true)
+    }
+
+    fun selectDisambiguationOption(intentId: String) {
+        val app = application ?: return
+        recordUserInteraction()
+        agentJob?.cancel()
+        agentScope.launch {
+            val result = orchestrator.runDisambiguatedIntent(
+                command = orchestrator.peekPendingOriginalCommand()
+                    ?: _state.value.command,
+                intentId = intentId,
+                apiKey = _state.value.apiKey.ifBlank { apiKeyStore?.getApiKey().orEmpty() },
+                appContext = app,
+                runContext = AgentRunContext(),
+            )
+            handleStandaloneAgentResult(app, result)
+        }
+    }
+
+    fun undoLastLocalAction() {
+        val app = application ?: return
+        val offer = LocalUndoRegistry.consume() ?: return
+        removeSessionCardsByKind(ConversationCardKind.Undo)
+        publishConversationCards()
+        JoyAccessibilityService.instance?.performGlobalAction(
+            android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME,
+        )
+        speakStatus(offer.message)
+        appendLog("用户撤销本地操作：${offer.action}")
+    }
+
+    fun dismissUndoOffer() {
+        LocalUndoRegistry.clear()
+        removeSessionCardsByKind(ConversationCardKind.Undo)
+        publishConversationCards()
+    }
+
+    private suspend fun handleStandaloneAgentResult(application: Application, result: AgentRunResult) {
+        _state.update {
+            it.copy(
+                isRunning = false,
+                waitingForUserConfirm = result.waitingForUserConfirm,
+                confirmPrompt = result.confirmPrompt,
+                needsBinaryConfirm = result.needsBinaryConfirm,
+                statusMessage = result.summary,
+            )
+        }
+        finalizeSessionCards(result)
+        publishConversationCards()
+        syncOverlayVisibility()
+        when {
+            result.waitingForUserConfirm && voiceSessionActive &&
+                !result.confirmPrompt.isNullOrBlank() -> {
+                recordVoicePrompt(result.confirmPrompt)
+                applyBargeInPreRoll(speakPromptWithOptionalBargeIn(result.confirmPrompt))
+            }
+            result.summary.isNotBlank() -> speakStatus(result.summary)
+        }
+        continueVoiceConversation(application, result)
     }
 
     fun appendInfoCard(title: String, body: String) {
@@ -468,7 +643,7 @@ object AgentRuntime {
     fun saveApiKey(application: Application) {
         initIfNeeded(application)
         apiKeyStore?.saveApiKey(_state.value.apiKey)
-        appendLog("DeepSeek API Key 已保存")
+        appendLog("LLM API Key 已保存")
     }
 
     fun updateAsrApiKey(value: String) {
@@ -749,6 +924,7 @@ object AgentRuntime {
                     wakeWordStore?.saveKeywordThreshold(result.recommendedThreshold)
                     wakeWordStore?.saveKeywordScore(result.recommendedScore)
                     wakeWordStore?.saveCalibrated(true)
+                    asrSpeakerProfileStore?.recordCalibrationPhrase(phrase)
                     _state.update {
                         it.copy(
                             wakeWordKeywordThreshold = result.recommendedThreshold,
@@ -799,12 +975,7 @@ object AgentRuntime {
         runContext?.cancel()
         agentJob?.cancel()
         agentJob = null
-        if (_state.value.isListening) {
-            speechInput?.let { input ->
-                mainScope.launch { input.stop { } }
-            }
-        }
-        voiceTurnCoordinator?.cancelVoice()
+        abortVoiceInput()
         voiceConfirmReplyMode = false
         voiceReplyApplication = null
         voiceSessionActive = false
@@ -837,8 +1008,13 @@ object AgentRuntime {
     }
 
     fun startVoiceInput() {
+        application?.let { initIfNeeded(it) }
         voiceSessionActive = true
-        startVoiceInputInternal(confirmReplyMode = false, application = null)
+        startVoiceInputInternal(
+            confirmReplyMode = false,
+            application = null,
+            skipPrompt = true,
+        )
     }
 
     fun resumeWakeWordVoiceSession() {
@@ -903,29 +1079,48 @@ object AgentRuntime {
         if (_state.value.wakeWordEnabled) {
             pauseWakeWordForMicSharing()
         }
+        if (wakeWordActivation) {
+            app?.let { WakeEarconPlayer.play(it) }
+            ensureAsrClient()?.setPreRollPcm(WakeChainedAudioBridge.takeAndClear())
+        }
         voiceConfirmReplyMode = confirmReplyMode
         voiceReplyApplication = application
         val prompt = when {
-            skipPrompt -> null
-            wakeWordActivation -> "在呢，请说"
+            skipPrompt || wakeWordActivation -> null
             confirmReplyMode -> _state.value.confirmPrompt ?: "请回答确认问题"
             else -> "请说出您的指令"
         }
-        appendLog(if (confirmReplyMode) "请先听完问题，再语音回答" else "开始语音识别")
+        appendLog(
+            when {
+                confirmReplyMode && _state.value.voiceBargeInEnabled ->
+                    "正在播报问题，可随时说话打断"
+                confirmReplyMode -> "请先听完问题，再语音回答"
+                wakeWordActivation -> "唤醒后继续听指令"
+                _state.value.voiceBargeInEnabled -> "正在提示，可随时说话打断"
+                else -> "开始语音识别"
+            },
+        )
         prompt?.let { recordVoicePrompt(it) }
-        mainScope.launch {
-            _state.update {
-                it.copy(
-                    isListening = false,
-                    speechText = "",
-                    voiceInteractionState = if (prompt.isNullOrBlank()) {
-                        VoiceInteractionState.Listening
-                    } else {
-                        VoiceInteractionState.SpeakingPrompt
-                    },
-                )
+        agentScope.launch {
+            withContext(Dispatchers.Main.immediate) {
+                _state.update {
+                    it.copy(
+                        isListening = false,
+                        speechText = "",
+                        voiceInteractionState = if (prompt.isNullOrBlank()) {
+                            VoiceInteractionState.Listening
+                        } else {
+                            VoiceInteractionState.SpeakingPrompt
+                        },
+                    )
+                }
+                syncOverlayVisibility()
             }
-            syncOverlayVisibility()
+            if (_state.value.wakeWordEnabled) {
+                awaitWakeWordMicReleased()
+            } else if (_state.value.voiceBargeInEnabled && !prompt.isNullOrBlank()) {
+                awaitWakeWordMicReleased()
+            }
             coordinator.speakPromptThenListen(
                 prompt = prompt,
                 session = SpeechInputSession(
@@ -1057,7 +1252,7 @@ object AgentRuntime {
                         return
                     }
                 }
-                PendingKind.ROUTE_CLARIFY -> when (VoiceConfirmPhraseMatcher.classify(merged)) {
+                PendingKind.ROUTE_CLARIFY, PendingKind.LOCAL_PREVIEW -> when (VoiceConfirmPhraseMatcher.classify(merged)) {
                     VoiceConfirmPhraseMatcher.Intent.CANCEL -> {
                         appendLog("用户取消：$merged")
                         speakStatus("好的，已取消")
@@ -1086,6 +1281,39 @@ object AgentRuntime {
                             return
                         }
                     }
+                }
+                PendingKind.INTENT_DISAMBIGUATION -> {
+                    val options = orchestrator.peekDisambiguationOptions()
+                    val matched = options.firstOrNull { option ->
+                        merged.contains(option.label, ignoreCase = true) ||
+                            merged.contains(option.intentId, ignoreCase = true)
+                    }
+                    if (matched != null) {
+                        appendLog("用户选择意图：${matched.label}")
+                        mainScope.launch {
+                            val result = orchestrator.runDisambiguatedIntent(
+                                command = orchestrator.peekPendingOriginalCommand().orEmpty(),
+                                intentId = matched.intentId,
+                                apiKey = _state.value.apiKey.ifBlank { apiKeyStore?.getApiKey().orEmpty() },
+                                appContext = app!!,
+                                runContext = AgentRunContext(),
+                            )
+                            handleStandaloneAgentResult(app, result)
+                        }
+                        return
+                    }
+                    appendLog("消歧选择未听清：$merged")
+                    mainScope.launch {
+                        voiceTurnCoordinator?.speakResult("请说出或点选要执行的操作")
+                        startVoiceReplyToConfirm(app!!)
+                    }
+                    return
+                }
+                PendingKind.CONTEXT_CONSENT -> {
+                    orchestrator.clearPendingUserReply()
+                    clearPendingConfirmUI()
+                    speakStatus(ContextConsentStore.SETTINGS_HINT)
+                    return
                 }
                 PendingKind.USER_CONFIRM -> {
                     val needsBinary = orchestrator.peekPendingNeedsBinaryConfirm()
@@ -1143,13 +1371,19 @@ object AgentRuntime {
             }
         }
 
-        if (app == null) {
+        val runApp = app ?: this.application
+        if (runApp == null) {
+            ensureWakeWordServiceRunning()
+            return
+        }
+        val shouldRunAgent = forceRun || fromAutoStop || isConfirmReply
+        if (!shouldRunAgent) {
             ensureWakeWordServiceRunning()
             return
         }
         appendLog("继续执行：$merged")
         val resumePending = isConfirmReply && _state.value.waitingForUserConfirm
-        runAgent(app, resumePendingConfirm = resumePending)
+        runAgent(runApp, resumePendingConfirm = resumePending)
     }
 
     fun appendLog(message: String) {
@@ -1176,7 +1410,37 @@ object AgentRuntime {
     }
 
     private fun filterVoiceRecognition(text: String): String {
-        return SpeechEchoFilter.stripEcho(text, recentVoicePrompts.toList())
+        val echoStripped = SpeechEchoFilter.stripEcho(text, recentVoicePrompts.toList())
+        val wakePhrase = _state.value.wakeWordPhrase.ifBlank {
+            asrSpeakerProfileStore?.wakePhrase().orEmpty()
+        }
+        val corrections = asrSpeakerProfileStore?.loadCorrections().orEmpty()
+        return AsrSpeakerAdaptation.adapt(echoStripped, wakePhrase, corrections)
+    }
+
+    private suspend fun speakPromptWithOptionalBargeIn(prompt: String): ByteArray? {
+        val trimmed = prompt.trim()
+        if (trimmed.isBlank()) return null
+        val tts = androidTtsOutput ?: return null
+        if (!_state.value.voiceBargeInEnabled || !voiceSessionActive) {
+            tts.speakAndAwait(trimmed, flush = true)
+            return null
+        }
+        val app = application ?: return null.also { tts.speakAndAwait(trimmed, flush = true) }
+        if (_state.value.wakeWordEnabled) {
+            pauseWakeWordForMicSharing()
+        }
+        awaitWakeWordMicReleased()
+        return when (val outcome = VoiceBargeInHelper.speakWithBargeIn(app, tts, trimmed)) {
+            is BargeInSpeakOutcome.BargedIn -> outcome.preRollPcm
+            BargeInSpeakOutcome.Completed -> null
+        }
+    }
+
+    private fun applyBargeInPreRoll(preRoll: ByteArray?) {
+        if (preRoll != null && preRoll.isNotEmpty()) {
+            ensureAsrClient()?.setPreRollPcm(preRoll)
+        }
     }
 
     private fun ensureVoiceStack(): VoiceTurnCoordinator? {
@@ -1184,19 +1448,35 @@ object AgentRuntime {
         val input = DoubaoSpeechInput(client)
         speechInput = input
         val tts = androidTtsOutput ?: return null
+        val app = application
         val coordinator = VoiceTurnCoordinator(
             ttsOutput = tts,
             speechInput = input,
             onStateChanged = { state ->
-                _state.update {
-                    it.copy(
-                        voiceInteractionState = state,
-                        isListening = state == VoiceInteractionState.Listening,
-                    )
+                mainScope.launch(Dispatchers.Main.immediate) {
+                    _state.update {
+                        it.copy(
+                            voiceInteractionState = state,
+                            isListening = state == VoiceInteractionState.Listening,
+                        )
+                    }
+                    syncOverlayVisibility()
                 }
-                syncOverlayVisibility()
             },
             awaitTtsIdle = { tts.awaitIdle() },
+            speakPromptBlocking = { prompt ->
+                if (!_state.value.voiceBargeInEnabled || app == null) {
+                    tts.speakAndAwait(prompt, flush = true)
+                    BargeInSpeakOutcome.Completed
+                } else {
+                    if (_state.value.wakeWordEnabled) {
+                        pauseWakeWordForMicSharing()
+                    }
+                    awaitWakeWordMicReleased()
+                    VoiceBargeInHelper.speakWithBargeIn(app, tts, prompt)
+                }
+            },
+            onBargeInPreRoll = { pcm -> client.setPreRollPcm(pcm) },
         )
         voiceTurnCoordinator = coordinator
         return coordinator
@@ -1219,6 +1499,7 @@ object AgentRuntime {
 
     fun runAgent(application: Application, resumePendingConfirm: Boolean? = null) {
         initIfNeeded(application)
+        recordUserInteraction()
         val current = _state.value
         if (current.isRunning) return
         val shouldResumePending = resumePendingConfirm == true
@@ -1312,10 +1593,15 @@ object AgentRuntime {
                     else "结束（${elapsed}ms）：${result.summary}",
                 )
                 when {
+                    result.waitingForUserConfirm && voiceSessionActive &&
+                        !result.confirmPrompt.isNullOrBlank() -> {
+                        recordVoicePrompt(result.confirmPrompt)
+                        applyBargeInPreRoll(speakPromptWithOptionalBargeIn(result.confirmPrompt))
+                    }
                     result.waitingForUserConfirm -> Unit
                     voiceSessionActive && result.summary.isNotBlank() -> {
                         recordVoicePrompt(result.summary)
-                        androidTtsOutput?.speakAndAwait(result.summary, flush = true)
+                        applyBargeInPreRoll(speakPromptWithOptionalBargeIn(result.summary))
                     }
                     result.summary.isNotBlank() -> speakStatus(result.summary, flush = true)
                 }
@@ -1353,7 +1639,7 @@ object AgentRuntime {
             } finally {
                 agentJob = null
                 runContext = null
-                ensureWakeWordServiceRunning()
+                scheduleWakeWordRestoreIfIdle()
             }
         }
     }
@@ -1361,11 +1647,18 @@ object AgentRuntime {
     fun clearPendingConfirmUI() {
         voiceConfirmReplyMode = false
         voiceReplyApplication = null
-        voiceTurnCoordinator?.cancelVoice()
         orchestrator.clearPendingUserReply()
-        if (_state.value.isListening) stopVoiceInput()
+        abortVoiceInput()
         _state.update { it.copy(waitingForUserConfirm = false, confirmPrompt = null, needsBinaryConfirm = false) }
         publishConversationCards()
+        syncOverlayVisibility()
+        scheduleWakeWordRestoreIfIdle()
+    }
+
+    private fun abortVoiceInput() {
+        voiceTurnCoordinator?.cancelVoice()
+        speechInput?.cancelActiveSession()
+        _state.update { it.copy(isListening = false, voiceInteractionState = VoiceInteractionState.Idle) }
         syncOverlayVisibility()
     }
 
@@ -1398,6 +1691,15 @@ object AgentRuntime {
         if (!_state.value.wakeWordEnabled) return
         WakeWordService.stop(app)
         _state.update { it.copy(wakeWordRunning = false) }
+    }
+
+    /** stopService 异步释放麦克风，打断监听开麦前需等待。 */
+    private suspend fun awaitWakeWordMicReleased() {
+        var waits = 0
+        while ((WakeWordService.isRunning || !WakeWordService.micReleased) && waits < 30) {
+            delay(50)
+            waits++
+        }
     }
 
     private fun ensureWakeWordServiceRunning() {
@@ -1540,7 +1842,7 @@ object AgentRuntime {
                 wakeWordTestHint = null,
             )
         }
-        appendLog("检测到唤醒词，开始语音指令识别")
+        appendLog("唤醒后继续听您说")
         voiceSessionActive = true
         mainScope.launch(Dispatchers.Main.immediate) {
             startVoiceInputInternal(
@@ -1564,6 +1866,7 @@ object AgentRuntime {
     private fun ensureAsrClient(): DoubaoAsrClient? {
         val params = resolveAsrParams() ?: return null
         if (asrClient != null && cachedAsrParams == params) return asrClient
+        asrClient?.shutdown()
         asrClient = DoubaoAsrClient(
             apiKey = params.apiKey,
             appId = params.appId,

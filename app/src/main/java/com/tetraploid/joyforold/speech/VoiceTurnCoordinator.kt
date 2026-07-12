@@ -4,15 +4,21 @@ import com.tetraploid.joyforold.speech.api.SpeechInput
 import com.tetraploid.joyforold.speech.api.SpeechInputSession
 import com.tetraploid.joyforold.speech.api.TtsOutput
 import com.tetraploid.joyforold.speech.api.VoiceInteractionState
+import kotlinx.coroutines.delay
 
 /**
- * 语音轮次：TTS 完全播完后再连接 ASR、开麦，避免把播报内容识别进去。
+ * 语音轮次：默认 TTS 播完再开麦；若启用打断，则在播报期间本地 VAD 检测人声并提前开麦。
  */
 class VoiceTurnCoordinator(
     private val ttsOutput: TtsOutput,
     private val speechInput: SpeechInput,
     private val onStateChanged: (VoiceInteractionState) -> Unit,
     private val awaitTtsIdle: suspend () -> Unit = {},
+    private val speakPromptBlocking: suspend (String) -> BargeInSpeakOutcome = { text ->
+        ttsOutput.speakAndAwait(text, flush = true)
+        BargeInSpeakOutcome.Completed
+    },
+    private val onBargeInPreRoll: (ByteArray) -> Unit = {},
 ) {
     suspend fun speakPromptThenListen(
         prompt: String?,
@@ -20,9 +26,14 @@ class VoiceTurnCoordinator(
     ) {
         if (!prompt.isNullOrBlank()) {
             onStateChanged(VoiceInteractionState.SpeakingPrompt)
-            ttsOutput.speakAndAwait(prompt, flush = true)
+            when (val outcome = speakPromptBlocking(prompt)) {
+                is BargeInSpeakOutcome.BargedIn -> {
+                    onBargeInPreRoll(outcome.preRollPcm)
+                    delay(VoiceBargeInMonitor.ECHO_DECAY_MS)
+                }
+                BargeInSpeakOutcome.Completed -> awaitTtsIdle()
+            }
         }
-        awaitTtsIdle()
         runCatching { speechInput.prepareConnection(session) }
         onStateChanged(VoiceInteractionState.Listening)
         speechInput.start(session)
@@ -45,6 +56,7 @@ class VoiceTurnCoordinator(
 
     fun cancelVoice() {
         ttsOutput.stop()
+        speechInput.cancelActiveSession()
         speechInput.cancelPreparedConnection()
         onStateChanged(VoiceInteractionState.Idle)
     }

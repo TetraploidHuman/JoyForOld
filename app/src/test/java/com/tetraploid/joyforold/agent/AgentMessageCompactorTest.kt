@@ -71,7 +71,7 @@ class AgentMessageCompactorTest {
 
     @Test
     fun truncateAgentFeedbackDetail_capsLargeToolOutput() {
-        val detail = "x".repeat(1500)
+        val detail = "x".repeat(50_000)
         val truncated = AgentMessageCompactor.truncateAgentFeedbackDetail(detail)
 
         assertTrue(truncated.length < detail.length)

@@ -58,6 +58,46 @@ class AgentActionGuardTest {
     }
 
     @Test
+    fun blockedRepeatReason_blocksRepeatedFindOnPage() {
+        val session = AgentConversationSession(rootCommand = "哔哩哔哩打开视频叫我要吃饭")
+        repeat(2) { step ->
+            session.recordStep(
+                step = step + 1,
+                action = AgentAction(action = "find_on_page", targetText = "我要吃饭"),
+                result = ActionExecutionResult(false, "未找到"),
+                pageDiff = "",
+            )
+        }
+
+        val reason = AgentActionGuard.blockedRepeatReason(
+            session,
+            AgentAction(action = "find_on_page", targetText = "我要吃饭"),
+        )
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("禁止"))
+    }
+
+    @Test
+    fun blockedRepeatReason_blocksRepeatedSuccessfulClick() {
+        val session = AgentConversationSession(rootCommand = "搜索视频")
+        repeat(2) { step ->
+            session.recordStep(
+                step = step + 1,
+                action = AgentAction(action = "click", targetText = "搜索"),
+                result = ActionExecutionResult(true, "已点击"),
+                pageDiff = "新增可见文字(1): 搜索发现",
+            )
+        }
+
+        val reason = AgentActionGuard.blockedRepeatReason(
+            session,
+            AgentAction(action = "click", targetText = "搜索"),
+        )
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("已连续成功"))
+    }
+
+    @Test
     fun sensitiveConfirmOverride_sendRequiresConfirm() {
         val session = AgentConversationSession(rootCommand = "发消息：你好")
         val override = AgentActionGuard.sensitiveConfirmOverride(

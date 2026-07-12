@@ -9,7 +9,7 @@ object AgentMessageCompactor {
     private const val PAGE_MINIMAL_MARKER = "【当前页面】"
     private const val PAGE_DIFF_MARKER = "【页面变化】"
     private const val PAGE_OMITTED = "（历史页面快照已省略，以最新观察为准）"
-    private const val AGENT_FEEDBACK_DETAIL_MAX_CHARS = 1_000
+    private const val AGENT_FEEDBACK_DETAIL_MAX_CHARS = AgentContextLimits.FEEDBACK_DETAIL_MAX_CHARS
 
     private val historicalPageBlockRegex = Regex(
         """(?:【当前页面快览】|【当前页面】)[\s\S]*?【页面变化】[\s\S]*?(?=\n请规划|\n请决定|$)""",
@@ -29,11 +29,7 @@ object AgentMessageCompactor {
         minimalPageContext: String,
         mode: PageContextMode? = null,
     ): String {
-        val resolved = mode ?: if (pageDiff.contains("页面指纹未变")) {
-            PageContextMode.DIFF_ONLY
-        } else {
-            PageContextMode.FULL
-        }
+        val resolved = mode ?: PageContextMode.FULL
         return when (resolved) {
             PageContextMode.NONE -> ""
             PageContextMode.DIFF_ONLY -> buildString {

@@ -3,10 +3,10 @@ package com.tetraploid.joyforold.agent
 import org.json.JSONObject
 
 /**
- * 一次 API 规划 1~2 步，本地连续执行；单独占屏的动作必须单步规划。
+ * 每次 API 只规划 1 步，执行后必须观察页面再规划（对齐 Open-AutoGLM / DroidLM 单步循环）。
  */
 object AgentPlanParser {
-    const val MAX_PLANNED_STEPS = 2
+    const val MAX_PLANNED_STEPS = 1
 
     private val SOLO_STEP_ACTIONS = setOf(
         "finish",

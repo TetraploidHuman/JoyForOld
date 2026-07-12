@@ -5,18 +5,16 @@ import org.junit.Test
 
 class PageContextSelectorTest {
     @Test
-    fun modeFor_fingerprintUnchanged_returnsDiffOnly() {
+    fun modeFor_alwaysReturnsFull_forEffectPriority() {
         val previous = snapshot(pkg = "com.tencent.mobileqq", fingerprint = "fp1", clickables = 5)
         val current = snapshot(pkg = "com.tencent.mobileqq", fingerprint = "fp1", clickables = 5)
         val diff = PageObservation.diff(previous, current)
 
-        val mode = PageContextSelector.modeFor(previous, current, diff)
-
-        assertEquals(PageContextMode.DIFF_ONLY, mode)
+        assertEquals(PageContextMode.FULL, PageContextSelector.modeFor(previous, current, diff))
     }
 
     @Test
-    fun modeFor_minorChange_returnsCompact() {
+    fun modeFor_minorChange_returnsFull() {
         val previous = snapshot(pkg = "com.tencent.mobileqq", fingerprint = "fp1", clickables = 5)
         val current = previous.copy(
             fingerprint = "fp2",
@@ -24,9 +22,7 @@ class PageContextSelectorTest {
         )
         val diff = PageObservation.diff(previous, current)
 
-        val mode = PageContextSelector.modeFor(previous, current, diff)
-
-        assertEquals(PageContextMode.COMPACT, mode)
+        assertEquals(PageContextMode.FULL, PageContextSelector.modeFor(previous, current, diff))
     }
 
     @Test
@@ -35,9 +31,7 @@ class PageContextSelectorTest {
         val current = snapshot(pkg = "com.tencent.mm", fingerprint = "fp9", clickables = 8)
         val diff = PageObservation.diff(previous, current)
 
-        val mode = PageContextSelector.modeFor(previous, current, diff)
-
-        assertEquals(PageContextMode.FULL, mode)
+        assertEquals(PageContextMode.FULL, PageContextSelector.modeFor(previous, current, diff))
     }
 
     private fun snapshot(

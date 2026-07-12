@@ -63,4 +63,37 @@ class AgentConversationSessionTest {
         assertTrue(messages.length() >= 1)
         assertTrue(messages.getJSONObject(0).getString("content").contains("本地快路径"))
     }
+
+    @Test
+    fun toResponsesApiInput_putsSystemIntoInstructionsOnly() {
+        val session = AgentConversationSession(rootCommand = "测试")
+        session.seedSystem("system")
+        session.addUser("【用户指令】测试")
+        session.addAssistant("""{"action":"wait"}""")
+        session.addUser("【上一步执行结果】成功")
+
+        val input = session.toResponsesApiInput()
+        assertEquals(3, input.length())
+        assertEquals("user", input.getJSONObject(0).getString("role"))
+        assertEquals("assistant", input.getJSONObject(1).getString("role"))
+        assertEquals("user", input.getJSONObject(2).getString("role"))
+        assertEquals("system", session.systemInstructions())
+    }
+
+    @Test
+    fun toResponsesApiInput_attachesScreenshotOnLatestUser() {
+        val session = AgentConversationSession(rootCommand = "测试")
+        session.seedSystem("system")
+        session.addUser("【用户指令】测试")
+        session.addAssistant("""{"action":"wait"}""")
+        session.addUser("【上一步执行结果】成功")
+
+        val input = session.toResponsesApiInput("imgb64")
+        val latest = input.getJSONObject(input.length() - 1)
+        assertEquals("user", latest.getString("role"))
+        val content = latest.getJSONArray("content")
+        assertEquals("input_text", content.getJSONObject(0).getString("type"))
+        assertEquals("input_image", content.getJSONObject(1).getString("type"))
+        assertTrue(content.getJSONObject(1).getString("image_url").contains("imgb64"))
+    }
 }

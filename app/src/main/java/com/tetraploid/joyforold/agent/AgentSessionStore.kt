@@ -7,6 +7,9 @@ enum class PendingKind {
     USER_CONFIRM,
     ROUTE_CLARIFY,
     TASK_ABANDON,
+    INTENT_DISAMBIGUATION,
+    LOCAL_PREVIEW,
+    CONTEXT_CONSENT,
 }
 
 data class PendingAgentState(

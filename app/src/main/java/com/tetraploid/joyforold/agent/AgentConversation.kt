@@ -79,6 +79,16 @@ class AgentConversationSession(
         this.messages += ChatMessage("system", systemPrompt)
     }
 
+    /** 进入视觉模式时刷新 system，注入 tap/坐标规则 */
+    fun refreshSystem(systemPrompt: String) {
+        val index = messages.indexOfFirst { it.role == "system" }
+        if (index >= 0) {
+            messages[index] = ChatMessage("system", systemPrompt)
+        } else {
+            messages.add(0, ChatMessage("system", systemPrompt))
+        }
+    }
+
     fun addUser(content: String) {
         messages += ChatMessage("user", content)
     }
@@ -115,12 +125,43 @@ class AgentConversationSession(
         }
     }
 
-    fun toApiMessages(): JSONArray {
+    fun toApiMessages(latestScreenshotBase64: String? = null): JSONArray {
         pruneForApi()
         val apiMessages = AgentMessageCompactor.compactForApi(messages)
         return JSONArray().apply {
-            apiMessages.forEach { msg ->
-                put(JSONObject().put("role", msg.role).put("content", msg.content))
+            apiMessages.forEachIndexed { index, msg ->
+                val isLatestUser = index == apiMessages.lastIndex &&
+                    msg.role == "user" &&
+                    !latestScreenshotBase64.isNullOrBlank()
+                if (isLatestUser) {
+                    put(LlmMultimodalMessage.userMessage(msg.content, latestScreenshotBase64))
+                } else {
+                    put(JSONObject().put("role", msg.role).put("content", msg.content))
+                }
+            }
+        }
+    }
+
+    fun systemInstructions(): String =
+        messages.filter { it.role == "system" }.joinToString("\n\n") { it.content }
+
+    /** Volc Responses API：system 走 instructions，input 仅含 user/assistant 轮次 */
+    fun toResponsesApiInput(latestScreenshotBase64: String? = null): JSONArray {
+        pruneForApi()
+        val apiMessages = AgentMessageCompactor.compactForApi(messages.filter { it.role != "system" })
+        return JSONArray().apply {
+            apiMessages.forEachIndexed { index, msg ->
+                val isLatestUser = index == apiMessages.lastIndex &&
+                    msg.role == "user" &&
+                    !latestScreenshotBase64.isNullOrBlank()
+                when {
+                    isLatestUser ->
+                        put(LlmMultimodalMessage.responsesUserMessage(msg.content, latestScreenshotBase64))
+                    msg.role == "assistant" ->
+                        put(JSONObject().put("role", "assistant").put("content", msg.content))
+                    else ->
+                        put(JSONObject().put("role", "user").put("content", msg.content))
+                }
             }
         }
     }

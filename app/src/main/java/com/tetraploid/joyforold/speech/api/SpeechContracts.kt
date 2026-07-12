@@ -24,6 +24,9 @@ interface SpeechInput {
 
     fun cancelPreparedConnection() {}
 
+    /** 取消进行中的识别会话（不触发 onFinalText）。 */
+    fun cancelActiveSession() {}
+
     fun start(session: SpeechInputSession)
 
     suspend fun stop(onFinalText: (String) -> Unit)

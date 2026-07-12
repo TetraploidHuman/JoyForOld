@@ -20,7 +20,7 @@ object OfflineNluRouter {
         val modelMargin: Float = 0f,
     )
 
-    fun match(command: String, context: Context?): Match? {
+    suspend fun match(command: String, context: Context?): Match? {
         if (context == null) return null
         val trimmed = command.trim()
         if (trimmed.isBlank()) return null

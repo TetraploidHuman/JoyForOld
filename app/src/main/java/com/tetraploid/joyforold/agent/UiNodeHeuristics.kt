@@ -11,13 +11,24 @@ object UiNodeHeuristics {
     private val sendKeywords = listOf("发送", "send", "发表", "送出")
     private val chatKeywords = listOf("聊天", "消息", "联系人", "会话", "输入", "发送")
 
-    fun nodeLabel(node: AccessibilityNodeInfo): String = buildString {
-        append(node.text?.toString().orEmpty())
-        append(node.contentDescription?.toString().orEmpty())
+    fun displayLabel(node: AccessibilityNodeInfo): String {
+        val text = node.text?.toString().orEmpty().trim()
+        if (text.isNotBlank()) return text
+        val desc = node.contentDescription?.toString().orEmpty().trim()
+        if (desc.isNotBlank()) return desc
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            append(node.hintText?.toString().orEmpty())
+            val hint = node.hintText?.toString().orEmpty().trim()
+            if (hint.isNotBlank()) return hint
         }
-        append(node.viewIdResourceName?.substringAfterLast('/').orEmpty())
+        return node.viewIdResourceName?.substringAfterLast('/').orEmpty().trim()
+    }
+
+    fun nodeLabel(node: AccessibilityNodeInfo): String = buildString {
+        append(displayLabel(node))
+        val viewId = node.viewIdResourceName?.substringAfterLast('/').orEmpty()
+        if (viewId.isNotBlank() && !displayLabel(node).equals(viewId, ignoreCase = true)) {
+            append(viewId)
+        }
     }.trim()
 
     fun isInputLike(node: AccessibilityNodeInfo, screenHeight: Int): Boolean {

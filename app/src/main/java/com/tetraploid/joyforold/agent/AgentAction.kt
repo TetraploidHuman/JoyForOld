@@ -26,15 +26,26 @@ data class AgentAction(
     companion object {
         fun fromJson(json: JSONObject): AgentAction {
             val action = json.optString("action", "finish")
-            return AgentAction(
-                action = action,
-                targetText = json.optString("target_text").ifBlank { null },
-                inputText = json.optString("input_text").ifBlank { null },
-                message = json.optString("message").ifBlank { null },
-                finished = json.optBoolean("finished", action.equals("finish", ignoreCase = true)),
-                waitingForUser = json.optBoolean("waiting_for_user", false),
-                needsBinaryConfirm = json.optBoolean("needs_binary_confirm", false),
+            return normalize(
+                AgentAction(
+                    action = action,
+                    targetText = json.optString("target_text").ifBlank { null },
+                    inputText = json.optString("input_text").ifBlank { null },
+                    message = json.optString("message").ifBlank { null },
+                    finished = json.optBoolean("finished", action.equals("finish", ignoreCase = true)),
+                    waitingForUser = json.optBoolean("waiting_for_user", false),
+                    needsBinaryConfirm = json.optBoolean("needs_binary_confirm", false),
+                ),
             )
+        }
+
+        /** 模型偶发把 type 的文案写在 target_text，本地补齐 input_text。 */
+        fun normalize(action: AgentAction): AgentAction {
+            if (!action.action.equals("type", ignoreCase = true)) return action
+            if (!action.inputText.isNullOrBlank()) return action
+            val target = action.targetText?.trim().orEmpty()
+            if (target.isBlank()) return action
+            return action.copy(inputText = target, targetText = null)
         }
     }
 }

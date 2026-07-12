@@ -34,7 +34,8 @@ class DoubaoAsrClient(
     private val resourceId: String,
     private val okHttpClient: OkHttpClient = sharedClient,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val supervisorJob = SupervisorJob()
+    private val scope = CoroutineScope(supervisorJob + Dispatchers.IO)
     private var webSocket: WebSocket? = null
     private var audioRecord: AudioRecord? = null
     private var streamingJob: Job? = null
@@ -44,6 +45,8 @@ class DoubaoAsrClient(
     private var finalText: String = ""
     private val pendingAudioFrames = ArrayDeque<ByteArray>()
     private val pendingAudioLock = Any()
+    @Volatile
+    private var preRollPcm: ByteArray? = null
     @Volatile
     private var opened = false
     @Volatile
@@ -67,6 +70,10 @@ class DoubaoAsrClient(
     private var onPrepareReady: (() -> Unit)? = null
     private var onPrepareError: ((String) -> Unit)? = null
 
+    fun setPreRollPcm(pcm: ByteArray?) {
+        preRollPcm = pcm?.copyOf()
+    }
+
     fun prepareConnection(
         shortUtterance: Boolean = false,
         onReady: () -> Unit,
@@ -88,6 +95,7 @@ class DoubaoAsrClient(
             shortUtteranceMode = shortUtterance
             return
         }
+        closeWebSocket()
         resetSessionState(shortUtterance)
         onPrepareReady = onReady
         onPrepareError = onError
@@ -95,12 +103,17 @@ class DoubaoAsrClient(
     }
 
     fun cancelPrepare() {
-        if (streamingJob?.isActive == true) return
+        if (streamingJob?.isActive == true) {
+            cancelSession()
+            return
+        }
         onPrepareReady = null
         onPrepareError = null
         if (!connectionPrepared && webSocket == null) return
         cancelSession()
     }
+
+    fun isSessionIdle(): Boolean = streamingJob?.isActive != true && webSocket == null
 
     fun start(
         onPartialText: (String) -> Unit,
@@ -123,6 +136,7 @@ class DoubaoAsrClient(
             return
         }
 
+        closeWebSocket()
         resetSessionState(shortUtterance)
         openWebSocket(deferClientRequest = false)
         beginRecordingSession()
@@ -172,7 +186,13 @@ class DoubaoAsrClient(
     }
 
     private fun openWebSocket(deferClientRequest: Boolean) {
+        closeWebSocket()
         webSocket = okHttpClient.newWebSocket(buildRequest(), createWebSocketListener(deferClientRequest))
+    }
+
+    private fun closeWebSocket() {
+        webSocket?.cancel()
+        webSocket = null
     }
 
     private fun buildRequest(): Request {
@@ -225,6 +245,15 @@ class DoubaoAsrClient(
                 errorReported = true
                 onErrorCallback?.invoke(formatConnectionError(t, response))
             }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                opened = false
+                connectionPrepared = false
+                clientRequestSent = false
+                if (this@DoubaoAsrClient.webSocket === webSocket) {
+                    this@DoubaoAsrClient.webSocket = null
+                }
+            }
         }
     }
 
@@ -247,15 +276,31 @@ class DoubaoAsrClient(
                     AudioFormat.ENCODING_PCM_16BIT,
                     bufferSize,
                 )
+                if (record.state != AudioRecord.STATE_INITIALIZED) {
+                    record.release()
+                    if (!errorReported) {
+                        errorReported = true
+                        onError("录音设备初始化失败，请检查麦克风权限或是否被其他应用占用")
+                    }
+                    return@launch
+                }
                 audioRecord = record
                 record.startRecording()
+
+                preRollPcm?.let { preRoll ->
+                    preRollPcm = null
+                    injectPreRollAsChunks(preRoll)
+                }
 
                 val chunk = ByteArray(CHUNK_BYTES_200MS)
                 val maxChunks = if (shortUtteranceMode) MAX_RECORD_CHUNKS_SHORT else MAX_RECORD_CHUNKS
                 var chunkCount = 0
                 while (isActive && !stopRecordingRequested) {
                     val read = record.read(chunk, 0, chunk.size)
-                    if (read <= 0) continue
+                    if (read <= 0) {
+                        delay(10)
+                        continue
+                    }
                     chunkCount++
                     if (chunkCount >= maxChunks) break
                     val payload = if (read == chunk.size) chunk else chunk.copyOf(read)
@@ -369,20 +414,25 @@ class DoubaoAsrClient(
         streamingJob?.cancel()
         streamingJob = null
         releaseRecording()
-        webSocket?.cancel()
-        webSocket = null
+        closeWebSocket()
         opened = false
         connectionPrepared = false
         clientRequestSent = false
         lastAudioFrame = null
         errorReported = false
         sessionDelivered = false
+        manualStopRequested = false
         onPartialCallback = null
         onFinalCallback = null
         onErrorCallback = null
         onPrepareReady = null
         onPrepareError = null
         synchronized(pendingAudioLock) { pendingAudioFrames.clear() }
+    }
+
+    fun shutdown() {
+        cancelSession()
+        supervisorJob.cancel()
     }
 
     private fun releaseRecording() {
@@ -467,6 +517,21 @@ class DoubaoAsrClient(
             while (pendingAudioFrames.size > MAX_PENDING_AUDIO_FRAMES) {
                 pendingAudioFrames.removeFirst()
             }
+        }
+    }
+
+    private fun injectPreRollAsChunks(pcm: ByteArray) {
+        if (pcm.isEmpty()) return
+        var offset = 0
+        while (offset < pcm.size) {
+            val end = minOf(offset + CHUNK_BYTES_200MS, pcm.size)
+            val slice = pcm.copyOfRange(offset, end)
+            if (!opened || !clientRequestSent) {
+                enqueuePendingAudio(slice)
+            } else {
+                sendAudioFrame(slice, isLast = false)
+            }
+            offset = end
         }
     }
 
@@ -622,7 +687,7 @@ class DoubaoAsrClient(
         }
 
         private fun gunzip(bytes: ByteArray): ByteArray {
-            return GZIPInputStream(bytes.inputStream()).readBytes()
+            return GZIPInputStream(bytes.inputStream()).use { it.readBytes() }
         }
     }
 }

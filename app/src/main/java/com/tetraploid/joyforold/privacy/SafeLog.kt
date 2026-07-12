@@ -5,7 +5,7 @@ import android.util.Log
 object SafeLog {
     private const val TAG = "JoyForOld"
 
-    fun redact(message: String): String = PageContextRedactor.redact(message)
+    fun redact(message: String): String = PageContextRedactor.redactForLog(message)
 
     fun i(message: String) {
         Log.i(TAG, redact(message))

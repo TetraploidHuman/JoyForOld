@@ -266,16 +266,16 @@ fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Text("DeepSeek", style = MaterialTheme.typography.titleSmall)
+            Text("火山方舟 LLM", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(
                 value = uiState.apiKey,
                 onValueChange = viewModel::updateApiKey,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("DeepSeek API Key") },
+                label = { Text("LLM API Key") },
                 singleLine = true,
             )
             OutlinedButton(onClick = viewModel::saveApiKey) {
-                Text("保存 DeepSeek 配置")
+                Text("保存 LLM 配置")
             }
 
             HorizontalDivider()

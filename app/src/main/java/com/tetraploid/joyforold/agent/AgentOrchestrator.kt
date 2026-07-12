@@ -6,6 +6,8 @@ import android.content.Context
 
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 
+import com.tetraploid.joyforold.app.InstalledAppResolver
+
 import com.tetraploid.joyforold.preset.PresetCommandStore
 
 import com.tetraploid.joyforold.privacy.PageContextRedactor
@@ -37,6 +39,8 @@ class AgentOrchestrator(
 ) {
 
     private var pendingState: PendingAgentState? = null
+
+    private var contextConsentStore: ContextConsentStore? = null
 
 
 
@@ -74,6 +78,14 @@ class AgentOrchestrator(
 
 
 
+    fun bindContextConsentStore(store: ContextConsentStore) {
+
+        contextConsentStore = store
+
+    }
+
+
+
     fun restorePendingFromDisk() {
 
         if (pendingState != null) return
@@ -90,7 +102,12 @@ class AgentOrchestrator(
 
     fun peekPendingKind(): PendingKind = pendingState?.kind ?: PendingKind.USER_CONFIRM
 
+    fun peekPendingOriginalCommand(): String? = pendingState?.originalCommand
+
     fun peekPendingNeedsBinaryConfirm(): Boolean = pendingState?.needsBinaryConfirm ?: false
+
+    fun peekDisambiguationOptions(): List<DisambiguationOption> =
+        decodeDisambiguationOptions(pendingState?.deferredCommand)
 
 
 
@@ -210,6 +227,34 @@ class AgentOrchestrator(
 
                     )
 
+                    PendingKind.LOCAL_PREVIEW -> handleLocalPreviewReply(
+
+                        pending, command, service, runContext,
+
+                    )
+
+                    PendingKind.INTENT_DISAMBIGUATION -> handleIntentDisambiguationReply(
+
+                        pending, command, apiKey, service, runContext, onProgress,
+
+                    )
+
+                    PendingKind.CONTEXT_CONSENT -> {
+
+                        clearPendingUserReply()
+
+                        AgentRunResult(
+
+                            false,
+
+                            ContextConsentStore.SETTINGS_HINT,
+
+                            emptyList(),
+
+                        )
+
+                    }
+
                 }
 
             }
@@ -228,6 +273,12 @@ class AgentOrchestrator(
 
         val presets = presetStore?.loadPresets().orEmpty()
 
+        IntentDisambiguationHelper.peek(command, executionContext)?.let { offer ->
+
+            return saveIntentDisambiguationPending(command, offer, service)
+
+        }
+
         CommandRouteResolver.resolve(command, apiKey, deepSeekClient, presets, appContext = executionContext)?.let { route ->
 
             route.clarifyMessage?.let { clarify ->
@@ -236,11 +287,41 @@ class AgentOrchestrator(
 
             }
 
-            val routeResult = executeLocalSteps(executionContext, service, route.steps, command, runContext)
+            if (IntentCapabilityMatrix.shouldExecuteRouteLocally(command, route)) {
 
-            if (routeResult.success || routeResult.waitingForUserConfirm) {
+                if (LocalFastPathGuard.needsPreview(route)) {
 
-                return routeResult
+                    return saveLocalPreviewPending(
+
+                        command = command,
+
+                        previewMessage = LocalFastPathGuard.previewMessage(route),
+
+                        steps = route.steps,
+
+                        service = service,
+
+                    )
+
+                }
+
+                val routeResult = executeLocalSteps(executionContext, service, route.steps, command, runContext)
+
+                if (routeResult.success && !routeResult.waitingForUserConfirm &&
+
+                    LocalFastPathGuard.isUndoable(route.steps)
+
+                ) {
+
+                    LocalUndoRegistry.register(route.steps)
+
+                }
+
+                if (routeResult.success || routeResult.waitingForUserConfirm) {
+
+                    return routeResult
+
+                }
 
             }
 
@@ -649,27 +730,49 @@ class AgentOrchestrator(
 
 
 
-        AgentActionGuard.blockedRepeatReason(session, action)?.let { return GuardOutcome.Blocked(it) }
-
-
-
         val currentSnapshot = snapshot ?: service?.mergeSnapshots(service.captureStructuredSnapshots())
+
+        AgentActionGuard.blockedRepeatReason(
+            session,
+            action,
+            pageUnchangedSinceLastStep = session.stepRecords.lastOrNull()
+                ?.pageDiff
+                ?.let(AgentActionGuard::pageDiffIndicatesNoChange)
+                ?: false,
+            a11yUnavailable = PageReadiness.needsVisionFallback(currentSnapshot),
+        )?.let { return GuardOutcome.Blocked(it) }
+
+        PageReadiness.needsVisionFallback(currentSnapshot).takeIf { it }?.let {
+            AgentActionGuard.blockedInVisionMode(action)?.let { reason ->
+                return GuardOutcome.Blocked(reason)
+            }
+        }
+
+        if (action.action.equals("open_app", ignoreCase = true) && service != null) {
+            val targetPkg = InstalledAppResolver.resolvePackage(
+                context,
+                action.targetText.orEmpty(),
+            )
+            if (!targetPkg.isNullOrBlank() && currentSnapshot?.packageName == targetPkg) {
+                return GuardOutcome.Blocked(
+                    "目标应用已在当前前台（$targetPkg），请勿重复 open_app；请根据截图继续 tap/type。",
+                )
+            }
+        }
 
         RiskScreenGuard.blockReason(currentSnapshot, action)?.let { return GuardOutcome.Blocked(it) }
 
 
 
-        if (service == null && !AgentToolRegistry.isSystemIntentAction(action.action)) {
-
-            return GuardOutcome.Blocked("需要无障碍服务才能执行：${action.action}")
-
+        AgentToolRegistry.executeSystemIntent(context, action)?.let {
+            return GuardOutcome.Executed(it)
         }
 
+        if (service == null) {
+            return GuardOutcome.Blocked("需要无障碍服务才能执行：${action.action}")
+        }
 
-
-        val result = AgentToolRegistry.executeSystemIntent(context, action)
-
-            ?: service!!.executeWithResult(action)
+        val result = AgentToolRegistry.execute(context, service, action)
 
         return GuardOutcome.Executed(result)
 
@@ -718,16 +821,36 @@ class AgentOrchestrator(
             .orEmpty()
 
         var previousSnapshot: StructuredPageSnapshot? = initialSnapshot
+        var previousVisionFingerprint: String? = null
 
         var stepNo = session.stepRecords.size
+        val loopState = AgentLoopState()
 
         val pageContextNeed = IntentCapabilityMatrix.inferPageContextNeed(loopCommand)
+
+        if (pageContextNeed == IntentCapabilityMatrix.PageContextNeed.UI_FULL &&
+
+            contextConsentStore?.hasConsented() != true
+
+        ) {
+
+            return AgentRunResult(
+
+                success = false,
+
+                summary = ContextConsentStore.SETTINGS_HINT,
+
+                logs = emptyList(),
+
+            )
+
+        }
 
         val agentToolsPrompt = IntentCapabilityMatrix.toolsPromptForContext(pageContextNeed)
 
 
 
-        suspend fun captureObservation(): PageObservationPayload {
+        suspend fun captureObservation(phase: String = "规划前"): PageObservationPayload {
 
             if (pageContextNeed == IntentCapabilityMatrix.PageContextNeed.NONE) {
 
@@ -745,23 +868,77 @@ class AgentOrchestrator(
 
             }
 
-            val snapshots = service.captureStructuredSnapshots()
-
-            val merged = service.mergeSnapshots(snapshots) ?: return PageObservationPayload(
-
-                pageContext = "无法读取页面，请切换到目标应用。",
-
-                pageDiff = "无法读取页面",
-
-                minimalPageContext = "无法读取页面",
-
-                mode = PageContextMode.FULL,
-
-            )
+            val merged = service.captureBestStructuredSnapshot()
+            if (merged == null) {
+                val screenshot = service.captureScreenshotBase64()
+                val visionMode = !screenshot.isNullOrBlank()
+                val currentVisionFp = VisionScreenChange.fingerprint(screenshot)
+                val baseDiff = "无法读取页面"
+                val pageDiff = if (visionMode) {
+                    PageContextRedactor.redact(
+                        VisionScreenChange.augmentPageDiff(
+                            baseDiff,
+                            previousVisionFingerprint,
+                            currentVisionFp,
+                        ),
+                    )
+                } else {
+                    baseDiff
+                }
+                if (currentVisionFp != null) {
+                    previousVisionFingerprint = currentVisionFp
+                }
+                AgentPageDebugLog.logObservation(
+                    stepNo = stepNo,
+                    phase = phase,
+                    service = service,
+                    snapshot = null,
+                    pageDiff = pageDiff,
+                    visionMode = visionMode,
+                    a11yUnavailable = true,
+                    screenshotChars = screenshot?.length ?: 0,
+                )
+                return PageObservationPayload(
+                    pageContext = if (visionMode) {
+                        "无法读取无障碍树，已附带屏幕截图供视觉识别。"
+                    } else {
+                        "无法读取页面，请切换到目标应用。"
+                    },
+                    pageDiff = pageDiff,
+                    minimalPageContext = if (visionMode) "视觉观察" else "无法读取页面",
+                    mode = PageContextMode.FULL,
+                    screenshotBase64 = screenshot,
+                    visionMode = visionMode,
+                    a11yUnavailable = true,
+                )
+            }
 
             val enriched = enrichWithAppHints(merged)
+            val readable = PageReadiness.isReadable(enriched)
+            val visionFallback = PageReadiness.needsVisionFallback(enriched)
+            val screenshot = if (visionFallback) service.captureScreenshotBase64() else null
+            val visionOnlyApp = VisionOnlyApps.isVisionOnly(enriched.packageName)
+            val visionMode = visionFallback && (
+                !screenshot.isNullOrBlank() || visionOnlyApp
+                )
 
-            val pageDiff = PageContextRedactor.redact(PageObservation.diff(previousSnapshot, enriched))
+            val currentVisionFp = VisionScreenChange.fingerprint(screenshot)
+
+            val pageDiff = PageContextRedactor.redact(
+                if (visionFallback) {
+                    VisionPageContext.formatPageDiff(
+                        packageName = enriched.packageName,
+                        previousSnapshot = previousSnapshot,
+                        previousVisionFingerprint = previousVisionFingerprint,
+                        currentVisionFingerprint = currentVisionFp,
+                    )
+                } else {
+                    PageObservation.diff(previousSnapshot, enriched)
+                },
+            )
+            if (currentVisionFp != null) {
+                previousVisionFingerprint = currentVisionFp
+            }
 
             val dynamicMode = PageContextSelector.modeFor(previousSnapshot, enriched, pageDiff)
 
@@ -769,16 +946,66 @@ class AgentOrchestrator(
 
             val mode = IntentCapabilityMatrix.pageContextModeForNeed(pageContextNeed, dynamicMode)
 
-            return PageObservationPayload(
-
-                pageContext = PageContextRedactor.redact(enriched.toCompactSummary()),
-
+            AgentPageDebugLog.logObservation(
+                stepNo = stepNo,
+                phase = phase,
+                service = service,
+                snapshot = enriched,
                 pageDiff = pageDiff,
+                visionMode = visionMode,
+                a11yUnavailable = visionFallback,
+                screenshotChars = screenshot?.length ?: 0,
+            )
 
-                minimalPageContext = PageContextRedactor.redact(enriched.toMinimalSummary()),
-
+            return PageObservationPayload(
+                pageContext = PageContextRedactor.redact(
+                    buildString {
+                        if (visionFallback) {
+                            append(
+                                VisionPageContext.formatPageContext(
+                                    enriched,
+                                    hasScreenshot = !screenshot.isNullOrBlank(),
+                                ),
+                            )
+                            appendLine()
+                            appendLine(
+                                "【系统提示】当前应用不提供可用无障碍 UI 信息；" +
+                                    "请以截图（若有）识别界面，使用 tap/type/send，禁止 click/read_tree/find_on_page。",
+                            )
+                            VisionTaskHint.pageContextSupplement(
+                                command = session.rootCommand,
+                                steps = session.stepRecords,
+                                visionMode = true,
+                            ).takeIf { it.isNotBlank() }?.let { supplement ->
+                                appendLine()
+                                append(supplement)
+                            }
+                        } else {
+                            append(enriched.toCompactSummary())
+                            if (!readable) {
+                                appendLine()
+                                appendLine(
+                                    "【系统提示】当前读到的是系统壳层或应用仍在启动，请 wait；" +
+                                        "确认 pageContext 已是目标应用后再规划下一步。",
+                                )
+                            }
+                        }
+                    },
+                ),
+                pageDiff = pageDiff,
+                minimalPageContext = PageContextRedactor.redact(
+                    if (visionFallback) {
+                        "${enriched.packageName.ifBlank { "未知应用" }} | 视觉观察（无无障碍 UI）"
+                    } else if (readable) {
+                        enriched.toMinimalSummary()
+                    } else {
+                        "${enriched.packageName.ifBlank { "未知应用" }} | 页面未就绪"
+                    },
+                ),
                 mode = mode,
-
+                screenshotBase64 = screenshot,
+                visionMode = visionMode,
+                a11yUnavailable = visionFallback,
             )
 
         }
@@ -791,7 +1018,14 @@ class AgentOrchestrator(
 
         ): JSONObject {
 
-            val observation = captureObservation()
+            val observation = captureObservation(phase = "规划续步")
+
+            val loopContext = AgentLoopState.formatPlannerContext(
+                state = loopState,
+                session = session,
+                stepNo = stepNo,
+                maxSteps = MAX_AGENT_STEPS,
+            )
 
             return deepSeekClient.continueAfterStep(
 
@@ -811,6 +1045,12 @@ class AgentOrchestrator(
 
                 pageContextMode = observation.mode,
 
+                loopContext = loopContext,
+
+                screenshotBase64 = observation.screenshotBase64,
+
+                visionMode = observation.plannerVisionMode(),
+
             )
 
         }
@@ -823,9 +1063,16 @@ class AgentOrchestrator(
 
                 deepSeekClient.ensureSystemSeeded(session, memoryPrompt)
 
-                val observation = captureObservation()
+                val observation = captureObservation(phase = "用户续跑")
 
                 runContext.awaitContinuation()
+
+                val resumeLoopContext = AgentLoopState.formatPlannerContext(
+                    state = loopState,
+                    session = session,
+                    stepNo = stepNo,
+                    maxSteps = MAX_AGENT_STEPS,
+                )
 
                 deepSeekClient.continueAfterStep(
 
@@ -845,15 +1092,28 @@ class AgentOrchestrator(
 
                     pageContextMode = observation.mode,
 
+                    loopContext = resumeLoopContext,
+
+                    screenshotBase64 = observation.screenshotBase64,
+
+                    visionMode = observation.plannerVisionMode(),
+
                 )
 
             } else {
 
-                val observation = captureObservation()
+                val observation = captureObservation(phase = "任务开始")
 
                 val effectiveCommand = if (loopCommand != rootCommand) loopCommand else session.rootCommand
 
                 runContext.awaitContinuation()
+
+                val loopContext = AgentLoopState.formatPlannerContext(
+                    state = loopState,
+                    session = session,
+                    stepNo = stepNo,
+                    maxSteps = MAX_AGENT_STEPS,
+                )
 
                 deepSeekClient.beginTask(
 
@@ -874,6 +1134,12 @@ class AgentOrchestrator(
                     pageContextMode = observation.mode,
 
                     toolsPrompt = agentToolsPrompt,
+
+                    loopContext = loopContext,
+
+                    screenshotBase64 = observation.screenshotBase64,
+
+                    visionMode = observation.plannerVisionMode(),
 
                 )
 
@@ -915,7 +1181,16 @@ class AgentOrchestrator(
 
                 }
 
-
+                val preActionSnapshot = service.mergeSnapshots(service.captureStructuredSnapshots())
+                    ?: previousSnapshot
+                MediaPlaybackHeuristics.interceptStuckPlaybackAction(
+                    session = session,
+                    snapshot = preActionSnapshot,
+                    rootCommand = session.rootCommand,
+                    action = action,
+                )?.let { finishInstead ->
+                    action = finishInstead
+                }
 
                 if (action.action.equals("finish", ignoreCase = true) || action.finished) {
 
@@ -1085,9 +1360,11 @@ class AgentOrchestrator(
 
                         val result = outcome.result
 
+                        postActionSettleDelay(service, action, result)
+
                         if (needsNavigationDelay(action)) {
 
-                            delay(NAVIGATION_DELAY_MS)
+                            delay(navigationDelayMs(action))
 
                         } else if (result.success) {
 
@@ -1095,9 +1372,32 @@ class AgentOrchestrator(
 
                         }
 
+                        coroutineContext.ensureActive()
+                        runContext.awaitContinuation()
 
-
-                        val observation = captureObservation()
+                        val beforeSnapshot = previousSnapshot
+                        val observation = captureObservation(phase = "执行后")
+                        val afterSnapshot = previousSnapshot
+                        val verification = AgentVerifier.verify(
+                            action = action,
+                            executionResult = result,
+                            beforeSnapshot = beforeSnapshot,
+                            afterSnapshot = afterSnapshot,
+                            pageDiff = observation.pageDiff,
+                        )
+                        val effectiveResult = if (
+                            result.success &&
+                            verification.status == AgentVerificationStatus.FAILED
+                        ) {
+                            ActionExecutionResult(
+                                success = false,
+                                summary = "验证未通过",
+                                detail = verification.message,
+                            )
+                        } else {
+                            result
+                        }
+                        loopState.afterStep(action, observation.pageDiff)
 
                         logs += AgentStepLog(
 
@@ -1105,23 +1405,28 @@ class AgentOrchestrator(
 
                             action = action,
 
-                            success = result.success,
+                            success = effectiveResult.success,
 
-                            detail = "[Agent] ${result.toAgentFeedback()}",
+                            detail = buildString {
+                                append("[Agent] ${effectiveResult.toAgentFeedback()}")
+                                verification.toFeedbackLine()?.let { line ->
+                                    append(" | ").append(line)
+                                }
+                            },
 
                         )
 
-                        session.recordStep(stepNo, action, result, observation.pageDiff)
+                        session.recordStep(stepNo, action, effectiveResult, observation.pageDiff)
 
                         AppHintLearner.maybeLearn(
 
                             store = appHintStore,
 
-                            packageName = previousSnapshot?.packageName.orEmpty(),
+                            packageName = beforeSnapshot?.packageName.orEmpty(),
 
                             action = action,
 
-                            success = result.success,
+                            success = effectiveResult.success,
 
                         )
 
@@ -1141,7 +1446,11 @@ class AgentOrchestrator(
 
                             )
 
-                            append(result.toAgentFeedback())
+                            append(effectiveResult.toAgentFeedback())
+                            verification.toFeedbackLine()?.let { line ->
+                                appendLine()
+                                append(line)
+                            }
 
                             AgentStepAdvisor.postStepHint(
 
@@ -1149,11 +1458,15 @@ class AgentOrchestrator(
 
                                 action = action,
 
-                                result = result,
+                                result = effectiveResult,
 
                                 rootCommand = session.rootCommand,
 
-                                snapshot = previousSnapshot,
+                                snapshot = beforeSnapshot,
+
+                                pageDiff = observation.pageDiff,
+
+                                visionMode = observation.plannerVisionMode(),
 
                             )?.let { hint ->
 
@@ -1162,24 +1475,6 @@ class AgentOrchestrator(
                                 append(hint)
 
                             }
-
-                        }
-
-
-
-                        if (
-
-                            actionQueue.isNotEmpty() &&
-
-                            result.success &&
-
-                            !AgentPlanParser.stopsBatchAfter(action) &&
-
-                            observation.mode != PageContextMode.FULL
-
-                        ) {
-
-                            return@repeat
 
                         }
 
@@ -1749,6 +2044,45 @@ class AgentOrchestrator(
 
 
 
+    private suspend fun postActionSettleDelay(
+        service: JoyAccessibilityService,
+        action: AgentAction,
+        result: ActionExecutionResult,
+    ) {
+        when {
+            action.action.equals("open_app", ignoreCase = true) && result.success -> {
+                val expectedPackage = InstalledAppResolver.resolvePackage(
+                    service.applicationContext,
+                    action.targetText.orEmpty(),
+                )
+                awaitReadablePage(service, expectedPackage = expectedPackage)
+            }
+            action.action.equals("wait", ignoreCase = true) ->
+                delay(WAIT_ACTION_MS)
+            action.action.equals("tap", ignoreCase = true) && result.success -> {
+                val snap = service.captureBestStructuredSnapshot()
+                if (PageReadiness.needsVisionFallback(snap)) {
+                    delay(VISION_TAP_BEFORE_TYPE_MS)
+                }
+            }
+        }
+    }
+
+    private suspend fun awaitReadablePage(
+        service: JoyAccessibilityService,
+        expectedPackage: String? = null,
+        timeoutMs: Long = PAGE_READY_TIMEOUT_MS,
+        pollMs: Long = PAGE_READY_POLL_MS,
+    ): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val merged = service.captureBestStructuredSnapshot()
+            if (PageReadiness.isReadable(merged, expectedPackage = expectedPackage)) return true
+            delay(pollMs)
+        }
+        return false
+    }
+
     private fun needsNavigationDelay(action: AgentAction): Boolean {
 
         return action.action.equals("click", ignoreCase = true) ||
@@ -1760,6 +2094,9 @@ class AgentOrchestrator(
             action.action.equals("open_app", ignoreCase = true)
 
     }
+
+    private fun navigationDelayMs(action: AgentAction): Long =
+        if (action.action.equals("open_app", ignoreCase = true)) OPEN_APP_DELAY_MS else NAVIGATION_DELAY_MS
 
 
 
@@ -1777,13 +2114,364 @@ class AgentOrchestrator(
 
 
 
+    suspend fun runDisambiguatedIntent(
+
+        command: String,
+
+        intentId: String,
+
+        apiKey: String,
+
+        appContext: Context,
+
+        runContext: AgentRunContext,
+
+        onProgress: ((Int, String) -> Unit)? = null,
+
+    ): AgentRunResult {
+
+        val service = JoyAccessibilityService.instance
+
+            ?: return AgentRunResult(false, "无障碍服务未连接", emptyList())
+
+        val steps = IntentDisambiguationHelper.stepsForIntent(command, intentId, appContext)
+
+            ?: return AgentRunResult(false, "无法执行所选意图", emptyList())
+
+        pendingState = null
+
+        sessionStore?.clearPending()
+
+        val result = executeLocalSteps(appContext, service, steps, command, runContext)
+
+        if (result.success && !result.waitingForUserConfirm && LocalFastPathGuard.isUndoable(steps)) {
+
+            LocalUndoRegistry.register(steps)
+
+        }
+
+        return result
+
+    }
+
+
+
+    private fun saveIntentDisambiguationPending(
+
+        command: String,
+
+        offer: DisambiguationOffer,
+
+        service: JoyAccessibilityService,
+
+    ): AgentRunResult {
+
+        val prompt = "您说的是「${offer.command}」吗？请点选或说出要执行的操作。"
+
+        val state = PendingAgentState(
+
+            originalCommand = command,
+
+            aiPrompt = prompt,
+
+            session = AgentConversationSession(rootCommand = command),
+
+            previousSnapshot = service.mergeSnapshots(service.captureStructuredSnapshots()),
+
+            kind = PendingKind.INTENT_DISAMBIGUATION,
+
+            deferredCommand = encodeDisambiguationOptions(offer.options),
+
+        )
+
+        savePendingState(state)
+
+        return AgentRunResult(
+
+            success = true,
+
+            summary = prompt,
+
+            logs = emptyList(),
+
+            waitingForUserConfirm = true,
+
+            confirmPrompt = prompt,
+
+        )
+
+    }
+
+
+
+    private suspend fun handleIntentDisambiguationReply(
+
+        pending: PendingAgentState,
+
+        command: String,
+
+        apiKey: String,
+
+        service: JoyAccessibilityService,
+
+        runContext: AgentRunContext,
+
+        onProgress: ((Int, String) -> Unit)?,
+
+    ): AgentRunResult {
+
+        val options = decodeDisambiguationOptions(pending.deferredCommand)
+
+        val matched = options.firstOrNull { option ->
+
+            command.contains(option.label, ignoreCase = true) ||
+
+                command.contains(option.intentId, ignoreCase = true)
+
+        } ?: options.firstOrNull()
+
+        if (matched == null) {
+
+            return AgentRunResult(
+
+                success = true,
+
+                summary = pending.aiPrompt,
+
+                logs = emptyList(),
+
+                waitingForUserConfirm = true,
+
+                confirmPrompt = pending.aiPrompt,
+
+            )
+
+        }
+
+        return runDisambiguatedIntent(
+
+            command = pending.originalCommand,
+
+            intentId = matched.intentId,
+
+            apiKey = apiKey,
+
+            appContext = service,
+
+            runContext = runContext,
+
+            onProgress = onProgress,
+
+        )
+
+    }
+
+
+
+    private fun saveLocalPreviewPending(
+
+        command: String,
+
+        previewMessage: String,
+
+        steps: List<AgentAction>,
+
+        service: JoyAccessibilityService,
+
+    ): AgentRunResult {
+
+        val state = PendingAgentState(
+
+            originalCommand = command,
+
+            aiPrompt = previewMessage,
+
+            session = AgentConversationSession(rootCommand = command),
+
+            previousSnapshot = service.mergeSnapshots(service.captureStructuredSnapshots()),
+
+            kind = PendingKind.LOCAL_PREVIEW,
+
+            plannedSteps = steps,
+
+        )
+
+        savePendingState(state)
+
+        return AgentRunResult(
+
+            success = true,
+
+            summary = previewMessage,
+
+            logs = emptyList(),
+
+            waitingForUserConfirm = true,
+
+            confirmPrompt = previewMessage,
+
+            needsBinaryConfirm = true,
+
+        )
+
+    }
+
+
+
+    private suspend fun handleLocalPreviewReply(
+
+        pending: PendingAgentState,
+
+        command: String,
+
+        service: JoyAccessibilityService,
+
+        runContext: AgentRunContext,
+
+    ): AgentRunResult {
+
+        return when (VoiceConfirmPhraseMatcher.classify(command)) {
+
+            VoiceConfirmPhraseMatcher.Intent.CONFIRM -> {
+
+                val steps = pending.plannedSteps.orEmpty()
+
+                pendingState = null
+
+                sessionStore?.clearPending()
+
+                if (steps.isEmpty()) {
+
+                    AgentRunResult(false, "没有可执行的步骤", emptyList())
+
+                } else {
+
+                    val result = executeLocalSteps(service, service, steps, pending.originalCommand, runContext)
+
+                    if (result.success && !result.waitingForUserConfirm && LocalFastPathGuard.isUndoable(steps)) {
+
+                        LocalUndoRegistry.register(steps)
+
+                    }
+
+                    result
+
+                }
+
+            }
+
+            VoiceConfirmPhraseMatcher.Intent.CANCEL -> {
+
+                clearPendingUserReply()
+
+                AgentRunResult(true, "好的，已取消", emptyList())
+
+            }
+
+            VoiceConfirmPhraseMatcher.Intent.UNCLEAR -> {
+
+                AgentRunResult(
+
+                    success = true,
+
+                    summary = pending.aiPrompt,
+
+                    logs = emptyList(),
+
+                    waitingForUserConfirm = true,
+
+                    confirmPrompt = pending.aiPrompt,
+
+                    needsBinaryConfirm = true,
+
+                )
+
+            }
+
+        }
+
+    }
+
+
+
+    private fun encodeDisambiguationOptions(options: List<DisambiguationOption>): String {
+
+        val arr = org.json.JSONArray()
+
+        options.forEach { option ->
+
+            arr.put(
+
+                org.json.JSONObject()
+
+                    .put("intent", option.intentId)
+
+                    .put("label", option.label),
+
+            )
+
+        }
+
+        return arr.toString()
+
+    }
+
+
+
+    private fun decodeDisambiguationOptions(raw: String?): List<DisambiguationOption> {
+
+        if (raw.isNullOrBlank()) return emptyList()
+
+        return runCatching {
+
+            val arr = org.json.JSONArray(raw)
+
+            buildList {
+
+                for (i in 0 until arr.length()) {
+
+                    val item = arr.getJSONObject(i)
+
+                    add(
+
+                        DisambiguationOption(
+
+                            intentId = item.optString("intent"),
+
+                            label = item.optString("label"),
+
+                            confidence = 0f,
+
+                        ),
+
+                    )
+
+                }
+
+            }
+
+        }.getOrDefault(emptyList())
+
+    }
+
+
+
     companion object {
 
         private const val MAX_AGENT_STEPS = 30
 
         private const val ACTION_DELAY_MS = 100L
+        private const val VISION_TAP_BEFORE_TYPE_MS = 800L
 
         private const val NAVIGATION_DELAY_MS = 280L
+
+        private const val OPEN_APP_DELAY_MS = 500L
+
+        private const val WAIT_ACTION_MS = 900L
+
+        private const val PAGE_READY_TIMEOUT_MS = 6_000L
+
+        private const val PAGE_READY_POLL_MS = 250L
 
         private val INFO_QUERY_ACTIONS = setOf(
             "tell_time",

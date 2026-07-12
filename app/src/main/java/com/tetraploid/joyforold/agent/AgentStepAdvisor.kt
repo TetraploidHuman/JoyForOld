@@ -1,7 +1,7 @@
 package com.tetraploid.joyforold.agent
 
 /**
- * 通用步骤后建议：根据指令语义与页面状态，提示 Agent 下一步，不绑定具体 App/场景。
+ * 步骤后建议：仅反馈可客观观测的状态（页面是否变化、操作是否重复失败），不解析用户意图。
  */
 object AgentStepAdvisor {
     fun postStepHint(
@@ -10,65 +10,73 @@ object AgentStepAdvisor {
         result: ActionExecutionResult,
         snapshot: StructuredPageSnapshot?,
         rootCommand: String,
+        pageDiff: String = "",
+        visionMode: Boolean = false,
     ): String? {
-        if (!result.success) return null
-        return when (action.action.lowercase()) {
-            "type" -> hintAfterType(action, snapshot, rootCommand)
-            "find_on_page" -> hintAfterFind(result, snapshot, rootCommand)
-            "open_app" -> hintAfterOpenApp(rootCommand)
-            "click" -> hintAfterClick(session, action, snapshot, rootCommand)
-            else -> null
+        MediaPlaybackHeuristics.plannerHint(session, snapshot, rootCommand)?.let { return it }
+
+        VisionTaskHint.postStepNudge(
+            command = rootCommand,
+            steps = session.stepRecords,
+            visionMode = visionMode,
+            lastAction = action,
+        )?.let { return it }
+
+        if (!result.success) {
+            return when (action.action.lowercase()) {
+                "find_on_page" -> hintAfterFailedFind(session, action, visionMode)
+                "click" -> hintAfterFailedPlaybackClick(action)
+                else -> null
+            }
         }
+        return hintAfterSuccessfulAction(action, pageDiff, visionMode)
     }
 
-    private fun hintAfterType(
+    private fun hintAfterSuccessfulAction(
         action: AgentAction,
-        snapshot: StructuredPageSnapshot?,
-        rootCommand: String,
+        pageDiff: String,
+        visionMode: Boolean,
     ): String? {
-        if (!AgentFinishGuard.impliesTargetSelection(rootCommand)) return null
-        val typed = action.inputText?.trim().orEmpty()
-        if (typed.length < 2) return null
-        val targets = AgentFinishGuard.matchingTargets(snapshot, typed)
-        return buildString {
-            append("【步骤建议】已输入文字。")
-            append("若用户目标是对该项进行操作，通常还需 click 列表或按钮中的目标。")
-            if (targets.isNotEmpty()) append(" 可尝试：${targets.joinToString("、")}。")
-            append(" 勿在未选中/未进入目标页时 finish。")
+        if (!action.action.equals("click", ignoreCase = true) &&
+            !action.action.equals("type", ignoreCase = true) &&
+            !action.action.equals("tap", ignoreCase = true)
+        ) {
+            return null
         }
-    }
-
-    private fun hintAfterFind(
-        result: ActionExecutionResult,
-        snapshot: StructuredPageSnapshot?,
-        rootCommand: String,
-    ): String? {
-        if (result.matchedElements.isEmpty()) return null
-        if (!AgentFinishGuard.impliesTargetSelection(rootCommand)) return null
-        return buildString {
-            append("【步骤建议】已找到匹配项：${result.matchedElements.take(4).joinToString("、")}。")
-            append(" 下一步应 click 其中最符合用户指令的一项。")
+        if (!AgentActionGuard.pageDiffIndicatesNoChange(pageDiff)) return null
+        val target = action.targetText?.trim().orEmpty()
+        val label = if (target.isNotBlank()) "「$target」" else action.action
+        val strategyHint = if (visionMode || action.action.equals("tap", ignoreCase = true)) {
+            "请换其他 tap 坐标或 finish+waiting_for_user 询问用户。"
+        } else {
+            "请 read_tree 查看可点击项并换策略，勿重复相同操作。"
         }
+        return "【页面反馈】执行 $label 后【页面变化】无明显变化，该操作可能未推进目标。" +
+            strategyHint
     }
 
-    private fun hintAfterOpenApp(rootCommand: String): String {
-        return "【步骤建议】应用已打开。继续在应用内完成用户目标，根据页面快览操作，勿立即 finish。"
+    private fun hintAfterFailedPlaybackClick(action: AgentAction): String? {
+        if (!MediaPlaybackHeuristics.isAbstractPlaybackTarget(action.targetText)) return null
+        return "【步骤建议】无障碍树中通常没有「${action.targetText}」。若已在视频详情页且标题匹配，请直接 finish，勿重复 read_tree。"
     }
 
-    private fun hintAfterClick(
+    private fun hintAfterFailedFind(
         session: AgentConversationSession,
         action: AgentAction,
-        snapshot: StructuredPageSnapshot?,
-        rootCommand: String,
+        visionMode: Boolean,
     ): String? {
-        if (!AgentFinishGuard.impliesTargetSelection(rootCommand)) return null
-        val target = action.targetText?.trim().orEmpty()
-        if (target.contains("搜索", ignoreCase = true)) {
-            val phrase = AgentFinishGuard.extractTargetPhrase(rootCommand) ?: return null
-            val targets = AgentFinishGuard.matchingTargets(snapshot, phrase)
-            if (targets.isEmpty()) return null
-            return "【步骤建议】已触发搜索。下一步 click 列表中的目标（${targets.joinToString("、")}）。"
+        val query = action.targetText?.trim().orEmpty()
+        if (query.length < 2) return null
+        val failedSameQuery = session.stepRecords.takeLast(8).count { step ->
+            !step.result.success &&
+                step.action.action.equals("find_on_page", ignoreCase = true) &&
+                step.action.targetText?.trim().equals(query, ignoreCase = true)
         }
-        return null
+        if (failedSameQuery < 1) return null
+        return if (visionMode) {
+            "【步骤建议】当前应用无障碍树不可用，无法在页面中搜索「$query」。请根据截图用 tap 重新规划，勿重复 find_on_page。"
+        } else {
+            "【步骤建议】当前可见页面未出现「$query」。请结合页面快览或 read_tree 重新规划下一步，勿重复 find_on_page。"
+        }
     }
 }

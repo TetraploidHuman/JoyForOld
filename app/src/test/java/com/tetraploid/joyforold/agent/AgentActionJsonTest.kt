@@ -42,6 +42,15 @@ class AgentActionJsonTest {
     }
 
     @Test
+    fun fromJson_normalizesTypeTargetToInput() {
+        val action = AgentAction.fromJson(
+            JSONObject("""{"action":"type","target_text":"赵雷 小雨中"}"""),
+        )
+        assertEquals("赵雷 小雨中", action.inputText)
+        assertEquals(null, action.targetText)
+    }
+
+    @Test
     fun toJson_roundTrip() {
         val original = AgentAction(
             action = "type",

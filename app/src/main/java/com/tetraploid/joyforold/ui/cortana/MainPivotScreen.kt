@@ -248,6 +248,9 @@ fun MainPivotScreen(viewModel: DemoViewModel = viewModel()) {
                         onClearConfirm = viewModel::clearPendingConfirmUI,
                         onBinaryConfirm = { viewModel.submitBinaryConfirm(true) },
                         onBinaryCancel = { viewModel.submitBinaryConfirm(false) },
+                        onDisambiguationSelect = viewModel::selectDisambiguationOption,
+                        onUndo = viewModel::undoLastLocalAction,
+                        onDismissUndo = viewModel::dismissUndoOffer,
                         onSendClick = { handleSendClick() },
                         onCancelClick = {
                             if (uiState.isRunning) {
@@ -286,6 +289,12 @@ fun MainPivotScreen(viewModel: DemoViewModel = viewModel()) {
                         onSetWakeWordSileroVad = viewModel::setWakeWordSileroVadEnabled,
                         onSetWakeWordSecondStage = viewModel::setWakeWordSecondStageEnabled,
                         onSaveWakeWordConfig = viewModel::saveWakeWordConfig,
+                        onSetCloudContextConsent = { granted ->
+                            viewModel.setCloudContextConsent(granted)
+                        },
+                        onSetVoiceBargeIn = { enabled ->
+                            viewModel.setVoiceBargeInEnabled(enabled)
+                        },
                         onTestWakeWord = viewModel::testWakeWord,
                         onStartCalibration = viewModel::startWakeWordCalibration,
                         onRecordCalibrationStep = viewModel::recordCalibrationStep,

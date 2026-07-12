@@ -5,8 +5,8 @@ import android.os.Build
 import android.view.accessibility.AccessibilityNodeInfo
 
 object UiTreeSerializer {
-    private const val MAX_NODES = 600
-    private const val MAX_DEPTH = 50
+    private const val MAX_NODES = AgentContextLimits.UI_TREE_MAX_NODES
+    private const val MAX_DEPTH = 55
 
     fun serialize(root: AccessibilityNodeInfo): String {
         val screenHeight = UiNodeHeuristics.screenHeight(root)

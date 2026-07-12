@@ -25,19 +25,18 @@ class AgentPlanParserTest {
             """.trimIndent(),
         )
         val plan = AgentPlanParser.parsePlan(json)
-        assertEquals(2, plan.size)
+        assertEquals(1, plan.size)
         assertEquals("click", plan[0].action)
-        assertEquals("type", plan[1].action)
     }
 
     @Test
-    fun sanitize_limitsToTwoSteps() {
+    fun sanitize_limitsToOneStep() {
         val actions = listOf(
             AgentAction(action = "scroll_down"),
             AgentAction(action = "click", targetText = "A"),
             AgentAction(action = "click", targetText = "B"),
         )
-        assertEquals(2, AgentPlanParser.sanitize(actions).size)
+        assertEquals(1, AgentPlanParser.sanitize(actions).size)
     }
 
     @Test

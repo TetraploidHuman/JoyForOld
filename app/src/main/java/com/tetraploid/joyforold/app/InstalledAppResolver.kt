@@ -96,10 +96,14 @@ object InstalledAppResolver {
     private fun resolvePackageInternal(context: Context, normalized: String): String? {
         if (normalized.isBlank()) return null
 
-        APP_ALIASES[normalized]?.let { return resolveInstalledAlias(context, it) }
-        APP_ALIASES.entries.firstOrNull { (alias, _) -> normalized.contains(alias) }
+        APP_ALIASES[normalized]?.let { aliasPkg ->
+            resolveInstalledAlias(context, aliasPkg)?.let { return it }
+        }
+        APP_ALIASES.entries.firstOrNull { (alias, _) -> normalized == alias }
             ?.value
-            ?.let { return resolveInstalledAlias(context, it) }
+            ?.let { aliasPkg ->
+                resolveInstalledAlias(context, aliasPkg)?.let { return it }
+            }
 
         if (normalized.contains("电话") || normalized.contains("拨号")) {
             resolveDialerPackage(context)?.let { return it }

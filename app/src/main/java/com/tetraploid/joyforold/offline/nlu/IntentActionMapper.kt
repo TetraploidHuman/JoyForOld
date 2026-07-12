@@ -89,6 +89,31 @@ object SlotExtractor {
 }
 
 object IntentActionMapper {
+    private val LABELS = mapOf(
+        "open_wifi_settings" to "打开无线网络",
+        "open_bluetooth_settings" to "打开蓝牙",
+        "open_sound_settings" to "打开声音设置",
+        "open_mobile_data_settings" to "打开移动数据",
+        "open_location_settings" to "打开定位",
+        "open_display_settings" to "打开显示设置",
+        "open_settings" to "打开系统设置",
+        "open_camera" to "打开相机",
+        "open_gallery" to "打开相册",
+        "open_weather" to "打开天气",
+        "tell_time" to "查看时间",
+        "query_weather" to "查询天气",
+        "navigate_home" to "导航回家",
+        "emergency_help" to "紧急呼救",
+        "ask_family_for_help" to "向家人求助",
+        "open_health_code" to "打开健康码",
+        "open_payment_code" to "打开付款码",
+        "open_font_settings" to "调整字体大小",
+        "open_app" to "打开应用",
+        "set_alarm" to "设闹钟",
+        "add_calendar_event" to "添加日程",
+        "dial_contact" to "打电话",
+    )
+
     private val SUMMARIES = mapOf(
         "open_wifi_settings" to "已打开无线网络设置",
         "open_bluetooth_settings" to "已打开蓝牙设置",
@@ -109,6 +134,23 @@ object IntentActionMapper {
         "open_payment_code" to "已尝试打开付款码入口",
         "open_font_settings" to "已打开字体显示设置",
     )
+
+    fun describeIntent(intentId: String, steps: List<AgentAction>): String {
+        val action = steps.firstOrNull { !it.action.equals("finish", ignoreCase = true) }?.action ?: intentId
+        return describeAction(action, steps)
+    }
+
+    fun describeAction(action: String, steps: List<AgentAction>): String {
+        LABELS[action]?.let { return it }
+        val primary = steps.firstOrNull { !it.action.equals("finish", ignoreCase = true) }
+        return when (primary?.action) {
+            "open_app" -> "打开${primary.targetText.orEmpty().ifBlank { "应用" }}"
+            "dial_contact" -> "给${primary.targetText.orEmpty().ifBlank { "联系人" }}打电话"
+            "set_alarm" -> "设${primary.targetText.orEmpty().ifBlank { "闹钟" }}"
+            "add_calendar_event" -> "添加日程：${primary.targetText.orEmpty().ifBlank { "提醒" }}"
+            else -> action
+        }
+    }
 
     fun toSteps(intent: String, command: String, context: Context?): List<AgentAction>? {
         val slots = SlotExtractor.extract(intent, command, context)

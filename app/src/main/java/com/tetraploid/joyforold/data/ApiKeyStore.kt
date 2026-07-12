@@ -8,10 +8,11 @@ class ApiKeyStore(context: Context) {
 
     fun getApiKey(): String {
         val saved = prefs.getString(KEY_API_KEY, "").orEmpty()
-        return saved.ifBlank { BuildConfig.DEEPSEEK_API_KEY }
+            .ifBlank { prefs.getString(LEGACY_KEY_API_KEY, "").orEmpty() }
+        return saved.ifBlank { BuildConfig.LLM_API_KEY }
     }
 
-    fun getModel(): String = BuildConfig.DEEPSEEK_MODEL
+    fun getModel(): String = BuildConfig.LLM_MODEL
 
     fun getAsrApiKey(): String {
         val saved = prefs.getString(KEY_ASR_API_KEY, "").orEmpty()
@@ -53,7 +54,8 @@ class ApiKeyStore(context: Context) {
 
     companion object {
         private const val PREFS_NAME = "joy_for_old_prefs"
-        private const val KEY_API_KEY = "deepseek_api_key"
+        private const val KEY_API_KEY = "llm_api_key"
+        private const val LEGACY_KEY_API_KEY = "deepseek_api_key"
         private const val KEY_ASR_API_KEY = "volc_asr_api_key"
         private const val KEY_ASR_APP_ID = "volc_asr_app_id"
         private const val KEY_ASR_ACCESS_TOKEN = "volc_asr_access_token"
