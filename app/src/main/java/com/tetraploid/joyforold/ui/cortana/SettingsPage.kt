@@ -24,9 +24,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.agent.AgentUiState
+import com.tetraploid.joyforold.ime.JoyImeHelper
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.OverlayPermission
 import com.tetraploid.joyforold.system.NotificationAccessPermission
@@ -105,11 +107,38 @@ fun SettingsPage(
         StatusLine("联系人", uiState.readContactsGranted)
         StatusLine("通知使用权", uiState.notificationAccessGranted)
         StatusLine("悬浮助手", overlayRunning)
+        StatusLine("Joy 输入助手", uiState.joyImeEnabled)
+        if (uiState.joyImeEnabled && !uiState.joyImeSelectedAsDefault) {
+            Text(
+                text = "已启用但未设为默认输入法，自动输入可能失败。",
+                color = CortanaColors.OnBackgroundSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+        }
+        Text(
+            text = stringResource(com.tetraploid.joyforold.R.string.joy_ime_settings_hint),
+            color = CortanaColors.OnBackgroundMuted,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
 
         OutlinedButton(
             onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("打开无障碍设置") }
+        OutlinedButton(
+            onClick = { context.startActivity(JoyImeHelper.createSettingsIntent()) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                if (uiState.joyImeSelectedAsDefault) {
+                    "Joy 输入助手已设为默认"
+                } else {
+                    "设置 Joy 输入助手（自动输入）"
+                },
+            )
+        }
         OutlinedButton(
             onClick = { context.startActivity(OverlayPermission.createSettingsIntent(context)) },
             modifier = Modifier.fillMaxWidth(),

@@ -8,6 +8,7 @@ import com.tetraploid.joyforold.BuildConfig
 import com.tetraploid.joyforold.accessibility.AccessibilityPermission
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
+import com.tetraploid.joyforold.ime.JoyImeHelper
 import com.tetraploid.joyforold.data.ApiKeyStore
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.OverlayPermission
@@ -82,6 +83,8 @@ data class AgentUiState(
     val isPaused: Boolean = false,
     val accessibilityEnabled: Boolean = false,
     val accessibilityServiceConnected: Boolean = false,
+    val joyImeEnabled: Boolean = false,
+    val joyImeSelectedAsDefault: Boolean = false,
     val recordAudioGranted: Boolean = false,
     val readContactsGranted: Boolean = false,
     val notificationAccessGranted: Boolean = false,
@@ -247,10 +250,14 @@ object AgentRuntime {
         val settingEnabled = app?.let { AccessibilityPermission.isSettingEnabled(it) }
             ?: AccessibilityPermission.isServiceConnected()
         val connected = AccessibilityPermission.isServiceConnected()
+        val imeEnabled = app?.let { JoyImeHelper.isEnabled(it) } ?: false
+        val imeDefault = app?.let { JoyImeHelper.isSelectedAsDefault(it) } ?: false
         _state.update {
             it.copy(
                 accessibilityEnabled = settingEnabled,
                 accessibilityServiceConnected = connected,
+                joyImeEnabled = imeEnabled,
+                joyImeSelectedAsDefault = imeDefault,
                 wakeWordRunning = it.wakeWordEnabled && WakeWordService.isRunning,
                 recordAudioGranted = app?.let { ctx -> hasRecordAudioPermission(ctx) } ?: it.recordAudioGranted,
                 readContactsGranted = app?.let { ctx -> ContactResolver.hasContactsPermission(ctx) } ?: it.readContactsGranted,

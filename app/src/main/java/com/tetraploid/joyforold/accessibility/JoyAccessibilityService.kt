@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
+import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -26,6 +27,8 @@ import com.tetraploid.joyforold.agent.StructuredPageSnapshot
 import com.tetraploid.joyforold.agent.UiNodeHeuristics
 import com.tetraploid.joyforold.agent.UiPageProbe
 import com.tetraploid.joyforold.agent.UiTreeSerializer
+import com.tetraploid.joyforold.ime.JoyImeHelper
+import com.tetraploid.joyforold.ime.JoyInputMethodService
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import java.util.concurrent.CountDownLatch
@@ -587,9 +590,10 @@ class JoyAccessibilityService : AccessibilityService() {
     val text = input?.trim().orEmpty()
     if (text.isEmpty()) return "输入失败：缺少 input_text"
 
-    // 视觉 tap 后输入：优先剪贴板+粘贴菜单，避免误绑 IME/假 editable
     if (lastTapNormalized != null) {
-        pasteViaClipboard(text)?.let { return it }
+      prepareInputFocusAtLastTap()
+      tryImeTypeText(text)?.let { return it }
+      pasteViaClipboard(text)?.let { return it }
     }
 
     val roots = collectExternalRoots()
@@ -625,6 +629,7 @@ class JoyAccessibilityService : AccessibilityService() {
       }
 
       if (editable == null) {
+        tryImeTypeText(text)?.let { return it }
         return pasteViaClipboard(text) ?: "输入失败：未找到输入区域，请先 tap 输入框坐标再 type"
       }
 
@@ -644,12 +649,27 @@ class JoyAccessibilityService : AccessibilityService() {
       if (ok) {
         "已输入：$text"
       } else {
-        pasteViaClipboard(text) ?: "输入失败：系统未接受输入，可先 tap 输入框再试"
+        tryImeTypeText(text)
+          ?: pasteViaClipboard(text)
+          ?: "输入失败：系统未接受输入，可先 tap 输入框再试"
       }
     } finally {
       recycleInputNodes(focused, editable)
       roots.forEach { it.recycle() }
     }
+  }
+
+  /** 通过隐藏 IME 注入文字；需用户已将 Joy 输入助手设为默认输入法。 */
+  private fun tryImeTypeText(text: String, maxWaitMs: Long = 2_000L): String? {
+    if (!JoyImeHelper.isSelectedAsDefault(this)) return null
+    val deadline = SystemClock.uptimeMillis() + maxWaitMs
+    while (SystemClock.uptimeMillis() < deadline) {
+      if (JoyInputMethodService.typeText(text)) {
+        return "已输入法注入：$text"
+      }
+      Thread.sleep(100L)
+    }
+    return null
   }
 
   private fun pasteViaClipboard(text: String): String? {
