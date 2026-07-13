@@ -2,7 +2,6 @@ package com.tetraploid.joyforold.collaboration
 
 import android.app.Application
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
-import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.assist.protocol.AssistControlMessage
 import com.tetraploid.joyforold.assist.protocol.AssistRole
 import com.tetraploid.joyforold.assist.protocol.BindingDto
@@ -22,82 +21,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-enum class AssistSessionPhase {
-    IDLE,
-    WAITING_PEER,
-    ACTIVE,
-    ENDED,
-}
-
-data class AssistSessionSnapshot(
-    val phase: AssistSessionPhase = AssistSessionPhase.IDLE,
-    val role: AssistRole = AssistRole.ELDER,
-    val pairCode: String = "",
-    val sessionId: String = "",
-    val statusMessage: String = "",
-    val peerDisplayName: String = "",
-    val latestFrameBytes: ByteArray? = null,
-    val latestFrameWidth: Int = 0,
-    val latestFrameHeight: Int = 0,
-    val latestFrameFormat: String = "",
-    val bindings: List<BindingDto> = emptyList(),
-    val serverHttpUrl: String = "",
-    val serverWsUrl: String = "",
-    val displayName: String = "",
-    val streamFps: Float = 0f,
-    val streamLatencyMs: Long = -1L,
-) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as AssistSessionSnapshot
-        return phase == other.phase &&
-            role == other.role &&
-            pairCode == other.pairCode &&
-            sessionId == other.sessionId &&
-            statusMessage == other.statusMessage &&
-            peerDisplayName == other.peerDisplayName &&
-            latestFrameBytes.contentEquals(other.latestFrameBytes) &&
-            latestFrameWidth == other.latestFrameWidth &&
-            latestFrameHeight == other.latestFrameHeight &&
-            latestFrameFormat == other.latestFrameFormat &&
-            bindings == other.bindings &&
-            serverHttpUrl == other.serverHttpUrl &&
-            serverWsUrl == other.serverWsUrl &&
-            displayName == other.displayName &&
-            streamFps == other.streamFps &&
-            streamLatencyMs == other.streamLatencyMs
-    }
-
-    override fun hashCode(): Int {
-        var result = phase.hashCode()
-        result = 31 * result + role.hashCode()
-        result = 31 * result + pairCode.hashCode()
-        result = 31 * result + sessionId.hashCode()
-        result = 31 * result + statusMessage.hashCode()
-        result = 31 * result + peerDisplayName.hashCode()
-        result = 31 * result + (latestFrameBytes?.contentHashCode() ?: 0)
-        result = 31 * result + latestFrameWidth
-        result = 31 * result + latestFrameHeight
-        result = 31 * result + latestFrameFormat.hashCode()
-        result = 31 * result + bindings.hashCode()
-        result = 31 * result + serverHttpUrl.hashCode()
-        result = 31 * result + serverWsUrl.hashCode()
-        result = 31 * result + displayName.hashCode()
-        result = 31 * result + streamFps.hashCode()
-        result = 31 * result + streamLatencyMs.hashCode()
-        return result
-    }
-}
-
 class AssistSessionManager(
     private val application: Application,
     private val scope: CoroutineScope,
     private val store: AssistPairingStore,
+    private val callbacks: AssistSessionCallbacks = AssistSessionCallbacks(),
     private val apiClient: AssistApiClient = AssistApiClient(),
     private val onSnapshot: (AssistSessionSnapshot) -> Unit,
 ) : AssistRelayClient.Listener {
-    private val commandExecutor = AssistCommandExecutor(scope)
+    private val commandExecutor = AssistCommandExecutor(
+        scope = scope,
+        onRemoteCommand = callbacks.onRemoteCommand,
+    )
     private var relayClient = AssistRelayClient(this)
     private var snapshot = AssistSessionSnapshot()
     private var activeToken: String = ""
@@ -194,7 +129,7 @@ class AssistSessionManager(
                 statusMessage = "${response.caregiverDisplayName.ifBlank { "家人" }} 已连接",
             )
         }
-        AgentRuntime.setAssistMode(true)
+        callbacks.onAssistModeChanged(true)
         connectWebSocket(wsUrl, token)
     }
 
@@ -267,7 +202,7 @@ class AssistSessionManager(
                     statusMessage = "等待家人连接，协助码 ${response.pairCode}",
                 )
             }
-            AgentRuntime.setAssistMode(true)
+            callbacks.onAssistModeChanged(true)
             connectWebSocket(response.wsUrl, response.elderToken)
         }
     }
@@ -517,7 +452,7 @@ class AssistSessionManager(
         elderPollJob = null
         relayClient.disconnect()
         streamStats.reset()
-        AgentRuntime.setAssistMode(false)
+        callbacks.onAssistModeChanged(false)
         updateSnapshot {
             AssistSessionSnapshot(
                 role = it.role,

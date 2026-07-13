@@ -35,7 +35,7 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.tetraploid.joyforold.MainActivity
 import com.tetraploid.joyforold.R
-import com.tetraploid.joyforold.agent.AgentRuntime
+import com.tetraploid.joyforold.di.agentRuntime
 import com.tetraploid.joyforold.ui.theme.JoyForOldTheme
 import com.tetraploid.joyforold.ui.theme.ThemePreferenceStore
 import com.tetraploid.joyforold.util.ForegroundServicePromoter
@@ -60,7 +60,8 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.currentState = Lifecycle.State.CREATED
 
-        AgentRuntime.initIfNeeded(applicationContext as Application)
+        val runtime = agentRuntime()
+        runtime.initIfNeeded(applicationContext as Application)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         if (!ForegroundServicePromoter.promote(this, NOTIFICATION_ID, createNotification())) {
             stopSelf()
@@ -77,13 +78,14 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
                 val darkTheme = ThemePreferenceStore(this@FloatingOverlayService).isDarkTheme()
                 JoyForOldTheme(darkTheme = darkTheme) {
                     FloatingOverlayContent(
-                        onRun = { AgentRuntime.runAgent(applicationContext as Application) },
-                        onStartVoice = { AgentRuntime.startVoiceInput() },
+                        agentRuntime = runtime,
+                        onRun = { runtime.runAgent(applicationContext as Application) },
+                        onStartVoice = { runtime.startVoiceInput() },
                         onStopVoiceAndRun = {
-                            AgentRuntime.stopVoiceInputAndRunAgent(applicationContext as Application)
+                            runtime.stopVoiceInputAndRunAgent(applicationContext as Application)
                         },
-                        onStopVoiceOnly = { AgentRuntime.stopVoiceInput() },
-                        onCancel = { AgentRuntime.clearInteraction() },
+                        onStopVoiceOnly = { runtime.stopVoiceInput() },
+                        onCancel = { runtime.clearInteraction() },
                     )
                 }
             }
@@ -113,7 +115,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
 
         windowManager.addView(composeView, layoutParams)
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
-        AgentRuntime.refreshAccessibilityState()
+        runtime.refreshAccessibilityState()
     }
 
     override fun onDestroy() {
@@ -137,7 +139,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
 
     private fun setDialogVisible(visible: Boolean) {
         if (!::composeView.isInitialized) return
-        if (visible && AgentRuntime.isAppInForeground()) return
+        if (visible && agentRuntime().isAppInForeground()) return
 
         composeView.visibility = if (visible) View.VISIBLE else View.GONE
         layoutParams.alpha = if (visible) 1f else 0f
@@ -219,7 +221,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         }
 
         fun showDialog() {
-            if (AgentRuntime.isAppInForeground()) return
+            if (agentRuntime().isAppInForeground()) return
             val service = instance ?: return
             if (Looper.myLooper() == Looper.getMainLooper()) {
                 service.setDialogVisible(true)

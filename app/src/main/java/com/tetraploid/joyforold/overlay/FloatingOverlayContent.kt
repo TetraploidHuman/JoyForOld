@@ -40,13 +40,14 @@ fun shouldShowOverlayDialog(
 
 @Composable
 fun FloatingOverlayContent(
+    agentRuntime: AgentRuntime,
     onRun: () -> Unit,
     onStartVoice: () -> Unit,
     onStopVoiceAndRun: () -> Unit,
     onStopVoiceOnly: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val uiState by AgentRuntime.state.collectAsStateWithLifecycle()
+    val uiState by agentRuntime.state.collectAsStateWithLifecycle()
     val visible = shouldShowOverlayDialog(
         isRunning = uiState.isRunning,
         isListening = uiState.isListening,
@@ -55,10 +56,10 @@ fun FloatingOverlayContent(
     )
 
     LaunchedEffect(Unit) {
-        AgentRuntime.refreshAccessibilityState()
+        agentRuntime.refreshAccessibilityState()
         while (true) {
             delay(2_000)
-            AgentRuntime.refreshAccessibilityState()
+            agentRuntime.refreshAccessibilityState()
         }
     }
 
@@ -89,12 +90,12 @@ fun FloatingOverlayContent(
                 card = card,
                 isListening = uiState.isListening,
                 speechText = uiState.speechText,
-                onBinaryConfirm = { AgentRuntime.submitBinaryConfirm(approved = true) },
-                onBinaryCancel = { AgentRuntime.submitBinaryConfirm(approved = false) },
-                onDismissConfirm = { AgentRuntime.clearPendingConfirmUI() },
-                onDisambiguationSelect = AgentRuntime::selectDisambiguationOption,
-                onUndo = AgentRuntime::undoLastLocalAction,
-                onDismissUndo = AgentRuntime::dismissUndoOffer,
+                onBinaryConfirm = { agentRuntime.submitBinaryConfirm(approved = true) },
+                onBinaryCancel = { agentRuntime.submitBinaryConfirm(approved = false) },
+                onDismissConfirm = { agentRuntime.clearPendingConfirmUI() },
+                onDisambiguationSelect = agentRuntime::selectDisambiguationOption,
+                onUndo = agentRuntime::undoLastLocalAction,
+                onDismissUndo = agentRuntime::dismissUndoOffer,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -137,7 +138,7 @@ fun FloatingOverlayContent(
                     ) {
                         TextButton(
                             onClick = {
-                                if (uiState.isPaused) AgentRuntime.resumeAgent() else AgentRuntime.pauseAgent()
+                                if (uiState.isPaused) agentRuntime.resumeAgent() else agentRuntime.pauseAgent()
                             },
                         ) {
                             Text(
@@ -151,7 +152,7 @@ fun FloatingOverlayContent(
 
             CortanaSearchBar(
                 value = uiState.command,
-                onValueChange = AgentRuntime::updateCommand,
+                onValueChange = agentRuntime::updateCommand,
                 onMicClick = onStartVoice,
                 onSendClick = {
                     if (uiState.isListening) {
@@ -162,7 +163,7 @@ fun FloatingOverlayContent(
                 },
                 onCancelClick = {
                     if (uiState.isRunning) {
-                        AgentRuntime.cancelAgent()
+                        agentRuntime.cancelAgent()
                     } else {
                         onCancel()
                     }

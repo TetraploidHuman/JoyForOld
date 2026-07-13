@@ -3,9 +3,14 @@ package com.tetraploid.joyforold.util
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import androidx.annotation.VisibleForTesting
 
 object NetworkStatus {
+    @VisibleForTesting
+    internal var forceOnline: Boolean? = null
+
     fun hasInternet(context: Context): Boolean {
+        forceOnline?.let { return it }
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return false
         val network = cm.activeNetwork ?: return false

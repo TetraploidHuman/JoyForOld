@@ -13,7 +13,7 @@ class CommandRouteResolverTest {
             CommandRouteResolver.resolve(
                 command = "导航回家",
                 apiKey = "",
-                deepSeekClient = DeepSeekClient(),
+                llmClient = DeepSeekClient(),
             )
         }
         assertNotNull(route)

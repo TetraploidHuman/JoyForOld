@@ -1,7 +1,6 @@
 package com.tetraploid.joyforold.overlay
 
 import com.tetraploid.joyforold.agent.AgentAction
-import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.agent.PageReadiness
 import com.tetraploid.joyforold.agent.PageScreenshotCapture
 import com.tetraploid.joyforold.agent.StructuredPageSnapshot
@@ -23,27 +22,29 @@ object VisionOverlayGuard {
     }
 
     suspend fun <T> withHidden(block: suspend () -> T): T {
-        if (AgentRuntime.isVisionAgentActive()) {
+        val suppressor = VisionOverlaySuppressors.current
+        if (suppressor.isVisionAgentActive()) {
             return block()
         }
-        AgentRuntime.pushVisionOverlaySuppressionAwait(waitFrame = false)
+        suppressor.pushSuppressionAwait(waitFrame = false)
         return try {
             block()
         } finally {
-            AgentRuntime.popVisionOverlaySuppression()
+            suppressor.popSuppression()
         }
     }
 
     suspend fun <T> withHiddenForCapture(block: suspend () -> T): T {
         PageScreenshotCapture.invalidateCache()
-        if (AgentRuntime.isVisionAgentActive()) {
+        val suppressor = VisionOverlaySuppressors.current
+        if (suppressor.isVisionAgentActive()) {
             return block()
         }
-        AgentRuntime.pushVisionOverlaySuppressionAwait(waitFrame = true)
+        suppressor.pushSuppressionAwait(waitFrame = true)
         return try {
             block()
         } finally {
-            AgentRuntime.popVisionOverlaySuppression()
+            suppressor.popSuppression()
         }
     }
 }

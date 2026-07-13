@@ -61,7 +61,7 @@ fun Application.configureWebSockets(
                 room.peer(claims.role)?.let { peer ->
                     sendPeer(peer, AssistControlMessage.sessionEnded("${claims.role.name.lowercase()}_disconnect"))
                 }
-                if (room.elderSocket == null && room.caregiverSocket == null) {
+                if (room.isEmpty) {
                     roomManager.removeRoom(claims.sessionId)
                     pairingService.endSession(claims.sessionId, claims.deviceId)
                 }

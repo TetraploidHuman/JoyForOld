@@ -6,7 +6,7 @@ object PresetIntentResolver {
     suspend fun resolve(
         command: String,
         apiKey: String,
-        client: DeepSeekClient,
+        client: AgentLlmClient,
     ): List<AgentAction>? {
         return resolveWithConfidence(command, apiKey, client)?.first
     }
@@ -14,7 +14,7 @@ object PresetIntentResolver {
     suspend fun resolveWithConfidence(
         command: String,
         apiKey: String,
-        client: DeepSeekClient,
+        client: AgentLlmClient,
     ): Pair<List<AgentAction>, Double>? {
         val trimmed = command.trim()
         if (trimmed.isBlank()) return null

@@ -47,10 +47,10 @@ import com.tetraploid.joyforold.speech.api.VoiceInteractionState
 import com.tetraploid.joyforold.system.NotificationAccessPermission
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 
-import androidx.lifecycle.viewmodel.compose.viewModel
+import org.koin.androidx.compose.koinViewModel
 
 @Composable
-fun DemoScreen(viewModel: DemoViewModel = viewModel()) {
+fun DemoScreen(viewModel: DemoViewModel = koinViewModel()) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current

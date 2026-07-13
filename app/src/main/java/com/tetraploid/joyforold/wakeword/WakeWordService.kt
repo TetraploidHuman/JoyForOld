@@ -19,7 +19,7 @@ import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
 import com.tetraploid.joyforold.MainActivity
 import com.tetraploid.joyforold.R
-import com.tetraploid.joyforold.agent.AgentRuntime
+import com.tetraploid.joyforold.di.agentRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -45,12 +45,12 @@ class WakeWordService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!hasRecordAudioPermission()) {
-            AgentRuntime.appendLog("本地唤醒启动失败：缺少麦克风权限")
+            agentRuntime().appendLog("本地唤醒启动失败：缺少麦克风权限")
             stopSelf()
             return START_NOT_STICKY
         }
         if (!promoteToForeground()) {
-            AgentRuntime.appendLog("本地唤醒启动失败：无法启动前台服务（请确认麦克风权限并在应用内开启唤醒）")
+            agentRuntime().appendLog("本地唤醒启动失败：无法启动前台服务（请确认麦克风权限并在应用内开启唤醒）")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -86,7 +86,7 @@ class WakeWordService : Service() {
                 val ran = runListenSession()
                 if (!isActive) break
                 if (!ran) {
-                    AgentRuntime.appendLog("本地唤醒监听异常退出，3 秒后重试")
+                    agentRuntime().appendLog("本地唤醒监听异常退出，3 秒后重试")
                     delay(RETRY_DELAY_MS)
                 }
             }
@@ -119,11 +119,11 @@ class WakeWordService : Service() {
         )
         val secondStage = if (secondStageEnabled) WakeWordSecondStageVerifier(detector) else null
         if (!detector.prepare()) {
-            AgentRuntime.appendLog("本地唤醒模型初始化失败：${detector.modelHint()}")
+            agentRuntime().appendLog("本地唤醒模型初始化失败：${detector.modelHint()}")
             sileroGate?.release()
             return false
         }
-        AgentRuntime.appendLog(
+        agentRuntime().appendLog(
             "本地唤醒已就绪：$phrase，score=$keywordScore，threshold=$keywordThreshold，" +
                 "confirm=$confirmHits，vad=${vadLabel(vadGateEnabled, useSileroVad, sileroGate != null)}，" +
                 "二阶段=${if (secondStageEnabled) "开" else "关"}",
@@ -137,7 +137,7 @@ class WakeWordService : Service() {
         val audio = createAudioRecord(bufferSize)
         if (audio.state != AudioRecord.STATE_INITIALIZED) {
             audio.release()
-            AgentRuntime.appendLog("本地唤醒录音设备初始化失败")
+            agentRuntime().appendLog("本地唤醒录音设备初始化失败")
             detector.release()
             sileroGate?.release()
             return false
@@ -146,7 +146,7 @@ class WakeWordService : Service() {
         micReleased = false
         runCatching { audio.startRecording() }
             .onFailure {
-                AgentRuntime.appendLog("本地唤醒录音启动失败：${it.message}")
+                agentRuntime().appendLog("本地唤醒录音启动失败：${it.message}")
                 Log.w(logTag, "audio start failed", it)
                 detector.release()
                 sileroGate?.release()
@@ -194,7 +194,7 @@ class WakeWordService : Service() {
                     WakeChainedAudioBridge.offer(ringBuffer.snapshot())
                     ringBuffer.clear()
                     Log.d(logTag, "wake hit: $phrase (#$hitCount)")
-                    AgentRuntime.onWakeWordDetected()
+                    agentRuntime().onWakeWordDetected()
                 }
                 lastStatsAt = maybeReportStats(frameCount, vadPassCount, hitCount, lastStatsAt)
             }
@@ -243,7 +243,7 @@ class WakeWordService : Service() {
     ): Long {
         val now = System.currentTimeMillis()
         if (now - lastStatsAt < STATS_LOG_INTERVAL_MS) return lastStatsAt
-        AgentRuntime.appendLog(
+        agentRuntime().appendLog(
             "唤醒监听统计：frames=$frameCount, vadPass=$vadPassCount, hits=$hitCount",
         )
         return now

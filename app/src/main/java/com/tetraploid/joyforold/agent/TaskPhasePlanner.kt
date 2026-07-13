@@ -5,7 +5,7 @@ package com.tetraploid.joyforold.agent
  */
 object TaskPhasePlanner {
     private val openAndSend = Regex(
-        """打开\s*(.+?)\s*给\s*(.+?)\s*发\s*(.+)""",
+        """打开\s*(.+?)\s*给\s*(.+?)\s*发(?:消息|送)?(?:[:：\s]+|说)?(.+)""",
         RegexOption.IGNORE_CASE,
     )
     private val sendToPerson = Regex(
@@ -36,9 +36,9 @@ object TaskPhasePlanner {
 
         planFromCategoryPrefix(text)?.let { return it }
         ElderTaskTemplateMatcher.match(text)?.let { return planFromActions(it) }
+        parseSendFlow(text)?.let { return it }
         SystemIntentLocalParser.parse(text)?.let { return planFromActions(it) }
         LocalCommandParser.parse(text)?.let { return planFromActions(it) }
-        parseSendFlow(text)?.let { return it }
 
         dialPattern.find(text)?.let { match ->
             val who = cleanLabel(match.groupValues[1])

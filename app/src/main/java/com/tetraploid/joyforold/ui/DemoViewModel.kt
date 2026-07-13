@@ -9,158 +9,157 @@ import com.tetraploid.joyforold.assist.protocol.BindingDto
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 import kotlinx.coroutines.flow.StateFlow
 
-class DemoViewModel(application: Application) : AndroidViewModel(application) {
-    val uiState: StateFlow<AgentUiState> = AgentRuntime.state
+class DemoViewModel(
+    application: Application,
+    private val runtime: AgentRuntime,
+) : AndroidViewModel(application) {
+    val uiState: StateFlow<AgentUiState> = runtime.state
 
-    init {
-        AgentRuntime.initIfNeeded(application)
-    }
-
-    fun refreshAccessibilityState() = AgentRuntime.refreshAccessibilityState()
+    fun refreshAccessibilityState() = runtime.refreshAccessibilityState()
 
     fun onRecordAudioPermissionResult(granted: Boolean) =
-        AgentRuntime.onRecordAudioPermissionResult(getApplication(), granted)
+        runtime.onRecordAudioPermissionResult(getApplication(), granted)
 
-    fun updateApiKey(value: String) = AgentRuntime.updateApiKey(value)
+    fun updateApiKey(value: String) = runtime.updateApiKey(value)
 
-    fun saveApiKey() = AgentRuntime.saveApiKey(getApplication())
+    fun saveApiKey() = runtime.saveApiKey(getApplication())
 
-    fun updateAsrApiKey(value: String) = AgentRuntime.updateAsrApiKey(value)
+    fun updateAsrApiKey(value: String) = runtime.updateAsrApiKey(value)
 
-    fun updateAsrAppId(value: String) = AgentRuntime.updateAsrAppId(value)
+    fun updateAsrAppId(value: String) = runtime.updateAsrAppId(value)
 
-    fun updateAsrAccessToken(value: String) = AgentRuntime.updateAsrAccessToken(value)
+    fun updateAsrAccessToken(value: String) = runtime.updateAsrAccessToken(value)
 
-    fun updateAsrResourceId(value: String) = AgentRuntime.updateAsrResourceId(value)
+    fun updateAsrResourceId(value: String) = runtime.updateAsrResourceId(value)
 
-    fun saveAsrConfig() = AgentRuntime.saveAsrConfig(getApplication())
+    fun saveAsrConfig() = runtime.saveAsrConfig(getApplication())
 
-    fun updateWakeWordPhrase(value: String) = AgentRuntime.updateWakeWordPhrase(value)
+    fun updateWakeWordPhrase(value: String) = runtime.updateWakeWordPhrase(value)
 
-    fun updateWakeWordKeywordScore(value: String) = AgentRuntime.updateWakeWordKeywordScore(value)
+    fun updateWakeWordKeywordScore(value: String) = runtime.updateWakeWordKeywordScore(value)
 
-    fun updateWakeWordKeywordThreshold(value: String) = AgentRuntime.updateWakeWordKeywordThreshold(value)
+    fun updateWakeWordKeywordThreshold(value: String) = runtime.updateWakeWordKeywordThreshold(value)
 
-    fun updateDaughterPhone(value: String) = AgentRuntime.updateDaughterPhone(value)
+    fun updateDaughterPhone(value: String) = runtime.updateDaughterPhone(value)
 
-    fun updateSonPhone(value: String) = AgentRuntime.updateSonPhone(value)
+    fun updateSonPhone(value: String) = runtime.updateSonPhone(value)
 
-    fun updateEmergencyPhone(value: String) = AgentRuntime.updateEmergencyPhone(value)
+    fun updateEmergencyPhone(value: String) = runtime.updateEmergencyPhone(value)
 
-    fun updateEmergencyMessage(value: String) = AgentRuntime.updateEmergencyMessage(value)
+    fun updateEmergencyMessage(value: String) = runtime.updateEmergencyMessage(value)
 
-    fun updateHomeAddress(value: String) = AgentRuntime.updateHomeAddress(value)
+    fun updateHomeAddress(value: String) = runtime.updateHomeAddress(value)
 
-    fun updatePresetPhraseGoHome(value: String) = AgentRuntime.updatePresetPhraseGoHome(value)
+    fun updatePresetPhraseGoHome(value: String) = runtime.updatePresetPhraseGoHome(value)
 
-    fun saveCaregiverSettings() = AgentRuntime.saveCaregiverSettings(getApplication())
+    fun saveCaregiverSettings() = runtime.saveCaregiverSettings(getApplication())
 
     fun applyWakeWordPreset(preset: WakeWordSensitivityPreset) =
-        AgentRuntime.applyWakeWordPreset(getApplication(), preset)
+        runtime.applyWakeWordPreset(getApplication(), preset)
 
-    fun saveWakeWordConfig() = AgentRuntime.saveWakeWordConfig(getApplication())
+    fun saveWakeWordConfig() = runtime.saveWakeWordConfig(getApplication())
 
-    fun setWakeWordEnabled(enabled: Boolean) = AgentRuntime.setWakeWordEnabled(getApplication(), enabled)
+    fun setWakeWordEnabled(enabled: Boolean) = runtime.setWakeWordEnabled(getApplication(), enabled)
 
     fun setWakeWordSileroVadEnabled(enabled: Boolean) =
-        AgentRuntime.setWakeWordSileroVadEnabled(getApplication(), enabled)
+        runtime.setWakeWordSileroVadEnabled(getApplication(), enabled)
 
     fun setWakeWordSecondStageEnabled(enabled: Boolean) =
-        AgentRuntime.setWakeWordSecondStageEnabled(getApplication(), enabled)
+        runtime.setWakeWordSecondStageEnabled(getApplication(), enabled)
 
-    fun testWakeWord() = AgentRuntime.testWakeWord(getApplication())
+    fun testWakeWord() = runtime.testWakeWord(getApplication())
 
-    fun startWakeWordCalibration() = AgentRuntime.startWakeWordCalibration(getApplication())
+    fun startWakeWordCalibration() = runtime.startWakeWordCalibration(getApplication())
 
-    fun recordCalibrationStep() = AgentRuntime.recordCalibrationStep(getApplication())
+    fun recordCalibrationStep() = runtime.recordCalibrationStep(getApplication())
 
-    fun updateCommand(value: String) = AgentRuntime.updateCommand(value)
+    fun updateCommand(value: String) = runtime.updateCommand(value)
 
     fun submitCommand(command: String) {
-        AgentRuntime.updateCommand(command)
-        AgentRuntime.runAgent(getApplication())
+        runtime.updateCommand(command)
+        runtime.runAgent(getApplication())
     }
 
-    fun runAgent() = AgentRuntime.runAgent(getApplication())
+    fun runAgent() = runtime.runAgent(getApplication())
 
-    fun previewPageTree() = AgentRuntime.previewPageTree()
+    fun previewPageTree() = runtime.previewPageTree()
 
     fun setVisionDebugEnabled(enabled: Boolean) =
-        AgentRuntime.setVisionDebugEnabled(getApplication(), enabled)
+        runtime.setVisionDebugEnabled(getApplication(), enabled)
 
-    fun refreshVisionDebugFrames() = AgentRuntime.refreshVisionDebugFrames()
+    fun refreshVisionDebugFrames() = runtime.refreshVisionDebugFrames()
 
-    fun clearVisionDebugFrames() = AgentRuntime.clearVisionDebugFrames()
+    fun clearVisionDebugFrames() = runtime.clearVisionDebugFrames()
 
-    fun setAssistRole(role: AssistRole) = AgentRuntime.setAssistRole(role)
+    fun setAssistRole(role: AssistRole) = runtime.setAssistRole(role)
 
-    fun setAssistDisplayName(name: String) = AgentRuntime.setAssistDisplayName(name)
+    fun setAssistDisplayName(name: String) = runtime.setAssistDisplayName(name)
 
-    fun setAssistServerHttpUrl(url: String) = AgentRuntime.setAssistServerHttpUrl(url)
+    fun setAssistServerHttpUrl(url: String) = runtime.setAssistServerHttpUrl(url)
 
-    fun setAssistServerWsUrl(url: String) = AgentRuntime.setAssistServerWsUrl(url)
+    fun setAssistServerWsUrl(url: String) = runtime.setAssistServerWsUrl(url)
 
-    fun startElderAssistSession() = AgentRuntime.startElderAssistSession()
+    fun startElderAssistSession() = runtime.startElderAssistSession()
 
-    fun joinAssistSession(pairCode: String) = AgentRuntime.joinAssistSession(pairCode)
+    fun joinAssistSession(pairCode: String) = runtime.joinAssistSession(pairCode)
 
-    fun connectAssistBinding(binding: BindingDto) = AgentRuntime.connectAssistBinding(binding)
+    fun connectAssistBinding(binding: BindingDto) = runtime.connectAssistBinding(binding)
 
-    fun deleteAssistBinding(bindingId: String) = AgentRuntime.deleteAssistBinding(bindingId)
+    fun deleteAssistBinding(bindingId: String) = runtime.deleteAssistBinding(bindingId)
 
-    fun sendAssistTap(x: Int, y: Int) = AgentRuntime.sendAssistTap(x, y)
+    fun sendAssistTap(x: Int, y: Int) = runtime.sendAssistTap(x, y)
 
     fun sendAssistSwipe(x1: Int, y1: Int, x2: Int, y2: Int) =
-        AgentRuntime.sendAssistSwipe(x1, y1, x2, y2)
+        runtime.sendAssistSwipe(x1, y1, x2, y2)
 
-    fun sendAssistAction(name: String) = AgentRuntime.sendAssistAction(name)
+    fun sendAssistAction(name: String) = runtime.sendAssistAction(name)
 
-    fun sendAssistTypeText(text: String) = AgentRuntime.sendAssistTypeText(text)
+    fun sendAssistTypeText(text: String) = runtime.sendAssistTypeText(text)
 
-    fun sendAssistCommand(text: String) = AgentRuntime.sendAssistCommand(text)
+    fun sendAssistCommand(text: String) = runtime.sendAssistCommand(text)
 
-    fun endAssistSession() = AgentRuntime.endAssistSession()
+    fun endAssistSession() = runtime.endAssistSession()
 
-    fun refreshAssistConfig() = AgentRuntime.refreshAssistConfig()
+    fun refreshAssistConfig() = runtime.refreshAssistConfig()
 
-    fun startVoiceInput() = AgentRuntime.startVoiceInput()
+    fun startVoiceInput() = runtime.startVoiceInput()
 
-    fun resumeWakeWordVoiceSession() = AgentRuntime.resumeWakeWordVoiceSession()
+    fun resumeWakeWordVoiceSession() = runtime.resumeWakeWordVoiceSession()
 
-    fun clearPermissionPrompt() = AgentRuntime.clearPermissionPrompt()
+    fun clearPermissionPrompt() = runtime.clearPermissionPrompt()
 
-    fun stopVoiceInput() = AgentRuntime.stopVoiceInput()
+    fun stopVoiceInput() = runtime.stopVoiceInput()
 
     fun onReadContactsPermissionResult(granted: Boolean) =
-        AgentRuntime.onReadContactsPermissionResult(getApplication(), granted)
+        runtime.onReadContactsPermissionResult(getApplication(), granted)
 
-    fun onVoicePermissionDenied() = AgentRuntime.appendLog("缺少录音权限，无法开始语音输入")
+    fun onVoicePermissionDenied() = runtime.appendLog("缺少录音权限，无法开始语音输入")
 
-    fun stopVoiceInputAndRunAgent() = AgentRuntime.stopVoiceInputAndRunAgent(getApplication())
+    fun stopVoiceInputAndRunAgent() = runtime.stopVoiceInputAndRunAgent(getApplication())
 
-    fun startVoiceReplyToConfirm() = AgentRuntime.startVoiceReplyToConfirm(getApplication())
+    fun startVoiceReplyToConfirm() = runtime.startVoiceReplyToConfirm(getApplication())
 
-    fun clearPendingConfirmUI() = AgentRuntime.clearPendingConfirmUI()
+    fun clearPendingConfirmUI() = runtime.clearPendingConfirmUI()
 
-    fun submitBinaryConfirm(approved: Boolean) = AgentRuntime.submitBinaryConfirm(approved)
+    fun submitBinaryConfirm(approved: Boolean) = runtime.submitBinaryConfirm(approved)
 
     fun setCloudContextConsent(granted: Boolean) =
-        AgentRuntime.setCloudContextConsent(getApplication(), granted)
+        runtime.setCloudContextConsent(getApplication(), granted)
 
     fun setVoiceBargeInEnabled(enabled: Boolean) =
-        AgentRuntime.setVoiceBargeInEnabled(getApplication(), enabled)
+        runtime.setVoiceBargeInEnabled(getApplication(), enabled)
 
-    fun selectDisambiguationOption(intentId: String) = AgentRuntime.selectDisambiguationOption(intentId)
+    fun selectDisambiguationOption(intentId: String) = runtime.selectDisambiguationOption(intentId)
 
-    fun undoLastLocalAction() = AgentRuntime.undoLastLocalAction()
+    fun undoLastLocalAction() = runtime.undoLastLocalAction()
 
-    fun dismissUndoOffer() = AgentRuntime.dismissUndoOffer()
+    fun dismissUndoOffer() = runtime.dismissUndoOffer()
 
-    fun clearInteraction() = AgentRuntime.clearInteraction()
+    fun clearInteraction() = runtime.clearInteraction()
 
-    fun cancelAgent() = AgentRuntime.cancelAgent()
+    fun cancelAgent() = runtime.cancelAgent()
 
-    fun pauseAgent() = AgentRuntime.pauseAgent()
+    fun pauseAgent() = runtime.pauseAgent()
 
-    fun resumeAgent() = AgentRuntime.resumeAgent()
+    fun resumeAgent() = runtime.resumeAgent()
 }

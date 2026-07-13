@@ -18,8 +18,8 @@ import kotlin.coroutines.resumeWithException
 
 class DeepSeekClient(
     private val httpClient: OkHttpClient = sharedClient,
-) {
-    suspend fun beginTask(
+) : AgentLlmClient {
+    override suspend fun beginTask(
         apiKey: String,
         conversation: AgentConversationSession,
         userCommand: String,
@@ -27,11 +27,11 @@ class DeepSeekClient(
         pageDiff: String,
         keyMemories: String,
         minimalPageContext: String,
-        pageContextMode: PageContextMode = PageContextMode.FULL,
-        toolsPrompt: String? = null,
-        loopContext: String = "",
-        screenshotBase64: String? = null,
-        visionMode: Boolean = false,
+        pageContextMode: PageContextMode,
+        toolsPrompt: String?,
+        loopContext: String,
+        screenshotBase64: String?,
+        visionMode: Boolean,
     ): JSONObject {
         conversation.seedSystem(buildSystemPrompt(keyMemories, toolsPrompt, visionMode))
         conversation.addUser(
@@ -55,18 +55,18 @@ class DeepSeekClient(
         }
     }
 
-    suspend fun continueAfterStep(
+    override suspend fun continueAfterStep(
         apiKey: String,
         conversation: AgentConversationSession,
         stepFeedback: String,
         pageContext: String,
         pageDiff: String,
-        keyMemories: String = "",
-        minimalPageContext: String = "",
-        pageContextMode: PageContextMode = PageContextMode.FULL,
-        loopContext: String = "",
-        screenshotBase64: String? = null,
-        visionMode: Boolean = false,
+        keyMemories: String,
+        minimalPageContext: String,
+        pageContextMode: PageContextMode,
+        loopContext: String,
+        screenshotBase64: String?,
+        visionMode: Boolean,
     ): JSONObject = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) throw IllegalArgumentException("请先填写 LLM API Key")
 
@@ -90,7 +90,7 @@ class DeepSeekClient(
         parseJsonObject(content)
     }
 
-    suspend fun extractKeyMemory(
+    override suspend fun extractKeyMemory(
         apiKey: String,
         sessionSummary: String,
     ): String = withContext(Dispatchers.IO) {
@@ -118,11 +118,11 @@ class DeepSeekClient(
         }
     }
 
-    fun ensureSystemSeeded(
+    override fun ensureSystemSeeded(
         conversation: AgentConversationSession,
         keyMemories: String,
-        visionMode: Boolean = false,
-        toolsPrompt: String? = null,
+        visionMode: Boolean,
+        toolsPrompt: String?,
     ) {
         val prompt = buildSystemPrompt(keyMemories, toolsPrompt, visionMode)
         if (!conversation.hasSystem()) {
@@ -134,7 +134,7 @@ class DeepSeekClient(
         }
     }
 
-    suspend fun classifyPresetIntent(
+    override suspend fun classifyPresetIntent(
         apiKey: String,
         utterance: String,
     ): Pair<String, Double>? = withContext(Dispatchers.IO) {
@@ -175,7 +175,7 @@ class DeepSeekClient(
         intent to confidence
     }
 
-    suspend fun classifySystemIntent(
+    override suspend fun classifySystemIntent(
         apiKey: String,
         utterance: String,
     ): SystemIntentAiResolver.Classification? = withContext(Dispatchers.IO) {

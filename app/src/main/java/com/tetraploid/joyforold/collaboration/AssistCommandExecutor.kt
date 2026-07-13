@@ -4,7 +4,6 @@ import android.app.Application
 import com.tetraploid.joyforold.accessibility.AccessibilityActionDispatcher
 import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
 import com.tetraploid.joyforold.agent.AgentAction
-import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.agent.AgentToolRegistry
 import com.tetraploid.joyforold.assist.protocol.AssistControlMessage
 import kotlinx.coroutines.CoroutineScope
@@ -12,6 +11,7 @@ import kotlinx.coroutines.launch
 
 class AssistCommandExecutor(
     private val scope: CoroutineScope,
+    private val onRemoteCommand: (Application, String) -> Unit = { _, _ -> },
 ) {
     suspend fun execute(application: Application, message: AssistControlMessage): AssistControlMessage {
         val service = JoyAccessibilityService.instance
@@ -49,7 +49,7 @@ class AssistCommandExecutor(
             }
             AssistControlMessage.TYPE_COMMAND -> {
                 scope.launch {
-                    AgentRuntime.submitRemoteAssistCommand(application, message.text)
+                    onRemoteCommand(application, message.text)
                 }
                 AssistControlMessage.agentStatus("running", "正在执行：${message.text}")
             }

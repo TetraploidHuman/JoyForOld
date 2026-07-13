@@ -17,6 +17,7 @@ import android.util.Log
 import android.view.inputmethod.InputMethodManager
 import com.tetraploid.joyforold.app.InstalledAppResolver
 import com.tetraploid.joyforold.agent.AgentContextLimits
+import com.tetraploid.joyforold.di.agentRuntime
 import com.tetraploid.joyforold.agent.ActionExecutionResult
 import com.tetraploid.joyforold.agent.AgentAction
 import com.tetraploid.joyforold.agent.AgentToolRegistry
@@ -43,7 +44,7 @@ class JoyAccessibilityService : AccessibilityService() {
   override fun onServiceConnected() {
     super.onServiceConnected()
     instance = this
-    com.tetraploid.joyforold.agent.AgentRuntime.refreshAccessibilityState()
+    agentRuntime().refreshAccessibilityState()
   }
 
   override fun onDestroy() {
@@ -51,7 +52,7 @@ class JoyAccessibilityService : AccessibilityService() {
       instance = null
       lastExternalRoot?.recycle()
       lastExternalRoot = null
-      com.tetraploid.joyforold.agent.AgentRuntime.refreshAccessibilityState()
+      agentRuntime().refreshAccessibilityState()
     }
     super.onDestroy()
   }

@@ -26,7 +26,7 @@ object SystemIntentAiResolver {
     suspend fun resolve(
         command: String,
         apiKey: String,
-        client: DeepSeekClient,
+        client: AgentLlmClient,
     ): ResolvedRoute? {
         val trimmed = command.trim()
         if (trimmed.isBlank() || apiKey.isBlank()) return null
@@ -52,7 +52,7 @@ object SystemIntentAiResolver {
     suspend fun resolveWithConfidence(
         command: String,
         apiKey: String,
-        client: DeepSeekClient,
+        client: AgentLlmClient,
     ): Pair<List<AgentAction>, Double>? {
         val resolved = resolve(command, apiKey, client) ?: return null
         return resolved.steps to resolved.confidence

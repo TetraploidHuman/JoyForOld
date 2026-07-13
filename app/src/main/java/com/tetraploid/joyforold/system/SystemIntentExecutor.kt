@@ -200,7 +200,7 @@ object SystemIntentExecutor {
     }
 
     private fun askFamilyForHelp(context: Context, targetText: String?): ActionExecutionResult {
-        com.tetraploid.joyforold.agent.AgentRuntime.startElderAssistSession()
+        com.tetraploid.joyforold.di.agentRuntime().startElderAssistSession()
         return ActionExecutionResult(
             success = true,
             summary = "已发起远程协助，请到「协作」页查看协助码并告诉家人",

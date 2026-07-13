@@ -29,7 +29,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
+import org.koin.androidx.compose.koinViewModel
 import com.tetraploid.joyforold.agent.RuntimePermissionKind
 import com.tetraploid.joyforold.assist.protocol.AssistRole
 import com.tetraploid.joyforold.collaboration.AssistSessionPhase
@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun MainPivotScreen(
-    viewModel: DemoViewModel = viewModel(),
+    viewModel: DemoViewModel = koinViewModel(),
     darkTheme: Boolean = false,
     onDarkThemeChange: (Boolean) -> Unit = {},
 ) {

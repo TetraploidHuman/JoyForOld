@@ -23,3 +23,7 @@ tools/nlu/__pycache__/
 .tmp_sherpa/
 .tmp_kws.tar.bz2
 .kotlin/
+**/build/
+assist-server/data/
+trueing/node_modules/
+uitreetest-build.log

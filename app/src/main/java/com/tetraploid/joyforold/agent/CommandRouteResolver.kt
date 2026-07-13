@@ -27,7 +27,7 @@ object CommandRouteResolver {
     suspend fun resolve(
         command: String,
         apiKey: String,
-        deepSeekClient: DeepSeekClient,
+        llmClient: AgentLlmClient,
         presetCommands: List<PresetCommand> = emptyList(),
         appContext: Context? = null,
     ): Route? {
@@ -61,7 +61,7 @@ object CommandRouteResolver {
         }
 
         if (env.hasNetwork) {
-            SystemIntentAiResolver.resolve(trimmed, apiKey, deepSeekClient)?.let { resolved ->
+            SystemIntentAiResolver.resolve(trimmed, apiKey, llmClient)?.let { resolved ->
                 candidates += Route(
                     steps = resolved.steps,
                     source = "system_ai",
@@ -84,7 +84,7 @@ object CommandRouteResolver {
         }
 
         if (env.hasNetwork) {
-            PresetIntentResolver.resolveWithConfidence(trimmed, apiKey, deepSeekClient)?.let { (steps, confidence) ->
+            PresetIntentResolver.resolveWithConfidence(trimmed, apiKey, llmClient)?.let { (steps, confidence) ->
                 candidates += Route(steps, source = "preset_ai", confidence = confidence)
             }
         }
