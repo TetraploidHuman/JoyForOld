@@ -1,7 +1,7 @@
 package com.tetraploid.joyforold.agent
 
 import android.content.Context
-import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
+import com.tetraploid.joyforold.accessibility.AccessibilityGateway
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -89,7 +89,7 @@ internal class PendingStateMachine(
         command: String,
         clarifyMessage: String,
         steps: List<AgentAction>,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
     ): AgentRunResult {
         val state = PendingAgentState(
             originalCommand = command,
@@ -106,7 +106,7 @@ internal class PendingStateMachine(
     fun saveIntentDisambiguationPending(
         command: String,
         offer: DisambiguationOffer,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
     ): AgentRunResult {
         val prompt = "您说的是「${offer.command}」吗？请点选或说出要执行的操作。"
         save(
@@ -126,7 +126,7 @@ internal class PendingStateMachine(
         command: String,
         previewMessage: String,
         steps: List<AgentAction>,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
     ): AgentRunResult {
         save(
             PendingAgentState(
@@ -143,7 +143,7 @@ internal class PendingStateMachine(
 
     fun promptTaskAbandon(
         newCommand: String,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
     ): AgentRunResult {
         val existing = pendingState ?: return AgentRunResult(false, "没有待处理任务", emptyList())
         val prompt = "您有未完成的任务：${existing.aiPrompt.take(80)}。要放弃并开始新指令吗？请说「放弃」或「继续」。"
@@ -169,7 +169,7 @@ internal class PendingStateMachine(
         pending: PendingAgentState,
         command: String,
         apiKey: String,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         runContext: AgentRunContext,
         onProgress: ((Int, String) -> Unit)?,
         executor: PendingExecutor,
@@ -192,7 +192,7 @@ internal class PendingStateMachine(
     suspend fun handleTaskAbandonReply(
         command: String,
         apiKey: String,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         runContext: AgentRunContext,
         onProgress: ((Int, String) -> Unit)?,
         executor: PendingExecutor,
@@ -228,7 +228,7 @@ internal class PendingStateMachine(
     private suspend fun handleRouteClarifyReply(
         pending: PendingAgentState,
         command: String,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         executor: PendingExecutor,
         runContext: AgentRunContext,
     ): AgentRunResult = when (VoiceConfirmPhraseMatcher.classify(command)) {
@@ -238,7 +238,13 @@ internal class PendingStateMachine(
             if (steps.isEmpty()) {
                 AgentRunResult(false, "没有可执行的预设步骤", emptyList())
             } else {
-                executor.executeLocalSteps(service, service, steps, pending.originalCommand, runContext)
+                executor.executeLocalSteps(
+                    service.context(),
+                    service,
+                    steps,
+                    pending.originalCommand,
+                    runContext,
+                )
             }
         }
         VoiceConfirmPhraseMatcher.Intent.CANCEL -> {
@@ -252,7 +258,7 @@ internal class PendingStateMachine(
     private suspend fun handleLocalPreviewReply(
         pending: PendingAgentState,
         command: String,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         executor: PendingExecutor,
         runContext: AgentRunContext,
     ): AgentRunResult = when (VoiceConfirmPhraseMatcher.classify(command)) {
@@ -262,7 +268,13 @@ internal class PendingStateMachine(
             if (steps.isEmpty()) {
                 AgentRunResult(false, "没有可执行的步骤", emptyList())
             } else {
-                executor.executeLocalSteps(service, service, steps, pending.originalCommand, runContext)
+                executor.executeLocalSteps(
+                    service.context(),
+                    service,
+                    steps,
+                    pending.originalCommand,
+                    runContext,
+                )
             }
         }
         VoiceConfirmPhraseMatcher.Intent.CANCEL -> {
@@ -277,7 +289,7 @@ internal class PendingStateMachine(
         pending: PendingAgentState,
         command: String,
         apiKey: String,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         runContext: AgentRunContext,
         onProgress: ((Int, String) -> Unit)?,
         executor: PendingExecutor,
@@ -294,7 +306,7 @@ internal class PendingStateMachine(
             command = pending.originalCommand,
             intentId = matched.intentId,
             apiKey = apiKey,
-            appContext = service,
+            appContext = service.context(),
             runContext = runContext,
             onProgress = onProgress,
         )
@@ -347,14 +359,14 @@ internal interface PendingExecutor {
         pending: PendingAgentState,
         command: String,
         apiKey: String,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         runContext: AgentRunContext,
         onProgress: ((Int, String) -> Unit)?,
     ): AgentRunResult
 
     suspend fun executeLocalSteps(
         context: Context,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         steps: List<AgentAction>,
         originalCommand: String,
         runContext: AgentRunContext,
@@ -363,7 +375,7 @@ internal interface PendingExecutor {
     suspend fun runNewCommand(
         command: String,
         apiKey: String,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         runContext: AgentRunContext,
         onProgress: ((Int, String) -> Unit)?,
     ): AgentRunResult

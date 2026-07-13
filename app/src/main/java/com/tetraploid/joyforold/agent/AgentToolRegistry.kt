@@ -1,7 +1,7 @@
 package com.tetraploid.joyforold.agent
 
 import com.tetraploid.joyforold.accessibility.AccessibilityActionDispatcher
-import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
+import com.tetraploid.joyforold.accessibility.AccessibilityGateway
 import com.tetraploid.joyforold.system.SystemIntentExecutor
 
 object AgentToolRegistry {
@@ -74,7 +74,7 @@ object AgentToolRegistry {
 
     suspend fun execute(
         context: android.content.Context,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         action: AgentAction,
     ): ActionExecutionResult {
         executeSystemIntent(context, action)?.let { return it }

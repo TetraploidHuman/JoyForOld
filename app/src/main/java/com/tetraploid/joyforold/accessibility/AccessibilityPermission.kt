@@ -18,7 +18,7 @@ object AccessibilityPermission {
     }
 
     /** 无障碍服务进程是否已绑定到当前应用 */
-    fun isServiceConnected(): Boolean = JoyAccessibilityService.instance != null
+    fun isServiceConnected(): Boolean = AccessibilityGateways.isConnected
 
     /**
      * 兼容旧调用：设置已开或实例已连接均视为可用。

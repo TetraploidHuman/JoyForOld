@@ -4,6 +4,8 @@ import android.app.Application
 import com.tetraploid.joyforold.BuildConfig
 import com.tetraploid.joyforold.agent.RuntimePermissionKind
 import com.tetraploid.joyforold.agent.RuntimePermissionPrompt
+import com.tetraploid.joyforold.agent.updatePermissions
+import com.tetraploid.joyforold.agent.updateWakeWord
 import com.tetraploid.joyforold.speech.AsrSpeakerProfileStore
 import com.tetraploid.joyforold.wakeword.SherpaOnnxModelManager
 import com.tetraploid.joyforold.wakeword.SileroVadModelManager
@@ -51,12 +53,12 @@ internal class WakeWordController(
         val enabled = state.read().wakeWordEnabled
         if (!enabled) {
             WakeWordService.stop(app)
-            state.update { it.copy(wakeWordRunning = false) }
+            state.update { it.updateWakeWord { w -> w.copy(running = false) } }
             return
         }
         if (!hasRecordAudioPermission(app)) {
             WakeWordService.stop(app)
-            state.update { it.copy(wakeWordRunning = false, wakeWordEnabled = false) }
+            state.update { it.updateWakeWord { w -> w.copy(running = false, enabled = false) } }
             wakeWordStore?.saveEnabled(false)
             appendLog("本地唤醒未启动：缺少麦克风权限")
             return
@@ -67,14 +69,14 @@ internal class WakeWordController(
         } else if (!WakeWordService.isRunning) {
             WakeWordService.start(app)
         }
-        state.update { it.copy(wakeWordRunning = WakeWordService.isRunning) }
+        state.update { it.updateWakeWord { w -> w.copy(running = WakeWordService.isRunning) } }
     }
 
     fun pauseForMicSharing() {
         val app = applicationProvider() ?: return
         if (!state.read().wakeWordEnabled) return
         WakeWordService.stop(app)
-        state.update { it.copy(wakeWordRunning = false) }
+        state.update { it.updateWakeWord { w -> w.copy(running = false) } }
     }
 
     suspend fun awaitMicReleased() {
@@ -102,7 +104,7 @@ internal class WakeWordController(
             return
         }
         wakeWordStore?.saveEnabled(enabled)
-        state.update { it.copy(wakeWordEnabled = enabled, wakeWordRunning = enabled) }
+        state.update { it.updateWakeWord { w -> w.copy(enabled = enabled, running = enabled) } }
         syncService()
         appendLog(if (enabled) "本地语音唤醒已开启" else "本地语音唤醒已关闭")
     }
@@ -116,12 +118,14 @@ internal class WakeWordController(
         wakeWordStore?.saveConfirmHitCount(current.wakeWordConfirmHits)
         wakeWordStore?.savePreset(current.wakeWordPreset)
         state.update {
-            it.copy(
-                wakeWordPhrase = phrase,
-                wakeWordKeywordScore = current.wakeWordKeywordScore,
-                wakeWordKeywordThreshold = current.wakeWordKeywordThreshold,
-                wakeWordConfirmHits = current.wakeWordConfirmHits,
-            )
+            it.updateWakeWord { w ->
+                w.copy(
+                    phrase = phrase,
+                    keywordScore = current.wakeWordKeywordScore,
+                    keywordThreshold = current.wakeWordKeywordThreshold,
+                    confirmHits = current.wakeWordConfirmHits,
+                )
+            }
         }
         syncService(forceRestart = state.read().wakeWordEnabled)
         appendLog(
@@ -134,12 +138,14 @@ internal class WakeWordController(
     fun applyPreset(preset: WakeWordSensitivityPreset) {
         wakeWordStore?.applyPreset(preset)
         state.update {
-            it.copy(
-                wakeWordPreset = preset,
-                wakeWordKeywordScore = preset.keywordScore,
-                wakeWordKeywordThreshold = preset.keywordThreshold,
-                wakeWordConfirmHits = preset.confirmHits,
-            )
+            it.updateWakeWord { w ->
+                w.copy(
+                    preset = preset,
+                    keywordScore = preset.keywordScore,
+                    keywordThreshold = preset.keywordThreshold,
+                    confirmHits = preset.confirmHits,
+                )
+            }
         }
         syncService(forceRestart = state.read().wakeWordEnabled)
         appendLog(
@@ -150,14 +156,14 @@ internal class WakeWordController(
 
     fun setSileroVadEnabled(enabled: Boolean) {
         wakeWordStore?.saveSileroVadEnabled(enabled)
-        state.update { it.copy(wakeWordSileroVadEnabled = enabled) }
+        state.update { it.updateWakeWord { w -> w.copy(sileroVadEnabled = enabled) } }
         syncService(forceRestart = state.read().wakeWordEnabled)
         appendLog(if (enabled) "Silero VAD 已开启" else "Silero VAD 已关闭（回退 RMS）")
     }
 
     fun setSecondStageEnabled(enabled: Boolean) {
         wakeWordStore?.saveSecondStageEnabled(enabled)
-        state.update { it.copy(wakeWordSecondStageEnabled = enabled) }
+        state.update { it.updateWakeWord { w -> w.copy(secondStageEnabled = enabled) } }
         syncService(forceRestart = state.read().wakeWordEnabled)
         appendLog(if (enabled) "二阶段唤醒已开启" else "二阶段唤醒已关闭")
     }
@@ -176,14 +182,16 @@ internal class WakeWordController(
         val phrase = state.read().wakeWordPhrase.trim().ifBlank { WakeWordConfigStore.DEFAULT_PHRASE }
         if (!state.read().wakeWordEnabled) {
             wakeWordStore?.saveEnabled(true)
-            state.update { it.copy(wakeWordEnabled = true, wakeWordRunning = true) }
+            state.update { it.updateWakeWord { w -> w.copy(enabled = true, running = true) } }
         }
         state.update {
-            it.copy(
-                lastWakeWordAtMs = null,
-                lastWakeWordKeyword = null,
-                wakeWordTestHint = "请说唤醒词：$phrase",
-            )
+            it.updateWakeWord { w ->
+                w.copy(
+                    lastDetectedAtMs = null,
+                    lastKeyword = null,
+                    testHint = "请说唤醒词：$phrase",
+                )
+            }
         }
         syncService()
         appendLog("开始测试唤醒词：请说「$phrase」")
@@ -202,11 +210,13 @@ internal class WakeWordController(
         pauseForMicSharing()
         calibrationSession = WakeWordCalibrationSession(application, phrase, score, threshold)
         state.update {
-            it.copy(
-                wakeWordCalibrationRunning = true,
-                wakeWordCalibrationStep = 0,
-                wakeWordCalibrationHint = "标定步骤 1/4：请清晰说出「$phrase」后点「录制样本」",
-            )
+            it.updateWakeWord { w ->
+                w.copy(
+                    calibrationRunning = true,
+                    calibrationStep = 0,
+                    calibrationHint = "标定步骤 1/4：请清晰说出「$phrase」后点「录制样本」",
+                )
+            }
         }
         calibrationJob = mainScope.launch(Dispatchers.IO) {
             val ready = calibrationSession?.prepare() == true
@@ -236,14 +246,16 @@ internal class WakeWordController(
                     }
                     val next = step + 1
                     state.update {
-                        it.copy(
-                            wakeWordCalibrationStep = next,
-                            wakeWordCalibrationHint = if (next < WakeWordCalibrationSession.POSITIVE_TARGET) {
-                                "标定步骤 ${next + 1}/4：再说一次「$phrase」"
-                            } else {
-                                "标定步骤 4/4：保持安静 5 秒，点「录制环境音」"
-                            },
-                        )
+                        it.updateWakeWord { w ->
+                            w.copy(
+                                calibrationStep = next,
+                                calibrationHint = if (next < WakeWordCalibrationSession.POSITIVE_TARGET) {
+                                    "标定步骤 ${next + 1}/4：再说一次「$phrase」"
+                                } else {
+                                    "标定步骤 4/4：保持安静 5 秒，点「录制环境音」"
+                                },
+                            )
+                        }
                     }
                     appendLog("已保存唤醒样本 $next/${WakeWordCalibrationSession.POSITIVE_TARGET}")
                 }
@@ -265,16 +277,18 @@ internal class WakeWordController(
                     wakeWordStore?.saveCalibrated(true)
                     speakerProfileProvider()?.recordCalibrationPhrase(phrase)
                     state.update {
-                        it.copy(
-                            wakeWordKeywordThreshold = result.recommendedThreshold,
-                            wakeWordKeywordScore = result.recommendedScore,
-                            wakeWordCalibrated = true,
-                            wakeWordCalibrationStep = WakeWordCalibrationSession.POSITIVE_TARGET + 1,
-                            wakeWordCalibrationHint =
-                                "标定完成：threshold=${result.recommendedThreshold}，" +
-                                    "正样本命中率=${"%.0f".format(result.positiveHitRate * 100)}%，" +
-                                    "环境误触=${"%.0f".format(result.negativeHitRate * 100)}%",
-                        )
+                        it.updateWakeWord { w ->
+                            w.copy(
+                                keywordThreshold = result.recommendedThreshold,
+                                keywordScore = result.recommendedScore,
+                                calibrated = true,
+                                calibrationStep = WakeWordCalibrationSession.POSITIVE_TARGET + 1,
+                                calibrationHint =
+                                    "标定完成：threshold=${result.recommendedThreshold}，" +
+                                        "正样本命中率=${"%.0f".format(result.positiveHitRate * 100)}%，" +
+                                        "环境误触=${"%.0f".format(result.negativeHitRate * 100)}%",
+                            )
+                        }
                     }
                     appendLog(
                         "唤醒标定完成：threshold=${result.recommendedThreshold}，" +
@@ -294,15 +308,17 @@ internal class WakeWordController(
         calibrationSession = null
         if (resetOnly) {
             state.update {
-                it.copy(
-                    wakeWordCalibrationRunning = false,
-                    wakeWordCalibrationStep = 0,
-                    wakeWordCalibrationHint = null,
-                )
+                it.updateWakeWord { w ->
+                    w.copy(
+                        calibrationRunning = false,
+                        calibrationStep = 0,
+                        calibrationHint = null,
+                    )
+                }
             }
             ensureRunning()
         } else {
-            state.update { it.copy(wakeWordCalibrationRunning = false) }
+            state.update { it.updateWakeWord { w -> w.copy(calibrationRunning = false) } }
         }
     }
 
@@ -330,31 +346,33 @@ internal class WakeWordController(
     }
 
     fun onRecordAudioGranted(application: Application, granted: Boolean) {
-        state.update { it.copy(recordAudioGranted = granted) }
+        state.update { it.updatePermissions { p -> p.copy(recordAudioGranted = granted) } }
         if (granted) {
             appendLog("麦克风权限已授予")
             syncService(forceRestart = state.read().wakeWordEnabled)
         } else {
             appendLog("麦克风权限被拒绝，语音识别与本地唤醒不可用")
             WakeWordService.stop(application)
-            state.update { it.copy(wakeWordRunning = false) }
+            state.update { it.updateWakeWord { w -> w.copy(running = false) } }
         }
     }
 
     fun seedStateFromStore(store: WakeWordConfigStore) {
         state.update {
-            it.copy(
-                wakeWordEnabled = store.isEnabled(),
-                wakeWordPhrase = store.getPhrase(),
-                wakeWordRunning = store.isEnabled() && WakeWordService.isRunning,
-                wakeWordKeywordScore = store.getKeywordScore(),
-                wakeWordKeywordThreshold = store.getKeywordThreshold(),
-                wakeWordConfirmHits = store.getConfirmHitCount(),
-                wakeWordPreset = store.getPreset(),
-                wakeWordCalibrated = store.isCalibrated(),
-                wakeWordSileroVadEnabled = store.isSileroVadEnabled(),
-                wakeWordSecondStageEnabled = store.isSecondStageEnabled(),
-            )
+            it.updateWakeWord { w ->
+                w.copy(
+                    enabled = store.isEnabled(),
+                    phrase = store.getPhrase(),
+                    running = store.isEnabled() && WakeWordService.isRunning,
+                    keywordScore = store.getKeywordScore(),
+                    keywordThreshold = store.getKeywordThreshold(),
+                    confirmHits = store.getConfirmHitCount(),
+                    preset = store.getPreset(),
+                    calibrated = store.isCalibrated(),
+                    sileroVadEnabled = store.isSileroVadEnabled(),
+                    secondStageEnabled = store.isSecondStageEnabled(),
+                )
+            }
         }
     }
 
@@ -390,14 +408,16 @@ internal class WakeWordController(
         store.markRecallMigrationDone()
         if (!migrated) return
         state.update {
-            it.copy(
-                wakeWordKeywordScore = store.getKeywordScore(),
-                wakeWordKeywordThreshold = store.getKeywordThreshold(),
-                wakeWordConfirmHits = store.getConfirmHitCount(),
-                wakeWordPreset = store.getPreset(),
-                wakeWordSileroVadEnabled = store.isSileroVadEnabled(),
-                wakeWordSecondStageEnabled = store.isSecondStageEnabled(),
-            )
+            it.updateWakeWord { w ->
+                w.copy(
+                    keywordScore = store.getKeywordScore(),
+                    keywordThreshold = store.getKeywordThreshold(),
+                    confirmHits = store.getConfirmHitCount(),
+                    preset = store.getPreset(),
+                    sileroVadEnabled = store.isSileroVadEnabled(),
+                    secondStageEnabled = store.isSecondStageEnabled(),
+                )
+            }
         }
         appendLog("已自动优化唤醒灵敏度配置（提升召回率）")
     }
@@ -413,13 +433,15 @@ internal class WakeWordController(
             store.applyPreset(WakeWordSensitivityPreset.BALANCED)
             store.saveSecondStageEnabled(true)
             state.update {
-                it.copy(
-                    wakeWordKeywordScore = store.getKeywordScore(),
-                    wakeWordKeywordThreshold = store.getKeywordThreshold(),
-                    wakeWordConfirmHits = store.getConfirmHitCount(),
-                    wakeWordPreset = store.getPreset(),
-                    wakeWordSecondStageEnabled = store.isSecondStageEnabled(),
-                )
+                it.updateWakeWord { w ->
+                    w.copy(
+                        keywordScore = store.getKeywordScore(),
+                        keywordThreshold = store.getKeywordThreshold(),
+                        confirmHits = store.getConfirmHitCount(),
+                        preset = store.getPreset(),
+                        secondStageEnabled = store.isSecondStageEnabled(),
+                    )
+                }
             }
             appendLog("已收紧唤醒灵敏度，降低误触（二次确认 + 二阶段复检）")
         }
@@ -437,14 +459,16 @@ internal class WakeWordController(
         store.saveSecondStageEnabled(true)
         store.saveSileroVadEnabled(true)
         state.update {
-            it.copy(
-                wakeWordKeywordScore = store.getKeywordScore(),
-                wakeWordKeywordThreshold = store.getKeywordThreshold(),
-                wakeWordConfirmHits = store.getConfirmHitCount(),
-                wakeWordPreset = store.getPreset(),
-                wakeWordSileroVadEnabled = store.isSileroVadEnabled(),
-                wakeWordSecondStageEnabled = store.isSecondStageEnabled(),
-            )
+            it.updateWakeWord { w ->
+                w.copy(
+                    keywordScore = store.getKeywordScore(),
+                    keywordThreshold = store.getKeywordThreshold(),
+                    confirmHits = store.getConfirmHitCount(),
+                    preset = store.getPreset(),
+                    sileroVadEnabled = store.isSileroVadEnabled(),
+                    secondStageEnabled = store.isSecondStageEnabled(),
+                )
+            }
         }
         store.markWakeQualityMigrationDone()
         appendLog("已优化唤醒：启用语音活动门控 + 二次确认，降低环境噪音误触")

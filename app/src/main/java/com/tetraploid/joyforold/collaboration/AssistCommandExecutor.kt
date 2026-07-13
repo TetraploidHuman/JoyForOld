@@ -2,7 +2,7 @@ package com.tetraploid.joyforold.collaboration
 
 import android.app.Application
 import com.tetraploid.joyforold.accessibility.AccessibilityActionDispatcher
-import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
+import com.tetraploid.joyforold.accessibility.AccessibilityGateways
 import com.tetraploid.joyforold.agent.AgentAction
 import com.tetraploid.joyforold.agent.AgentToolRegistry
 import com.tetraploid.joyforold.assist.protocol.AssistControlMessage
@@ -14,7 +14,7 @@ class AssistCommandExecutor(
     private val onRemoteCommand: (Application, String) -> Unit = { _, _ -> },
 ) {
     suspend fun execute(application: Application, message: AssistControlMessage): AssistControlMessage {
-        val service = JoyAccessibilityService.instance
+        val service = AccessibilityGateways.current
             ?: return AssistControlMessage.actionResult(
                 action = message.type,
                 success = false,

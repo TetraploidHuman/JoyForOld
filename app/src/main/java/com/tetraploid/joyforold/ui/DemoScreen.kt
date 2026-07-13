@@ -50,6 +50,7 @@ import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
+@Deprecated("Legacy demo UI; MainPivotScreen is the production shell.")
 fun DemoScreen(viewModel: DemoViewModel = koinViewModel()) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current

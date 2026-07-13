@@ -1,7 +1,7 @@
 package com.tetraploid.joyforold.agent
 
 import android.util.Log
-import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
+import com.tetraploid.joyforold.accessibility.AccessibilityGateway
 import com.tetraploid.joyforold.privacy.SafeLog
 
 /**
@@ -15,7 +15,7 @@ object AgentPageDebugLog {
     fun logObservation(
         stepNo: Int,
         phase: String,
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         snapshot: StructuredPageSnapshot?,
         pageDiff: String = "",
         treeSnippet: String? = null,

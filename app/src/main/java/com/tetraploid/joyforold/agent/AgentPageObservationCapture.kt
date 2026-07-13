@@ -1,6 +1,6 @@
 package com.tetraploid.joyforold.agent
 
-import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
+import com.tetraploid.joyforold.accessibility.AccessibilityGateway
 import com.tetraploid.joyforold.overlay.VisionOverlayGuard
 import com.tetraploid.joyforold.overlay.VisionOverlaySuppressors
 import com.tetraploid.joyforold.privacy.PageContextRedactor
@@ -22,7 +22,7 @@ class AgentPageObservationCapture(
     private var previousVisionFingerprint: String? = null
 
     suspend fun capture(
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         session: AgentConversationSession,
         stepNo: Int,
         pageContextNeed: IntentCapabilityMatrix.PageContextNeed,
@@ -157,7 +157,7 @@ class AgentPageObservationCapture(
     }
 
     private suspend fun captureWithoutA11yTree(
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         session: AgentConversationSession,
         stepNo: Int,
         pageContextNeed: IntentCapabilityMatrix.PageContextNeed,
@@ -208,7 +208,7 @@ class AgentPageObservationCapture(
         return payload
     }
 
-    private suspend fun captureVisionScreenshot(service: JoyAccessibilityService): String? =
+    private suspend fun captureVisionScreenshot(service: AccessibilityGateway): String? =
         VisionOverlayGuard.withHiddenForCapture {
             service.captureScreenshotBase64(forceFresh = true)
         }

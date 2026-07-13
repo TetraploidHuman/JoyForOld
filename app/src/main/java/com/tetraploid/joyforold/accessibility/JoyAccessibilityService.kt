@@ -17,7 +17,8 @@ import android.util.Log
 import android.view.inputmethod.InputMethodManager
 import com.tetraploid.joyforold.app.InstalledAppResolver
 import com.tetraploid.joyforold.agent.AgentContextLimits
-import com.tetraploid.joyforold.di.agentRuntime
+import com.tetraploid.joyforold.accessibility.AccessibilityGateway
+import com.tetraploid.joyforold.accessibility.AccessibilityGateways
 import com.tetraploid.joyforold.agent.ActionExecutionResult
 import com.tetraploid.joyforold.agent.AgentAction
 import com.tetraploid.joyforold.agent.AgentToolRegistry
@@ -38,21 +39,25 @@ import kotlin.coroutines.suspendCoroutine
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-class JoyAccessibilityService : AccessibilityService() {
+class JoyAccessibilityService : AccessibilityService(), AccessibilityGateway {
+  override fun context(): Context = getApplicationContext()
+
   private var lastTapNormalized: Pair<Int, Int>? = null
 
   override fun onServiceConnected() {
     super.onServiceConnected()
     instance = this
-    agentRuntime().refreshAccessibilityState()
+    AccessibilityGateways.bind(this)
+    com.tetraploid.joyforold.di.agentRuntime().refreshAccessibilityState()
   }
 
   override fun onDestroy() {
     if (instance === this) {
       instance = null
+      AccessibilityGateways.unbind(this)
       lastExternalRoot?.recycle()
       lastExternalRoot = null
-      agentRuntime().refreshAccessibilityState()
+      com.tetraploid.joyforold.di.agentRuntime().refreshAccessibilityState()
     }
     super.onDestroy()
   }
@@ -82,7 +87,10 @@ class JoyAccessibilityService : AccessibilityService() {
 
   fun isReady(): Boolean = instance != null
 
-  fun captureStructuredSnapshots(): List<StructuredPageSnapshot> {
+  override fun performGlobalHome(): Boolean =
+      performGlobalAction(GLOBAL_ACTION_HOME)
+
+  override fun captureStructuredSnapshots(): List<StructuredPageSnapshot> {
     val roots = collectExternalRoots()
     if (roots.isEmpty()) return emptyList()
     return try {
@@ -93,7 +101,7 @@ class JoyAccessibilityService : AccessibilityService() {
     }
   }
 
-  fun snapshotCompactForAgent(): String {
+  override fun snapshotCompactForAgent(): String {
     val snapshots = captureStructuredSnapshots()
     if (snapshots.isEmpty()) {
       return "无法读取页面，请切换到目标应用。"
@@ -101,7 +109,7 @@ class JoyAccessibilityService : AccessibilityService() {
     return snapshots.joinToString("\n\n") { it.toCompactSummary() }
   }
 
-  fun mergeSnapshots(snapshots: List<StructuredPageSnapshot>): StructuredPageSnapshot? {
+  override fun mergeSnapshots(snapshots: List<StructuredPageSnapshot>): StructuredPageSnapshot? {
     val usable = snapshots.filter { ExternalWindowFilter.isUsableSnapshot(it) }
     if (usable.isEmpty()) return null
     if (usable.size == 1) return usable.first()
@@ -116,7 +124,7 @@ class JoyAccessibilityService : AccessibilityService() {
   }
 
   /** merge 失败时回退到单窗口最佳 root（与 read_tree 同源），避免 open_app 后误判无页面。 */
-  fun captureBestStructuredSnapshot(): StructuredPageSnapshot? {
+  override fun captureBestStructuredSnapshot(): StructuredPageSnapshot? {
     mergeSnapshots(captureStructuredSnapshots())?.let { return it }
     val root = getTargetRoot() ?: return null
     return try {
@@ -127,10 +135,10 @@ class JoyAccessibilityService : AccessibilityService() {
     }
   }
 
-  suspend fun captureScreenshotBase64(forceFresh: Boolean = false): String? =
+  override suspend fun captureScreenshotBase64(forceFresh: Boolean): String? =
     PageScreenshotCapture.captureBase64Jpeg(this, forceFresh = forceFresh)
 
-  fun snapshotTreeForDebug(): String {
+  override fun snapshotTreeForDebug(): String {
     val root = getTargetRoot() ?: return "(无法读取结构树：当前无外部窗口)"
     return try {
       UiTreeSerializer.serialize(root)
@@ -139,7 +147,7 @@ class JoyAccessibilityService : AccessibilityService() {
     }
   }
 
-  fun snapshotForAgent(): String {
+  override fun snapshotForAgent(): String {
     val roots = collectExternalRoots()
     if (roots.isEmpty()) {
       return "当前无法读取任何窗口内容，请确认已开启无障碍权限，且已切换到目标应用（如 QQ）。"
@@ -162,7 +170,7 @@ class JoyAccessibilityService : AccessibilityService() {
 
   fun execute(action: AgentAction): String = executeWithResult(action).summary
 
-  fun executeWithResult(action: AgentAction): ActionExecutionResult {
+  override fun executeWithResult(action: AgentAction): ActionExecutionResult {
     val result = when (action.action.lowercase()) {
       "click" -> clickByTextResult(action.targetText)
       "tap" -> tapAtNormalizedResult(action.targetText)
@@ -1112,7 +1120,10 @@ class JoyAccessibilityService : AccessibilityService() {
     }
   }
 
-  fun swipeNormalizedBlocking(x1: Int, y1: Int, x2: Int, y2: Int): String? {
+  override fun swipeNormalizedBlocking(x1: Int, y1: Int, x2: Int, y2: Int): String =
+      swipeNormalizedBlockingImpl(x1, y1, x2, y2) ?: "滑动手势失败"
+
+  private fun swipeNormalizedBlockingImpl(x1: Int, y1: Int, x2: Int, y2: Int): String? {
     val metrics = resources.displayMetrics
     val maxX = (metrics.widthPixels - 1).coerceAtLeast(0).toFloat()
     val maxY = (metrics.heightPixels - 1).coerceAtLeast(0).toFloat()
@@ -1146,9 +1157,9 @@ class JoyAccessibilityService : AccessibilityService() {
     return if (performGlobalAction(action)) successMessage else "系统操作失败"
   }
 
-  suspend fun swipeDown(): String = swipeVerticalSuspend(down = true)
+  override suspend fun swipeDown(): String = swipeVerticalSuspend(down = true)
 
-  suspend fun swipeUp(): String = swipeVerticalSuspend(down = false)
+  override suspend fun swipeUp(): String = swipeVerticalSuspend(down = false)
 
   private suspend fun swipeVerticalSuspend(down: Boolean): String = suspendCoroutine { continuation ->
     val metrics = resources.displayMetrics

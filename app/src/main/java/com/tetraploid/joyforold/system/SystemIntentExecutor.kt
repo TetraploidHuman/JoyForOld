@@ -9,6 +9,7 @@ import android.provider.CalendarContract
 import android.provider.Settings
 import androidx.core.net.toUri
 import com.tetraploid.joyforold.agent.ActionExecutionResult
+import com.tetraploid.joyforold.core.AssistSessionStarters
 import com.tetraploid.joyforold.app.InstalledAppResolver
 import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
 import com.tetraploid.joyforold.util.NetworkStatus
@@ -200,7 +201,7 @@ object SystemIntentExecutor {
     }
 
     private fun askFamilyForHelp(context: Context, targetText: String?): ActionExecutionResult {
-        com.tetraploid.joyforold.di.agentRuntime().startElderAssistSession()
+        AssistSessionStarters.delegate.startElderAssistSession()
         return ActionExecutionResult(
             success = true,
             summary = "已发起远程协助，请到「协作」页查看协助码并告诉家人",

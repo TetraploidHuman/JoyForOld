@@ -136,6 +136,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.foundation:foundation")
     implementation("com.xdcobra.sherpa:sherpa-onnx:1.13.2-1")
+    implementation(project(":core:common"))
     implementation(libs.koin.android)
     implementation(libs.koin.androidx.compose)
     testImplementation("junit:junit:4.13.2")

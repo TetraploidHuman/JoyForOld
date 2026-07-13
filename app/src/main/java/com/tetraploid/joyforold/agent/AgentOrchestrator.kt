@@ -4,7 +4,8 @@ package com.tetraploid.joyforold.agent
 
 import android.content.Context
 
-import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
+import com.tetraploid.joyforold.accessibility.AccessibilityGateway
+import com.tetraploid.joyforold.accessibility.AccessibilityGateways
 
 import com.tetraploid.joyforold.app.InstalledAppResolver
 
@@ -55,14 +56,14 @@ class AgentOrchestrator(
             pending: PendingAgentState,
             command: String,
             apiKey: String,
-            service: JoyAccessibilityService,
+            service: AccessibilityGateway,
             runContext: AgentRunContext,
             onProgress: ((Int, String) -> Unit)?,
         ): AgentRunResult = resumeUserConfirm(pending, command, apiKey, service, runContext, onProgress)
 
         override suspend fun executeLocalSteps(
             context: Context,
-            service: JoyAccessibilityService,
+            service: AccessibilityGateway,
             steps: List<AgentAction>,
             originalCommand: String,
             runContext: AgentRunContext,
@@ -77,13 +78,13 @@ class AgentOrchestrator(
         override suspend fun runNewCommand(
             command: String,
             apiKey: String,
-            service: JoyAccessibilityService,
+            service: AccessibilityGateway,
             runContext: AgentRunContext,
             onProgress: ((Int, String) -> Unit)?,
         ): AgentRunResult = run(
             userCommand = command,
             apiKey = apiKey,
-            appContext = service,
+            appContext = service.context(),
             runContext = runContext,
             onProgress = onProgress,
             resumePendingConfirm = false,
@@ -164,9 +165,9 @@ class AgentOrchestrator(
 
 
 
-        val service = JoyAccessibilityService.instance
+        val service = AccessibilityGateways.current
 
-        val executionContext = service ?: appContext
+        val executionContext = service?.context() ?: appContext
 
         if (executionContext == null) {
 
@@ -334,7 +335,7 @@ class AgentOrchestrator(
 
         apiKey: String,
 
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
 
         runContext: AgentRunContext,
 
@@ -388,7 +389,7 @@ class AgentOrchestrator(
 
     private suspend fun executeGuardedAction(
         context: Context,
-        service: JoyAccessibilityService?,
+        service: AccessibilityGateway?,
         session: AgentConversationSession,
         action: AgentAction,
         snapshot: StructuredPageSnapshot?,
@@ -405,7 +406,7 @@ class AgentOrchestrator(
 
         apiKey: String,
 
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
 
         runContext: AgentRunContext,
 
@@ -807,10 +808,10 @@ class AgentOrchestrator(
                 )
                 val outcome = if (hideOverlayForVision) {
                     VisionOverlayGuard.withHidden {
-                        executeGuardedAction(service, service, session, action, previousSnapshot)
+                        executeGuardedAction(service.context(), service, session, action, previousSnapshot)
                     }
                 } else {
-                    executeGuardedAction(service, service, session, action, previousSnapshot)
+                    executeGuardedAction(service.context(), service, session, action, previousSnapshot)
                 }
                 when (outcome) {
 
@@ -1304,7 +1305,7 @@ class AgentOrchestrator(
 
         context: Context,
 
-        service: JoyAccessibilityService?,
+        service: AccessibilityGateway?,
 
         steps: List<AgentAction>,
 
@@ -1510,14 +1511,14 @@ class AgentOrchestrator(
 
 
     private suspend fun postActionSettleDelay(
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         action: AgentAction,
         result: ActionExecutionResult,
     ) {
         when {
             action.action.equals("open_app", ignoreCase = true) && result.success -> {
                 val expectedPackage = InstalledAppResolver.resolvePackage(
-                    service.applicationContext,
+                    service.context(),
                     action.targetText.orEmpty(),
                 )
                 awaitReadablePage(service, expectedPackage = expectedPackage)
@@ -1538,7 +1539,7 @@ class AgentOrchestrator(
     }
 
     private suspend fun awaitReadablePage(
-        service: JoyAccessibilityService,
+        service: AccessibilityGateway,
         expectedPackage: String? = null,
         timeoutMs: Long = PAGE_READY_TIMEOUT_MS,
         pollMs: Long = PAGE_READY_POLL_MS,
@@ -1583,7 +1584,7 @@ class AgentOrchestrator(
 
     ): AgentRunResult {
 
-        val service = JoyAccessibilityService.instance
+        val service = AccessibilityGateways.current
 
             ?: return AgentRunResult(false, "无障碍服务未连接", emptyList())
 

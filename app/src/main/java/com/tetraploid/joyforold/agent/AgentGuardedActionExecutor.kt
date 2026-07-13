@@ -1,7 +1,8 @@
 package com.tetraploid.joyforold.agent
 
 import android.content.Context
-import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
+import com.tetraploid.joyforold.accessibility.AccessibilityGateway
+import com.tetraploid.joyforold.accessibility.AccessibilityGateways
 import com.tetraploid.joyforold.app.InstalledAppResolver
 
 /**
@@ -17,7 +18,7 @@ internal object AgentGuardedActionExecutor {
 
     suspend fun execute(
         context: Context,
-        service: JoyAccessibilityService?,
+        service: AccessibilityGateway?,
         session: AgentConversationSession,
         action: AgentAction,
         snapshot: StructuredPageSnapshot?,

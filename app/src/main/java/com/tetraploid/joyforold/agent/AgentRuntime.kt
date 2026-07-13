@@ -5,7 +5,9 @@ import android.app.Application
 import android.content.pm.PackageManager
 import android.view.accessibility.AccessibilityManager
 import com.tetraploid.joyforold.accessibility.AccessibilityPermission
-import com.tetraploid.joyforold.accessibility.JoyAccessibilityService
+import com.tetraploid.joyforold.accessibility.AccessibilityGateways
+import com.tetraploid.joyforold.core.AssistSessionStarter
+import com.tetraploid.joyforold.core.AssistSessionStarters
 import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
 import com.tetraploid.joyforold.assist.protocol.AssistRole
 import com.tetraploid.joyforold.assist.protocol.BindingDto
@@ -61,87 +63,6 @@ data class RuntimePermissionPrompt(
     val resumeEnableWakeWord: Boolean = false,
     val resumeWakeWordVoice: Boolean = false,
     val resumeVoiceInputAfterPermission: Boolean = false,
-)
-
-data class AgentUiState(
-    val apiKey: String = "",
-    val modelName: String = "",
-    val asrApiKey: String = "",
-    val asrAppId: String = "",
-    val asrAccessToken: String = "",
-    val asrResourceId: String = "",
-    val command: String = "",
-    val speechText: String = "",
-    val logs: List<String> = emptyList(),
-    val isRunning: Boolean = false,
-    val isListening: Boolean = false,
-    val voiceInteractionState: VoiceInteractionState = VoiceInteractionState.Idle,
-    val isPaused: Boolean = false,
-    val accessibilityEnabled: Boolean = false,
-    val accessibilityServiceConnected: Boolean = false,
-    val joyImeEnabled: Boolean = false,
-    val joyImeSelectedAsDefault: Boolean = false,
-    val recordAudioGranted: Boolean = false,
-    val readContactsGranted: Boolean = false,
-    val notificationAccessGranted: Boolean = false,
-    val waitingForUserConfirm: Boolean = false,
-    val confirmPrompt: String? = null,
-    val needsBinaryConfirm: Boolean = false,
-    val currentStep: Int = 0,
-    val statusMessage: String = "",
-    val taskSteps: List<TaskStepItem> = emptyList(),
-    val taskPhases: List<TaskPhaseItem> = emptyList(),
-    val conversationCards: List<ConversationCard> = emptyList(),
-    val overlayInteractionCard: ConversationCard? = null,
-    val sessionId: String? = null,
-    val recentMemories: List<String> = emptyList(),
-    val wakeWordEnabled: Boolean = false,
-    val wakeWordPhrase: String = "",
-    val wakeWordRunning: Boolean = false,
-    val lastWakeWordAtMs: Long? = null,
-    val lastWakeWordKeyword: String? = null,
-    val wakeWordTestHint: String? = null,
-    val wakeWordKeywordScore: Float = WakeWordConfigStore.DEFAULT_KEYWORD_SCORE,
-    val wakeWordKeywordThreshold: Float = WakeWordConfigStore.DEFAULT_KEYWORD_THRESHOLD,
-    val wakeWordConfirmHits: Int = WakeWordConfigStore.DEFAULT_CONFIRM_HITS,
-    val wakeWordPreset: WakeWordSensitivityPreset = WakeWordSensitivityPreset.BALANCED,
-    val wakeWordModelVersion: String = SherpaOnnxModelManager.MODEL_VERSION,
-    val wakeWordCalibrationRunning: Boolean = false,
-    val wakeWordCalibrationStep: Int = 0,
-    val wakeWordCalibrationHint: String? = null,
-    val wakeWordCalibrated: Boolean = false,
-    val wakeWordSileroVadEnabled: Boolean = WakeWordConfigStore.DEFAULT_SILERO_VAD,
-    val wakeWordSecondStageEnabled: Boolean = WakeWordConfigStore.DEFAULT_SECOND_STAGE,
-    val daughterPhone: String = "",
-    val sonPhone: String = "",
-    val emergencyPhone: String = "",
-    val emergencyMessage: String = "",
-    val homeAddress: String = "",
-    val presetPhraseGoHome: String = "我要回家, 导航回家, 送我回家",
-    val suggestionChips: List<String> = emptyList(),
-    val cloudContextConsentGranted: Boolean = false,
-    val voiceBargeInEnabled: Boolean = true,
-    val permissionPrompt: RuntimePermissionPrompt? = null,
-    val visionDebugEnabled: Boolean = false,
-    val visionDebugFrames: List<VisionDebugFrame> = emptyList(),
-    val assistRole: AssistRole = AssistRole.ELDER,
-    val assistPhase: AssistSessionPhase = AssistSessionPhase.IDLE,
-    val assistPairCode: String = "",
-    val assistSessionId: String = "",
-    val assistStatusMessage: String = "",
-    val assistPeerDisplayName: String = "",
-    val assistLatestFrameBytes: ByteArray? = null,
-    val assistLatestFrameWidth: Int = 0,
-    val assistLatestFrameHeight: Int = 0,
-    val assistLatestFrameFormat: String = "",
-    val assistBindings: List<BindingDto> = emptyList(),
-    val assistServerHttpUrl: String = "",
-    val assistServerWsUrl: String = "",
-    val assistDisplayName: String = "",
-    val assistStreamFps: Float = 0f,
-    val assistStreamLatencyMs: Long = -1L,
-    val assistMode: Boolean = false,
-    val assistNavigateTick: Long = 0L,
 )
 
 class AgentRuntime(
@@ -260,6 +181,7 @@ class AgentRuntime(
         this.application = application.applicationContext as Application
         if (!bootstrapped) {
             bootstrapped = true
+            AssistSessionStarters.delegate = AssistSessionStarter { startElderAssistSession() }
             androidTtsOutput.ensureReady()
             ensureControllers()
             assistBridge!!.attachSessionManager(application, assistPairingStore)
@@ -281,26 +203,30 @@ class AgentRuntime(
                     asrAppId = apiKeyStore.getAsrAppId(),
                     asrAccessToken = apiKeyStore.getAsrAccessToken(),
                     asrResourceId = apiKeyStore.getAsrResourceId(),
-                    wakeWordEnabled = wakeWordStore.isEnabled(),
-                    wakeWordPhrase = wakeWordStore.getPhrase(),
-                    wakeWordRunning = wakeWordStore.isEnabled() && WakeWordService.isRunning,
-                    wakeWordKeywordScore = wakeWordStore.getKeywordScore(),
-                    wakeWordKeywordThreshold = wakeWordStore.getKeywordThreshold(),
-                    wakeWordConfirmHits = wakeWordStore.getConfirmHitCount(),
-                    wakeWordPreset = wakeWordStore.getPreset(),
-                    wakeWordModelVersion = SherpaOnnxModelManager.MODEL_VERSION,
-                    wakeWordCalibrated = wakeWordStore.isCalibrated(),
-                    wakeWordSileroVadEnabled = wakeWordStore.isSileroVadEnabled(),
-                    wakeWordSecondStageEnabled = wakeWordStore.isSecondStageEnabled(),
+                    wakeWord = it.wakeWord.copy(
+                        enabled = wakeWordStore.isEnabled(),
+                        phrase = wakeWordStore.getPhrase(),
+                        running = wakeWordStore.isEnabled() && WakeWordService.isRunning,
+                        keywordScore = wakeWordStore.getKeywordScore(),
+                        keywordThreshold = wakeWordStore.getKeywordThreshold(),
+                        confirmHits = wakeWordStore.getConfirmHitCount(),
+                        preset = wakeWordStore.getPreset(),
+                        modelVersion = SherpaOnnxModelManager.MODEL_VERSION,
+                        calibrated = wakeWordStore.isCalibrated(),
+                        sileroVadEnabled = wakeWordStore.isSileroVadEnabled(),
+                        secondStageEnabled = wakeWordStore.isSecondStageEnabled(),
+                    ),
                     daughterPhone = daughter?.phoneNumber.orEmpty(),
                     sonPhone = son?.phoneNumber.orEmpty(),
                     emergencyPhone = emergency?.phoneNumber.orEmpty(),
                     emergencyMessage = caregiverStore.loadEmergencyMessage(),
                     homeAddress = caregiverStore.loadHomeAddress(),
                     presetPhraseGoHome = goHomePreset?.aliases?.joinToString(", ") ?: "我要回家, 导航回家, 送我回家",
-                    recordAudioGranted = hasRecordAudioPermission(application),
-                    readContactsGranted = ContactResolver.hasContactsPermission(application),
-                    notificationAccessGranted = NotificationAccessPermission.isEnabled(application),
+                    permissions = it.permissions.copy(
+                        recordAudioGranted = hasRecordAudioPermission(application),
+                        readContactsGranted = ContactResolver.hasContactsPermission(application),
+                        notificationAccessGranted = NotificationAccessPermission.isEnabled(application),
+                    ),
                     cloudContextConsentGranted = contextConsentStore.hasConsented(),
                     voiceBargeInEnabled = voiceInteractionConfigStore.isBargeInEnabled(),
                     visionDebugEnabled = visionDebugStore.isEnabled(),
@@ -325,16 +251,22 @@ class AgentRuntime(
         val imeDefault = app?.let { JoyImeHelper.isSelectedAsDefault(it) } ?: false
         _state.update {
             it.copy(
-                accessibilityEnabled = settingEnabled,
-                accessibilityServiceConnected = connected,
-                joyImeEnabled = imeEnabled,
-                joyImeSelectedAsDefault = imeDefault,
-                wakeWordRunning = it.wakeWordEnabled && WakeWordService.isRunning,
-                recordAudioGranted = app?.let { ctx -> hasRecordAudioPermission(ctx) } ?: it.recordAudioGranted,
-                readContactsGranted = app?.let { ctx -> ContactResolver.hasContactsPermission(ctx) } ?: it.readContactsGranted,
-                notificationAccessGranted = app?.let { ctx ->
-                    NotificationAccessPermission.isEnabled(ctx)
-                } ?: it.notificationAccessGranted,
+                permissions = it.permissions.copy(
+                    accessibilityEnabled = settingEnabled,
+                    accessibilityServiceConnected = connected,
+                    joyImeEnabled = imeEnabled,
+                    joyImeSelectedAsDefault = imeDefault,
+                    recordAudioGranted = app?.let { ctx -> hasRecordAudioPermission(ctx) }
+                        ?: it.recordAudioGranted,
+                    readContactsGranted = app?.let { ctx -> ContactResolver.hasContactsPermission(ctx) }
+                        ?: it.readContactsGranted,
+                    notificationAccessGranted = app?.let { ctx ->
+                        NotificationAccessPermission.isEnabled(ctx)
+                    } ?: it.notificationAccessGranted,
+                ),
+                wakeWord = it.wakeWord.copy(
+                    running = it.wakeWordEnabled && WakeWordService.isRunning,
+                ),
             )
         }
     }
@@ -351,7 +283,7 @@ class AgentRuntime(
 
     fun onReadContactsPermissionResult(application: Application, granted: Boolean) {
         initIfNeeded(application)
-        _state.update { it.copy(readContactsGranted = granted) }
+        _state.update { it.updatePermissions { p -> p.copy(readContactsGranted = granted) } }
         if (granted) {
             appendLog("联系人权限已授予，可按姓名拨号或发短信")
         } else {
@@ -365,11 +297,11 @@ class AgentRuntime(
     }
 
     fun clearPermissionPrompt() {
-        _state.update { it.copy(permissionPrompt = null) }
+        _state.update { it.updatePermissions { p -> p.copy(permissionPrompt = null) } }
     }
 
     private fun showPermissionPrompt(prompt: RuntimePermissionPrompt) {
-        _state.update { it.copy(permissionPrompt = prompt) }
+        _state.update { it.updatePermissions { p -> p.copy(permissionPrompt = prompt) } }
     }
 
     private fun refreshMemories() {
@@ -665,9 +597,7 @@ class AgentRuntime(
         val offer = LocalUndoRegistry.consume() ?: return
         removeSessionCardsByKind(ConversationCardKind.Undo)
         publishConversationCards()
-        JoyAccessibilityService.instance?.performGlobalAction(
-            android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME,
-        )
+        AccessibilityGateways.current?.performGlobalHome()
         voiceSession()?.speakStatus(offer.message)
         appendLog("用户撤销本地操作：${offer.action}")
     }
@@ -724,7 +654,7 @@ class AgentRuntime(
     }
 
     fun updateWakeWordPhrase(value: String) {
-        _state.update { it.copy(wakeWordPhrase = value) }
+        _state.update { it.updateWakeWord { w -> w.copy(phrase = value) } }
     }
 
     fun saveWakeWordConfig(application: Application) {
@@ -739,12 +669,12 @@ class AgentRuntime(
 
     fun updateWakeWordKeywordScore(value: String) {
         val parsed = value.toFloatOrNull() ?: return
-        _state.update { it.copy(wakeWordKeywordScore = parsed.coerceIn(0.1f, 10f)) }
+        _state.update { it.updateWakeWord { w -> w.copy(keywordScore = parsed.coerceIn(0.1f, 10f)) } }
     }
 
     fun updateWakeWordKeywordThreshold(value: String) {
         val parsed = value.toFloatOrNull() ?: return
-        _state.update { it.copy(wakeWordKeywordThreshold = parsed.coerceIn(0.01f, 5f)) }
+        _state.update { it.updateWakeWord { w -> w.copy(keywordThreshold = parsed.coerceIn(0.01f, 5f)) } }
     }
 
     fun updateDaughterPhone(value: String) {
@@ -1112,11 +1042,13 @@ class AgentRuntime(
             return
         }
         _state.update {
-            it.copy(
-                lastWakeWordAtMs = System.currentTimeMillis(),
-                lastWakeWordKeyword = keyword,
-                wakeWordTestHint = null,
-            )
+            it.updateWakeWord { w ->
+                w.copy(
+                    lastDetectedAtMs = System.currentTimeMillis(),
+                    lastKeyword = keyword,
+                    testHint = null,
+                )
+            }
         }
         appendLog("唤醒后继续听您说")
         voiceSession()?.startFromWakeWord(app)
@@ -1141,7 +1073,7 @@ class AgentRuntime(
     }
 
     fun setAssistMode(active: Boolean) {
-        _state.update { it.copy(assistMode = active) }
+        _state.update { it.updateAssist { a -> a.copy(mode = active) } }
     }
 
     fun isAssistModeActive(): Boolean = assistBridge?.isAssistModeActive() == true
@@ -1230,7 +1162,7 @@ class AgentRuntime(
     }
 
     fun previewPageTree() {
-        val service = JoyAccessibilityService.instance
+        val service = AccessibilityGateways.current
         if (service == null) {
             appendLog("无法读取页面：无障碍服务未开启")
             return

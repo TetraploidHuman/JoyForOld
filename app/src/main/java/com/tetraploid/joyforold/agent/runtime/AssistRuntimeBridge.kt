@@ -8,6 +8,7 @@ import com.tetraploid.joyforold.collaboration.AssistPairingStore
 import com.tetraploid.joyforold.collaboration.AssistSessionCallbacks
 import com.tetraploid.joyforold.collaboration.AssistSessionManager
 import com.tetraploid.joyforold.collaboration.AssistSessionPhase
+import com.tetraploid.joyforold.agent.updateAssist
 import com.tetraploid.joyforold.collaboration.AssistSessionSnapshot
 import kotlinx.coroutines.CoroutineScope
 
@@ -84,29 +85,31 @@ internal class AssistRuntimeBridge(
     }
 
     fun requestNavigation() {
-        state.update { it.copy(assistNavigateTick = it.assistNavigateTick + 1) }
+        state.update { it.updateAssist { a -> a.copy(navigateTick = a.navigateTick + 1) } }
     }
 
     private fun applySnapshot(snapshot: AssistSessionSnapshot) {
         state.update {
-            it.copy(
-                assistRole = snapshot.role,
-                assistPhase = snapshot.phase,
-                assistPairCode = snapshot.pairCode,
-                assistSessionId = snapshot.sessionId,
-                assistStatusMessage = snapshot.statusMessage,
-                assistPeerDisplayName = snapshot.peerDisplayName,
-                assistLatestFrameBytes = snapshot.latestFrameBytes,
-                assistLatestFrameWidth = snapshot.latestFrameWidth,
-                assistLatestFrameHeight = snapshot.latestFrameHeight,
-                assistLatestFrameFormat = snapshot.latestFrameFormat,
-                assistBindings = snapshot.bindings,
-                assistServerHttpUrl = snapshot.serverHttpUrl,
-                assistServerWsUrl = snapshot.serverWsUrl,
-                assistDisplayName = snapshot.displayName,
-                assistStreamFps = snapshot.streamFps,
-                assistStreamLatencyMs = snapshot.streamLatencyMs,
-            )
+            it.updateAssist { a ->
+                a.copy(
+                    role = snapshot.role,
+                    phase = snapshot.phase,
+                    pairCode = snapshot.pairCode,
+                    sessionId = snapshot.sessionId,
+                    statusMessage = snapshot.statusMessage,
+                    peerDisplayName = snapshot.peerDisplayName,
+                    latestFrameBytes = snapshot.latestFrameBytes,
+                    latestFrameWidth = snapshot.latestFrameWidth,
+                    latestFrameHeight = snapshot.latestFrameHeight,
+                    latestFrameFormat = snapshot.latestFrameFormat,
+                    bindings = snapshot.bindings,
+                    serverHttpUrl = snapshot.serverHttpUrl,
+                    serverWsUrl = snapshot.serverWsUrl,
+                    displayName = snapshot.displayName,
+                    streamFps = snapshot.streamFps,
+                    streamLatencyMs = snapshot.streamLatencyMs,
+                )
+            }
         }
     }
 
