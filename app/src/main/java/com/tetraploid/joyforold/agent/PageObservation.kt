@@ -26,7 +26,7 @@ data class StructuredPageSnapshot(
             appendLine("package: ${snap.packageName}")
             appendLine(
                 "可点击(${snap.clickables.size}): " +
-                    AgentContextLimits.capList(snap.clickables, cap).joinToString(" | "),
+                    AgentContextLimits.formatCappedJoined(snap.clickables, cap),
             )
             PageSnapshotHints.linesFor(snap).forEach { hint ->
                 appendLine(hint)
@@ -36,11 +36,11 @@ data class StructuredPageSnapshot(
             }
             appendLine(
                 "可输入(${snap.editables.size}): " +
-                    AgentContextLimits.capList(snap.editables, cap).joinToString(" | "),
+                    AgentContextLimits.formatCappedJoined(snap.editables, cap),
             )
             appendLine(
                 "可见文字(${snap.visibleTexts.size}): " +
-                    AgentContextLimits.capList(snap.visibleTexts, cap).joinToString(" | "),
+                    AgentContextLimits.formatCappedJoined(snap.visibleTexts, cap),
             )
         }.trimEnd()
         return if (raw.length <= maxChars) {
@@ -110,10 +110,10 @@ object PageObservation {
             if (depth > MAX_DEPTH || walked >= MAX_WALK_NODES) return
             walked++
 
-            val text = node.text?.toString()?.trim().orEmpty()
-            val desc = node.contentDescription?.toString()?.trim().orEmpty()
+            val text = ClickTargetNormalizer.stripMarkup(node.text?.toString().orEmpty())
+            val desc = ClickTargetNormalizer.stripMarkup(node.contentDescription?.toString().orEmpty())
             val hint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                node.hintText?.toString()?.trim().orEmpty()
+                ClickTargetNormalizer.stripMarkup(node.hintText?.toString().orEmpty())
             } else {
                 ""
             }
@@ -169,6 +169,8 @@ object PageObservation {
             pkg.contains("tencent.mobileqq") -> "当前为 QQ"
             pkg.contains("com.tencent.mm") -> "当前为微信"
             pkg.contains("danmaku.bili") -> "当前为哔哩哔哩"
+            pkg.contains("autonavi") -> "当前为高德地图"
+            pkg.contains("baidu") && pkg.contains("map") -> "当前为百度地图"
             else -> ""
         }
 
@@ -216,25 +218,25 @@ object PageObservation {
             if (newClickables.isNotEmpty()) {
                 appendLine(
                     "新增可点击(${newClickables.size}): " +
-                        AgentContextLimits.capList(newClickables, listCap).joinToString(" | "),
+                        AgentContextLimits.formatCappedJoined(newClickables, listCap),
                 )
             }
             if (removedClickables.isNotEmpty()) {
                 appendLine(
                     "消失可点击(${removedClickables.size}): " +
-                        AgentContextLimits.capList(removedClickables, listCap).joinToString(" | "),
+                        AgentContextLimits.formatCappedJoined(removedClickables, listCap),
                 )
             }
             if (newEditables.isNotEmpty()) {
                 appendLine(
                     "新增输入区: " +
-                        AgentContextLimits.capList(newEditables, listCap).joinToString(" | "),
+                        AgentContextLimits.formatCappedJoined(newEditables, listCap),
                 )
             }
             if (newTexts.isNotEmpty()) {
                 appendLine(
                     "新增可见文字(${newTexts.size}): " +
-                        AgentContextLimits.capList(newTexts, listCap).joinToString(" | "),
+                        AgentContextLimits.formatCappedJoined(newTexts, listCap),
                 )
             }
             if (!packageChanged && newClickables.isEmpty() && removedClickables.isEmpty() &&

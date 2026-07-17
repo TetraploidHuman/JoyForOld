@@ -77,6 +77,8 @@ class AssistCommandExecutorTest {
 
         override fun snapshotTreeForDebug(): String = ""
 
+        override fun setContinuousUiTreeLogcatEnabled(enabled: Boolean) = Unit
+
         override suspend fun captureScreenshotBase64(forceFresh: Boolean): String? = null
 
         override fun executeWithResult(action: AgentAction): ActionExecutionResult =

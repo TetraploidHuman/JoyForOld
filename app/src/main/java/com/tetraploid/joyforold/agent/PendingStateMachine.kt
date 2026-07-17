@@ -122,6 +122,26 @@ internal class PendingStateMachine(
         return waitingResult(prompt, needsBinaryConfirm = false)
     }
 
+    fun saveNavPoiPickPending(
+        command: String,
+        query: String,
+        options: List<DisambiguationOption>,
+        service: AccessibilityGateway?,
+    ): AgentRunResult {
+        val prompt = "找到多处「$query」，请点选或说出想去哪一个。"
+        save(
+            PendingAgentState(
+                originalCommand = command,
+                aiPrompt = prompt,
+                session = AgentConversationSession(rootCommand = command),
+                previousSnapshot = service?.mergeSnapshots(service.captureStructuredSnapshots()),
+                kind = PendingKind.NAV_POI_PICK,
+                deferredCommand = encodeDisambiguationOptions(options),
+            ),
+        )
+        return waitingResult(prompt, needsBinaryConfirm = false)
+    }
+
     fun saveLocalPreviewPending(
         command: String,
         previewMessage: String,
@@ -182,6 +202,9 @@ internal class PendingStateMachine(
         PendingKind.LOCAL_PREVIEW -> handleLocalPreviewReply(pending, command, service, executor, runContext)
         PendingKind.INTENT_DISAMBIGUATION -> handleIntentDisambiguationReply(
             pending, command, apiKey, service, runContext, onProgress, executor,
+        )
+        PendingKind.NAV_POI_PICK -> handleNavPoiPickReply(
+            pending, command, service, runContext, onProgress, executor,
         )
         PendingKind.CONTEXT_CONSENT -> {
             clear()
@@ -312,6 +335,28 @@ internal class PendingStateMachine(
         )
     }
 
+    private suspend fun handleNavPoiPickReply(
+        pending: PendingAgentState,
+        command: String,
+        service: AccessibilityGateway,
+        runContext: AgentRunContext,
+        onProgress: ((Int, String) -> Unit)?,
+        executor: PendingExecutor,
+    ): AgentRunResult {
+        val options = decodeDisambiguationOptions(pending.deferredCommand)
+        val matched = NavPoiPickCodec.matchReply(command, options)
+        if (matched == null) {
+            return waitingResult(pending.aiPrompt, needsBinaryConfirm = false)
+        }
+        return executor.runNavPoiPick(
+            poiIntentId = matched.intentId,
+            originalCommand = pending.originalCommand,
+            appContext = service.context(),
+            runContext = runContext,
+            onProgress = onProgress,
+        )
+    }
+
     private fun waitingResult(prompt: String, needsBinaryConfirm: Boolean): AgentRunResult =
         AgentRunResult(
             success = true,
@@ -384,6 +429,14 @@ internal interface PendingExecutor {
         command: String,
         intentId: String,
         apiKey: String,
+        appContext: Context,
+        runContext: AgentRunContext,
+        onProgress: ((Int, String) -> Unit)?,
+    ): AgentRunResult
+
+    suspend fun runNavPoiPick(
+        poiIntentId: String,
+        originalCommand: String,
         appContext: Context,
         runContext: AgentRunContext,
         onProgress: ((Int, String) -> Unit)?,

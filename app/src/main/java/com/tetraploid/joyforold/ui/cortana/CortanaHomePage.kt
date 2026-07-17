@@ -72,15 +72,18 @@ fun CortanaHomePage(
 
     val greeting = when {
         uiState.isRunning -> "正在为您处理…"
-        uiState.isListening -> "我在听，请说…"
-        uiState.waitingForUserConfirm -> "需要您确认一下"
+        uiState.isListening ||
+            uiState.voiceInteractionState == VoiceInteractionState.Listening -> "我在听，请说…"
+        uiState.waitingForUserConfirm -> "请说出或点选您的选择"
         uiState.voiceInteractionState == VoiceInteractionState.SpeakingPrompt -> "请听我说…"
         else -> "嗨，在想什么呢？"
     }
 
     val orbActive = uiState.isRunning || uiState.isListening || uiState.waitingForUserConfirm
+    val voiceListening = uiState.isListening ||
+        uiState.voiceInteractionState == VoiceInteractionState.Listening
     val hasContentPanel = uiState.isRunning ||
-        uiState.isListening ||
+        voiceListening ||
         uiState.waitingForUserConfirm ||
         uiState.conversationCards.isNotEmpty() ||
         uiState.speechText.isNotBlank() ||
@@ -204,6 +207,8 @@ fun CortanaHomePage(
             isListening = uiState.isListening,
             enabled = !uiState.isRunning,
             isRunning = uiState.isRunning,
+            voiceBusy = uiState.voiceInteractionState != VoiceInteractionState.Idle &&
+                !uiState.isListening,
             expandedHints = expandedHints && !uiState.isRunning && !hasContentPanel,
             onExpandHints = { expandedHints = !expandedHints },
             extraSuggestions = dockSuggestions,

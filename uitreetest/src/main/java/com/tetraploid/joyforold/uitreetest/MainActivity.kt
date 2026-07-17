@@ -13,6 +13,7 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity(), UiTreeTestAccessibilityService.TreeUpdateListener {
@@ -21,6 +22,7 @@ class MainActivity : AppCompatActivity(), UiTreeTestAccessibilityService.TreeUpd
     private lateinit var treeView: TextView
     private lateinit var refreshButton: Button
     private lateinit var autoRefreshButton: Button
+    private lateinit var continuousLogcatSwitch: SwitchCompat
 
     private val treeUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -36,6 +38,7 @@ class MainActivity : AppCompatActivity(), UiTreeTestAccessibilityService.TreeUpd
         treeView = findViewById(R.id.treeText)
         refreshButton = findViewById(R.id.refreshButton)
         autoRefreshButton = findViewById(R.id.autoRefreshButton)
+        continuousLogcatSwitch = findViewById(R.id.continuousLogcatSwitch)
 
         treeView.movementMethod = ScrollingMovementMethod()
 
@@ -50,18 +53,21 @@ class MainActivity : AppCompatActivity(), UiTreeTestAccessibilityService.TreeUpd
                 !UiTreeTestAccessibilityService.autoRefreshEnabled
             updateAutoRefreshLabel()
         }
+        continuousLogcatSwitch.isChecked =
+            UiTreeTestAccessibilityService.isContinuousLogcatEnabled(this)
+        continuousLogcatSwitch.setOnCheckedChangeListener { _, isChecked ->
+            UiTreeTestAccessibilityService.setContinuousLogcatEnabled(this, isChecked)
+            updateConnectionStatus()
+            if (isChecked) {
+                Toast.makeText(this, R.string.continuous_logcat_enabled, Toast.LENGTH_SHORT).show()
+            }
+        }
         findViewById<Button>(R.id.copyButton).setOnClickListener {
             val text = treeView.text?.toString().orEmpty()
             if (text.isBlank()) return@setOnClickListener
             val clipboard = getSystemService(ClipboardManager::class.java)
             clipboard.setPrimaryClip(ClipData.newPlainText("ui-tree", text))
             Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show()
-        }
-        findViewById<Button>(R.id.logcatButton).setOnClickListener {
-            val text = treeView.text?.toString().orEmpty()
-            if (text.isBlank()) return@setOnClickListener
-            FullUiTreeDumper.logToLogcat(text)
-            Toast.makeText(this, R.string.logged, Toast.LENGTH_SHORT).show()
         }
 
         updateConnectionStatus()
@@ -105,13 +111,21 @@ class MainActivity : AppCompatActivity(), UiTreeTestAccessibilityService.TreeUpd
 
     private fun updateConnectionStatus() {
         val connected = UiTreeTestAccessibilityService.isConnected()
-        statusView.text = if (connected) {
-            "无障碍服务：已连接"
-        } else {
-            "无障碍服务：未连接"
+        val logcatOn = UiTreeTestAccessibilityService.isContinuousLogcatEnabled(this)
+        statusView.text = buildString {
+            append("【仅类名白名单】").append(WhitelistDisguise.SELECT_TO_SPEAK_SERVICE_CLASS)
+            append('\n')
+            append("组件: ").append(WhitelistDisguise.enabledServiceComponentId(packageName))
+            append('\n')
+            append("包名: ").append(packageName)
+            append('\n')
+            append(if (connected) "无障碍服务：已连接" else "无障碍服务：未连接")
+            append('\n')
+            append(if (logcatOn) "持续 Logcat：已开启（tag=UiTreeTest）" else "持续 Logcat：已关闭")
         }
         refreshButton.isEnabled = connected
         autoRefreshButton.isEnabled = connected
+        continuousLogcatSwitch.isEnabled = connected
     }
 
     private fun updateAutoRefreshLabel() {

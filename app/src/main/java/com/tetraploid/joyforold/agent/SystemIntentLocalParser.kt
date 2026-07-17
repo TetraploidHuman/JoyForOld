@@ -3,6 +3,7 @@ package com.tetraploid.joyforold.agent
 import android.content.Context
 import com.tetraploid.joyforold.app.InstalledAppResolver
 import com.tetraploid.joyforold.offline.nlu.TimeSlotParser
+import com.tetraploid.joyforold.system.AmapPoiResolver
 
 /**
  * 离线规则解析：将口语指令映射为 [SystemIntentExecutor] 可执行的 action 链。
@@ -18,7 +19,14 @@ object SystemIntentLocalParser {
     private val calendarHint = Regex("""添加日程|新建日程|日历提醒|记(?:一)?下|安排(?:一)?下|加个日程""")
     private val openAppPattern = Regex("""^(?:打开|启动|运行|进入)\s*(.+)$""")
 
-    private val NAVIGATE_PHRASES = setOf("导航回家", "带我回家", "回家路线", "我要回家", "导航回去")
+    private val NAVIGATE_HOME_PHRASES = setOf("导航回家", "带我回家", "回家路线", "我要回家", "导航回去")
+    private val navigateToPatterns = listOf(
+        Regex("""(?:带我)?(?:导航到|导航去|带我去|带我到|带我前往)(?:最近的|附近的)?(.+)$"""),
+        Regex("""^(?:我要)?去(?:最近的|附近的)(.+)$"""),
+        Regex("""^(?:我要)?去(.+)$"""),
+        Regex("""^去(.+?)(?:导航一下|导航)$"""),
+    )
+    private val navigateToExclude = Regex("""搜索|打开|播放|打电话|发短信|闹钟|日程|微信|淘宝""")
     private val CAMERA_PHRASES = setOf("打开相机", "拍照", "我要拍照")
     private val GALLERY_PHRASES = setOf("打开相册", "看照片", "我的照片")
 
@@ -115,11 +123,139 @@ object SystemIntentLocalParser {
     }
 
     private fun parseNavigate(text: String): List<AgentAction>? {
-        if (text !in NAVIGATE_PHRASES) return null
-        return listOf(
-            AgentAction(action = "navigate_home"),
-            AgentAction(action = "finish", message = "正在为您导航回家。", finished = true),
+        val normalized = softNormalizeNavigateUtterance(
+            text.trim().trimEnd('。', '.', '！', '!', '？', '?'),
         )
+        if (normalized in NAVIGATE_HOME_PHRASES) {
+            return listOf(
+                AgentAction(action = "navigate_home"),
+                AgentAction(action = "finish", message = "正在为您导航回家。", finished = true),
+            )
+        }
+        if (normalized.contains("回家") || normalized.contains("家里")) return null
+        if (navigateToExclude.containsMatchIn(normalized)) return null
+
+        val destination = navigateToPatterns
+            .asSequence()
+            .mapNotNull { it.find(normalized)?.groupValues?.get(1)?.trim() }
+            .map { dest ->
+                dest
+                    .replace(Regex("""^最[近进]的"""), "")
+                    .replace(Regex("""^附近的"""), "")
+                    .trim()
+            }
+            .firstOrNull { it.length in 2..40 }
+            ?: return null
+
+        val near = splitScopedPoiQuery(destination)
+        val query = normalizePoiQuery(near?.poi ?: destination)
+        val scope = near?.scope?.trim()?.takeIf { it.length in 2..30 }
+
+        // 本地拆句仅服务离线 / AI 未给出导航时的兜底（有网时 CommandRouteResolver 会 defer）。
+        // 「A附近的B」→ 直达；「行政区的B」→ 候选列表。
+        if (scope != null) {
+            val isNearLandmark = splitNearLandmarkQuery(destination) != null
+            return if (isNearLandmark) {
+                listOf(
+                    AgentAction(action = "navigate_to", targetText = query, inputText = scope),
+                    AgentAction(
+                        action = "finish",
+                        message = "正在为您导航前往：${scope}附近的$query",
+                        finished = true,
+                    ),
+                )
+            } else {
+                listOf(
+                    AgentAction(action = "navigate_pick", targetText = query, inputText = scope),
+                )
+            }
+        }
+
+        // 「最近/就近」语义有网交给 AI；本地只认具体长地址直达，其余列候选。
+        if (looksLikeSpecificAddressQuery(query)) {
+            return listOf(
+                AgentAction(action = "navigate_to", targetText = query),
+                AgentAction(action = "finish", message = "正在为您导航前往：$query", finished = true),
+            )
+        }
+        return listOf(
+            AgentAction(action = "navigate_pick", targetText = query),
+        )
+    }
+
+    /** ASR 常见：「附件的」→「附近的」。 */
+    internal fun softNormalizeNavigateUtterance(text: String): String =
+        text.replace("附件的", "附近的")
+
+    /**
+     * 拆「范围 + 目的地」：
+     * - 桂阳一中附近的肯德基 → scope=桂阳一中, poi=肯德基
+     * - 郴州市北湖区的肯德基 → scope=郴州市北湖区, poi=肯德基
+     */
+    internal fun splitScopedPoiQuery(destination: String): NearLandmarkQuery? {
+        splitNearLandmarkQuery(destination)?.let { return it }
+        return splitAdminRegionQuery(destination)
+    }
+
+    /**
+     * 拆「地标附近的目的地」：桂阳一中附近的肯德基 → landmark=桂阳一中, poi=肯德基。
+     * 不含「附近的肯德基」这种相对当前位置的说法（无地标前缀）。
+     */
+    internal fun splitNearLandmarkQuery(destination: String): NearLandmarkQuery? {
+        val match = Regex("""^(.+?)(?:附近|旁边|周围|周边)的(.+)$""").find(destination.trim())
+            ?: return null
+        val landmark = match.groupValues[1].trim()
+        val poi = match.groupValues[2].trim()
+        if (landmark.length < 2 || poi.length < 1) return null
+        // 「最近的」「附近的」本身不是地标
+        if (landmark in setOf("最", "最近", "最进", "就近")) return null
+        return NearLandmarkQuery(landmark = landmark, poi = normalizePoiQuery(poi))
+    }
+
+    /**
+     * 「行政区的品类」：郴州市北湖区的肯德基、北湖区的麦当劳。
+     * 要求前半段含省/市/区/县等，避免把「我的肯德基」误拆。
+     */
+    internal fun splitAdminRegionQuery(destination: String): NearLandmarkQuery? {
+        val match = Regex(
+            """^(.+?(?:省|市|自治州|地区|盟|区|县|旗|镇|乡|街道))的(.+)$""",
+        ).find(destination.trim()) ?: return null
+        val region = match.groupValues[1].trim()
+        val poi = match.groupValues[2].trim()
+        if (region.length < 2 || poi.length < 1) return null
+        if (region in setOf("最", "最近", "最进", "就近", "附近")) return null
+        if (!AmapPoiResolver.looksLikeAdminRegion(region)) return null
+        return NearLandmarkQuery(landmark = region, poi = normalizePoiQuery(poi))
+    }
+
+    data class NearLandmarkQuery(val landmark: String, val poi: String) {
+        val scope: String get() = landmark
+    }
+
+    internal fun looksLikeSpecificAddressQuery(destination: String): Boolean {
+        if (destination.length < 6) return false
+        // 「郴州市北湖区的肯德基」是行政区+品类，不是门牌地址
+        if (splitScopedPoiQuery(destination) != null) return false
+        return destination.contains(Regex("""[路街道巷弄号栋楼区县镇村市省]"""))
+    }
+
+    /** 是否为需 AI 判断直达/候选的导航目的地路由（不含回家）。 */
+    fun isAiPreferredNavigateRoute(steps: List<AgentAction>): Boolean =
+        steps.any {
+            it.action.equals("navigate_to", ignoreCase = true) ||
+                it.action.equals("navigate_pick", ignoreCase = true)
+        }
+
+    /** 英文品牌口语 → 地图更易命中的中文关键词。 */
+    internal fun normalizePoiQuery(raw: String): String {
+        val t = raw.trim()
+        if (t.isEmpty()) return t
+        return when (t.lowercase()) {
+            "kfc" -> "肯德基"
+            "mcdonalds", "mcdonald", "mcdc", "macdonald" -> "麦当劳"
+            "starbucks" -> "星巴克"
+            else -> t
+        }
     }
 
     private fun parseCamera(text: String): List<AgentAction>? {

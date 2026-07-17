@@ -35,6 +35,12 @@ interface AgentLlmClient {
 
     suspend fun extractKeyMemory(apiKey: String, sessionSummary: String): String
 
+    /**
+     * 面向用户的粗略任务阶段（2~5 步），不绑定具体 click/tap。
+     * 失败或空白时由调用方回退 [TaskPhasePlanner.planFromCommand]。
+     */
+    suspend fun planUserFacingPhases(apiKey: String, userCommand: String): List<TaskPhaseItem>
+
     fun ensureSystemSeeded(
         conversation: AgentConversationSession,
         keyMemories: String,
@@ -48,4 +54,16 @@ interface AgentLlmClient {
         apiKey: String,
         utterance: String,
     ): SystemIntentAiResolver.Classification?
+
+    /**
+     * ActionSet 窄域 askLlm：只看列表/候选切片做选型，按 [writeFields] 从 JSON 写回 params。
+     * 不应替代主规划，也不应接收整棵 UI 树。
+     * 失败时返回 emptyMap（调用方可不改 params，仍记成功以推进流程，或自行重试）。
+     */
+    suspend fun resolveActionSetAsk(
+        apiKey: String,
+        systemPrompt: String,
+        userPrompt: String,
+        writeFields: List<String>,
+    ): Map<String, String>
 }

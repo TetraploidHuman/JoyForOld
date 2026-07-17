@@ -12,21 +12,39 @@ object UiNodeHeuristics {
     private val chatKeywords = listOf("聊天", "消息", "联系人", "会话", "输入", "发送")
 
     fun displayLabel(node: AccessibilityNodeInfo): String {
-        val text = node.text?.toString().orEmpty().trim()
+        val text = ClickTargetNormalizer.stripMarkup(node.text?.toString().orEmpty())
         if (text.isNotBlank()) return text
-        val desc = node.contentDescription?.toString().orEmpty().trim()
+        val desc = ClickTargetNormalizer.stripMarkup(node.contentDescription?.toString().orEmpty())
         if (desc.isNotBlank()) return desc
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val hint = node.hintText?.toString().orEmpty().trim()
+            val hint = ClickTargetNormalizer.stripMarkup(node.hintText?.toString().orEmpty())
             if (hint.isNotBlank()) return hint
         }
         return node.viewIdResourceName?.substringAfterLast('/').orEmpty().trim()
     }
 
+    /**
+     * 供 find/click 匹配：合并 text + contentDescription（高德「路线」只在 desc，
+     * 店名常带 HTML text），避免只看 text 时漏匹配。
+     */
     fun nodeLabel(node: AccessibilityNodeInfo): String = buildString {
-        append(displayLabel(node))
+        val text = ClickTargetNormalizer.stripMarkup(node.text?.toString().orEmpty())
+        val desc = ClickTargetNormalizer.stripMarkup(node.contentDescription?.toString().orEmpty())
+        if (text.isNotBlank()) append(text)
+        if (desc.isNotBlank() && !text.contains(desc)) {
+            if (isNotEmpty()) append(' ')
+            append(desc)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val hint = ClickTargetNormalizer.stripMarkup(node.hintText?.toString().orEmpty())
+            if (hint.isNotBlank() && !contains(hint)) {
+                if (isNotEmpty()) append(' ')
+                append(hint)
+            }
+        }
         val viewId = node.viewIdResourceName?.substringAfterLast('/').orEmpty()
-        if (viewId.isNotBlank() && !displayLabel(node).equals(viewId, ignoreCase = true)) {
+        val visible = toString().trim()
+        if (viewId.isNotBlank() && !visible.equals(viewId, ignoreCase = true)) {
             append(viewId)
         }
     }.trim()

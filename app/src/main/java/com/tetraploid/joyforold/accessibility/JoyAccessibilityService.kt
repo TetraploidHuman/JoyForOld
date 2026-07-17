@@ -15,6 +15,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.util.Log
 import android.view.inputmethod.InputMethodManager
+import com.google.android.accessibility.selecttospeak.SelectToSpeakService
 import com.tetraploid.joyforold.app.InstalledAppResolver
 import com.tetraploid.joyforold.agent.AgentContextLimits
 import com.tetraploid.joyforold.accessibility.AccessibilityGateway
@@ -43,11 +44,16 @@ class JoyAccessibilityService : AccessibilityService(), AccessibilityGateway {
   override fun context(): Context = getApplicationContext()
 
   private var lastTapNormalized: Pair<Int, Int>? = null
+  @Volatile
+  private var continuousUiTreeLogcatEnabled = false
+  private var lastUiTreeLogcatDump: String? = null
+  private var lastUiTreeLogcatAtMs = 0L
 
   override fun onServiceConnected() {
     super.onServiceConnected()
     instance = this
     AccessibilityGateways.bind(this)
+    continuousUiTreeLogcatEnabled = UiTreeLogcatStore(applicationContext).isEnabled()
     com.tetraploid.joyforold.di.agentRuntime().refreshAccessibilityState()
   }
 
@@ -77,6 +83,7 @@ class JoyAccessibilityService : AccessibilityService(), AccessibilityGateway {
         lastExternalRoot = AccessibilityNodeInfo.obtain(freshRoot)
         lastExternalUpdatedAt = System.currentTimeMillis()
         freshRoot.recycle()
+        maybeLogUiTreeContinuously()
       }
     }
   }
@@ -144,6 +151,57 @@ class JoyAccessibilityService : AccessibilityService(), AccessibilityGateway {
       UiTreeSerializer.serialize(root)
     } finally {
       root.recycle()
+    }
+  }
+
+  override fun setContinuousUiTreeLogcatEnabled(enabled: Boolean) {
+    continuousUiTreeLogcatEnabled = enabled
+    if (!enabled) {
+      lastUiTreeLogcatDump = null
+      lastUiTreeLogcatAtMs = 0L
+      Log.i(UI_TREE_LOGCAT_TAG, "持续 UI 树 Logcat 已关闭")
+      return
+    }
+    lastUiTreeLogcatDump = null
+    lastUiTreeLogcatAtMs = 0L
+    Log.i(UI_TREE_LOGCAT_TAG, "持续 UI 树 Logcat 已开启（内容与「读取页面」/snapshotForAgent 相同）")
+    maybeLogUiTreeContinuously(force = true)
+  }
+
+  /**
+   * 与设置页「读取页面」同源：多窗口摘要 + [UiTreeSerializer] 结构树。
+   * 去重 + 节流，避免 content_changed 刷屏。
+   */
+  private fun maybeLogUiTreeContinuously(force: Boolean = false) {
+    if (!continuousUiTreeLogcatEnabled) return
+    val dump = runCatching { snapshotForAgent() }.getOrElse { error ->
+      "(读取 UI 树失败: ${error.message})"
+    }
+    val now = System.currentTimeMillis()
+    if (!force) {
+      if (dump == lastUiTreeLogcatDump) return
+      if (now - lastUiTreeLogcatAtMs < MIN_UI_TREE_LOGCAT_INTERVAL_MS) return
+    }
+    lastUiTreeLogcatDump = dump
+    lastUiTreeLogcatAtMs = now
+    emitUiTreeLogcat(dump)
+  }
+
+  private fun emitUiTreeLogcat(text: String) {
+    val redacted = com.tetraploid.joyforold.privacy.SafeLog.redact(text)
+    val chunk = AgentContextLimits.DEBUG_LOG_CHUNK_CHARS
+    if (redacted.length <= chunk) {
+      Log.i(UI_TREE_LOGCAT_TAG, redacted)
+      return
+    }
+    var offset = 0
+    var part = 1
+    val total = (redacted.length + chunk - 1) / chunk
+    while (offset < redacted.length) {
+      val end = (offset + chunk).coerceAtMost(redacted.length)
+      Log.i(UI_TREE_LOGCAT_TAG, "[$part/$total] ${redacted.substring(offset, end)}")
+      offset = end
+      part++
     }
   }
 
@@ -300,51 +358,18 @@ class JoyAccessibilityService : AccessibilityService(), AccessibilityGateway {
     return best
   }
 
+  /** 读 UI 树时优先用「微信支持」组件；手势与执行仍在本服务。 */
+  private fun accessibilityTreeSource(): AccessibilityService {
+    if (WeChatA11yComponent.isTreeReaderReady()) {
+      SelectToSpeakService.instance?.let { return it }
+    }
+    return this
+  }
+
   private fun collectExternalRoots(): List<AccessibilityNodeInfo> {
-    val results = mutableListOf<AccessibilityNodeInfo>()
-    val seenPackages = linkedSetOf<String>()
-
-    fun addRoot(root: AccessibilityNodeInfo) {
-      val pkg = root.packageName?.toString().orEmpty()
-      if (pkg.isBlank() || pkg == packageName || pkg in seenPackages || ExternalWindowFilter.isIgnoredPackage(pkg)) {
-        root.recycle()
-        return
-      }
-      seenPackages += pkg
-      results += AccessibilityNodeInfo.obtain(root)
-      root.recycle()
-    }
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-      windows?.forEach { window ->
-        if (window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) return@forEach
-        val root = window.root ?: return@forEach
-        addRoot(root)
-      }
-    }
-
-    findExternalRoot()?.let { cached ->
-      val pkg = cached.packageName?.toString().orEmpty()
-      if (pkg.isNotBlank() && pkg != packageName && pkg !in seenPackages &&
-          !ExternalWindowFilter.isIgnoredPackage(pkg)
-      ) {
-        seenPackages += pkg
-        results += cached
-      } else {
-        cached.recycle()
-      }
-    }
-
-    if (results.isEmpty()) {
-      rootInActiveWindow?.let { active ->
-        val pkg = active.packageName?.toString()
-        if (!pkg.isNullOrBlank() && pkg != packageName) {
-          results += AccessibilityNodeInfo.obtain(active)
-        }
-        active.recycle()
-      }
-    }
-    return results
+    val reader = accessibilityTreeSource()
+    val cached = if (reader === this) findExternalRoot() else null
+    return ExternalRootCollector.collect(reader, packageName, cached)
   }
 
   private fun queryFreshExternalRoot(): AccessibilityNodeInfo? {
@@ -605,25 +630,57 @@ class JoyAccessibilityService : AccessibilityService(), AccessibilityGateway {
     val roots = collectExternalRoots()
     if (roots.isEmpty()) return "点击失败：无法读取页面"
     return try {
-      var found: AccessibilityNodeInfo? = null
+      var best: AccessibilityNodeInfo? = null
+      var bestScore = Int.MIN_VALUE
       var matchedLabel = text
       for (candidate in ClickTargetNormalizer.clickCandidates(text)) {
         for (root in roots) {
-          found = NodeFinder.findClickableByText(root, candidate)
-          if (found != null) {
+          val found = NodeFinder.findClickableByText(root, candidate) ?: continue
+          val rect = android.graphics.Rect()
+          found.getBoundsInScreen(rect)
+          var score = 2_000_000 - rect.top
+          if (found.isVisibleToUser) score += 50_000
+          if (score > bestScore) {
+            best?.recycle()
+            best = found
+            bestScore = score
             matchedLabel = candidate
-            break
+          } else {
+            found.recycle()
           }
         }
-        if (found != null) break
       }
-      val node = found ?: return "点击失败：未找到包含「$text」的可点击元素"
-      recordTapFromNode(node)
-      val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-      node.recycle()
-      if (clicked) "已点击：$matchedLabel" else "点击失败：系统未接受点击操作"
+      val node = best ?: return "点击失败：未找到包含「$text」的可点击元素"
+      try {
+        clickNode(node, matchedLabel)
+      } finally {
+        node.recycle()
+      }
     } finally {
       roots.forEach { it.recycle() }
+    }
+  }
+
+  /**
+   * 优先手势点击节点中心：高德等自定义控件常对 ACTION_CLICK 返回 true 但不真正响应。
+   */
+  private fun clickNode(node: AccessibilityNodeInfo, matchedLabel: String): String {
+    recordTapFromNode(node)
+    val rect = Rect()
+    node.getBoundsInScreen(rect)
+    if (rect.width() > 0 && rect.height() > 0) {
+      val gesture = tapAt(
+        rect.exactCenterX(),
+        rect.exactCenterY(),
+        "已点击：$matchedLabel",
+      )
+      if (gesture != null) return gesture
+    }
+    val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    return if (clicked) {
+      "已点击：$matchedLabel"
+    } else {
+      "点击失败：系统未接受点击操作"
     }
   }
 
@@ -1200,6 +1257,8 @@ class JoyAccessibilityService : AccessibilityService(), AccessibilityGateway {
 
   companion object {
     private const val EXTERNAL_CACHE_MS = 8_000L
+    private const val UI_TREE_LOGCAT_TAG = "JoyForOld/UiTree"
+    private const val MIN_UI_TREE_LOGCAT_INTERVAL_MS = 1_000L
     private val UI_MUTATING_ACTIONS = setOf(
       "click", "tap", "type", "send",
       "scroll_down", "scroll_up", "back", "home", "open_app",
@@ -1270,8 +1329,12 @@ private object NodeFinder {
     queue.add(AccessibilityNodeInfo.obtain(root))
     val lower = text.lowercase()
     val tokens = lower.split(Regex("\\s+")).filter { it.length >= 1 }
+    var best: AccessibilityNodeInfo? = null
+    var bestScore = Int.MIN_VALUE
+    var walked = 0
 
-    while (queue.isNotEmpty()) {
+    while (queue.isNotEmpty() && walked < AgentContextLimits.SNAPSHOT_WALK_MAX_NODES) {
+      walked++
       val node = queue.removeFirst()
       val nodeText = UiNodeHeuristics.nodeLabel(node).lowercase()
       val matched = nodeText.contains(lower) ||
@@ -1280,8 +1343,46 @@ private object NodeFinder {
 
       if (matched) {
         val clickable = findClickableTarget(node)
-        queue.forEach { it.recycle() }
-        return clickable
+        if (clickable != null) {
+          val rect = android.graphics.Rect()
+          clickable.getBoundsInScreen(rect)
+          // 越靠上分越高（周边列表第一项=最近）；可见节点加分
+          var score = 2_000_000 - rect.top
+          if (clickable.isVisibleToUser) score += 50_000
+          if (nodeText == lower || nodeText.startsWith("$lower ")) score += 10_000
+          // 「导航」优先底部主按钮（门店详情 CTA），避开语音/设置等
+          if (lower == "导航") {
+            if (nodeText.trim() == "导航") score += 80_000
+            score += rect.bottom
+            if (nodeText.contains("语音") || nodeText.contains("设置")) score -= 80_000
+          }
+          if (lower == "开始导航" && nodeText.contains("开始导航")) score += 60_000
+          // 「路线」：列表项右侧 / 详情底栏
+          if (lower == "路线") {
+            if (nodeText.trim() == "路线" || nodeText.endsWith(" 路线")) score += 60_000
+            score += rect.left / 8
+            score += rect.bottom / 20
+          }
+          // 「公里」易误点「附近3公里」筛选芯片；优先门店距离「28.7公里」
+          if (lower.contains("公里")) {
+            if (nodeText.contains("附近")) score -= 200_000
+            if (Regex("""\d+\.\d+\s*公里""").containsMatchIn(nodeText)) score += 40_000
+          }
+          // 地点卡片常带括号副名（门店/分馆等），优先完整名称而非残片段
+          if ((nodeText.contains('(') || nodeText.contains('（')) &&
+            lower.length >= 2 &&
+            nodeText.contains(lower.take(minOf(lower.length, 8)))
+          ) {
+            score += 30_000
+          }
+          if (score > bestScore) {
+            best?.recycle()
+            best = clickable
+            bestScore = score
+          } else if (clickable !== best) {
+            clickable.recycle()
+          }
+        }
       }
 
       for (i in 0 until node.childCount) {
@@ -1289,7 +1390,8 @@ private object NodeFinder {
       }
       node.recycle()
     }
-    return null
+    queue.forEach { it.recycle() }
+    return best
   }
 
   fun findBestEditable(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {

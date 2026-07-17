@@ -40,7 +40,7 @@ object TaskStepTracker {
 
     fun fromPlannedActions(actions: List<AgentAction>): List<TaskStepItem> {
         return actions.mapIndexed { index, action ->
-            val label = when {
+            val label = AgentActionSet.uiLabel(action) ?: when {
                 action.action.equals("finish", ignoreCase = true) -> action.message ?: "完成"
                 action.message?.isNotBlank() == true -> action.message.orEmpty()
                 else -> action.action

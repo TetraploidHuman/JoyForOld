@@ -6,23 +6,21 @@ import android.content.Context
 
 import com.tetraploid.joyforold.accessibility.AccessibilityGateway
 import com.tetraploid.joyforold.accessibility.AccessibilityGateways
-
+import com.tetraploid.joyforold.agent.actionsets.dsl.ACTION_ASK_LLM
+import com.tetraploid.joyforold.agent.actionsets.dsl.ACTION_CAPTURE_PAGE_TEXTS
+import com.tetraploid.joyforold.agent.actionsets.dsl.ActionSetAskPolicy
+import com.tetraploid.joyforold.agent.actionsets.dsl.ActionSetDrain
 import com.tetraploid.joyforold.app.InstalledAppResolver
-
-import com.tetraploid.joyforold.preset.PresetCommandStore
-
-import com.tetraploid.joyforold.privacy.PageContextRedactor
-
 import com.tetraploid.joyforold.overlay.VisionOverlayGuard
-
+import com.tetraploid.joyforold.preset.PresetCommandStore
+import com.tetraploid.joyforold.privacy.PageContextRedactor
+import com.tetraploid.joyforold.privacy.SafeLog
+import com.tetraploid.joyforold.system.AmapPoiResolver
+import com.tetraploid.joyforold.system.SystemIntentExecutor
 import kotlinx.coroutines.CancellationException
-
 import kotlinx.coroutines.delay
-
 import kotlinx.coroutines.ensureActive
-
 import kotlin.coroutines.coroutineContext
-
 import org.json.JSONObject
 
 
@@ -51,6 +49,9 @@ class AgentOrchestrator(
         pendingMachine.restoreFromDisk()
     }
 
+    suspend fun planUserFacingPhases(apiKey: String, userCommand: String): List<TaskPhaseItem> =
+        llmClient.planUserFacingPhases(apiKey, userCommand)
+
     private val pendingExecutor = object : PendingExecutor {
         override suspend fun resumeUserConfirm(
             pending: PendingAgentState,
@@ -68,7 +69,10 @@ class AgentOrchestrator(
             originalCommand: String,
             runContext: AgentRunContext,
         ): AgentRunResult {
-            val result = executeLocalSteps(context, service, steps, originalCommand, runContext)
+            // 必须限定到外层 Orchestrator，否则会递归调用本 override 导致 StackOverflow
+            val result = this@AgentOrchestrator.executeLocalSteps(
+                context, service, steps, originalCommand, runContext,
+            )
             if (result.success && !result.waitingForUserConfirm && LocalFastPathGuard.isUndoable(steps)) {
                 LocalUndoRegistry.register(steps)
             }
@@ -99,6 +103,16 @@ class AgentOrchestrator(
             onProgress: ((Int, String) -> Unit)?,
         ): AgentRunResult = this@AgentOrchestrator.runDisambiguatedIntent(
             command, intentId, apiKey, appContext, runContext, onProgress,
+        )
+
+        override suspend fun runNavPoiPick(
+            poiIntentId: String,
+            originalCommand: String,
+            appContext: Context,
+            runContext: AgentRunContext,
+            onProgress: ((Int, String) -> Unit)?,
+        ): AgentRunResult = this@AgentOrchestrator.runNavPoiPick(
+            poiIntentId, originalCommand, appContext, runContext, onProgress,
         )
     }
 
@@ -297,6 +311,32 @@ class AgentOrchestrator(
 
                 }
 
+            } else {
+
+                val seedActionSet = route.steps.firstOrNull { AgentActionSet.isRunActionSetAction(it) }
+
+                if (seedActionSet != null && AgentActionSet.fromRunActionSetAction(seedActionSet) != null) {
+
+                    return runAgentLoop(
+
+                        command,
+
+                        command,
+
+                        apiKey,
+
+                        service,
+
+                        runContext,
+
+                        onProgress,
+
+                        seedActions = route.steps,
+
+                    )
+
+                }
+
             }
 
         }
@@ -393,8 +433,16 @@ class AgentOrchestrator(
         session: AgentConversationSession,
         action: AgentAction,
         snapshot: StructuredPageSnapshot?,
+        observationStore: AgentObservationStore? = null,
     ): AgentGuardedActionExecutor.Outcome =
-        AgentGuardedActionExecutor.execute(context, service, session, action, snapshot)
+        AgentGuardedActionExecutor.execute(
+            context = context,
+            service = service,
+            session = session,
+            action = action,
+            snapshot = snapshot,
+            observationStore = observationStore,
+        )
 
 
 
@@ -420,6 +468,8 @@ class AgentOrchestrator(
 
         resumePending: PendingAgentState? = null,
 
+        seedActions: List<AgentAction>? = null,
+
     ): AgentRunResult {
 
         val logs = mutableListOf<AgentStepLog>()
@@ -444,6 +494,7 @@ class AgentOrchestrator(
         val pageObserver = AgentPageObservationCapture(appHintStore, visionDebugStore).apply {
             seedPreviousSnapshot(initialSnapshot)
         }
+        val observationStore = AgentObservationStore()
 
         val pageContextNeed = IntentCapabilityMatrix.inferPageContextNeed(loopCommand)
 
@@ -467,16 +518,44 @@ class AgentOrchestrator(
 
         val agentToolsPrompt = IntentCapabilityMatrix.toolsPromptForContext(pageContextNeed)
 
-        suspend fun captureObservation(phase: String = "规划前"): PageObservationPayload {
+        suspend fun captureObservation(
+            phase: String = "规划前",
+            updatePlannerBaseline: Boolean = true,
+        ): PageObservationPayload {
             val observation = pageObserver.capture(
                 service = service,
                 session = session,
                 stepNo = stepNo,
                 pageContextNeed = pageContextNeed,
                 phase = phase,
+                updatePlannerBaseline = updatePlannerBaseline,
             )
             previousSnapshot = pageObserver.previousSnapshot
+            if (updatePlannerBaseline && pageContextNeed != IntentCapabilityMatrix.PageContextNeed.NONE) {
+                pageObserver.lastCapturedSnapshot?.let { snap ->
+                    observationStore.record(
+                        step = stepNo,
+                        snapshot = snap,
+                        diff = observation.pageDiff,
+                    )
+                }
+            }
             return observation
+        }
+
+        fun plannerLoopContext(): String = buildString {
+            append(
+                AgentLoopState.formatPlannerContext(
+                    state = loopState,
+                    session = session,
+                    stepNo = stepNo,
+                    maxSteps = MAX_AGENT_STEPS,
+                ),
+            )
+            observationStore.formatPromptHint().takeIf { it.isNotBlank() }?.let { hint ->
+                if (isNotEmpty()) appendLine()
+                append(hint)
+            }
         }
 
         var lastLlmScreenshotBase64: String? = null
@@ -497,12 +576,7 @@ class AgentOrchestrator(
 
             rememberLlmScreenshot(observation, phase = "规划续步")
 
-            val loopContext = AgentLoopState.formatPlannerContext(
-                state = loopState,
-                session = session,
-                stepNo = stepNo,
-                maxSteps = MAX_AGENT_STEPS,
-            )
+            val loopContext = plannerLoopContext()
 
             return llmClient.continueAfterStep(
 
@@ -546,12 +620,7 @@ class AgentOrchestrator(
 
                 runContext.awaitContinuation()
 
-                val resumeLoopContext = AgentLoopState.formatPlannerContext(
-                    state = loopState,
-                    session = session,
-                    stepNo = stepNo,
-                    maxSteps = MAX_AGENT_STEPS,
-                )
+                val resumeLoopContext = plannerLoopContext()
 
                 llmClient.continueAfterStep(
 
@@ -579,6 +648,16 @@ class AgentOrchestrator(
 
                 )
 
+            } else if (seedActions != null) {
+
+                // 路由已给出动作组：跳过首轮主规划，直接 drain（省一次易误判 finish 的 LLM）
+
+                llmClient.ensureSystemSeeded(session, memoryPrompt, toolsPrompt = agentToolsPrompt)
+
+                captureObservation(phase = "动作组启动")
+
+                org.json.JSONObject()
+
             } else {
 
                 val observation = captureObservation(phase = "任务开始")
@@ -589,12 +668,7 @@ class AgentOrchestrator(
 
                 runContext.awaitContinuation()
 
-                val loopContext = AgentLoopState.formatPlannerContext(
-                    state = loopState,
-                    session = session,
-                    stepNo = stepNo,
-                    maxSteps = MAX_AGENT_STEPS,
-                )
+                val loopContext = plannerLoopContext()
 
                 llmClient.beginTask(
 
@@ -629,7 +703,10 @@ class AgentOrchestrator(
 
 
             val actionQueue = ArrayDeque<AgentAction>()
-            var activePlaybook: AgentActionPlaybook.Match? = null
+
+            var activeActionSet: AgentActionSet.Match? = null
+
+            var consumeSeedPlan = seedActions != null && !resumeAfterUserReply
 
 
 
@@ -642,36 +719,99 @@ class AgentOrchestrator(
 
 
                 if (actionQueue.isEmpty()) {
-                    activePlaybook?.let { playbook ->
-                        AgentActionPlaybook.drainNextSteps(
-                            playbook = playbook,
-                            stepRecords = session.stepRecords,
-                        )?.let { planned ->
-                            actionQueue.addAll(planned)
+                    activeActionSet?.let { actionSet ->
+                        when (
+                            processActionSetDrain(
+                                actionSet = actionSet,
+                                session = session,
+                                service = service,
+                                apiKey = apiKey,
+                                actionQueue = actionQueue,
+                                stepNoHolder = { stepNo },
+                                setStepNo = { stepNo = it },
+                            )
+                        ) {
+                            ActionSetDrainOutcome.SIDE_EFFECT -> return@repeat
+                            ActionSetDrainOutcome.DONE -> activeActionSet = null
+                            ActionSetDrainOutcome.QUEUED -> Unit
                         }
                     }
                 }
 
                 if (actionQueue.isEmpty()) {
-                    val planned = AgentPlanParser.parsePlan(json)
-                    val expanded = AgentActionPlaybook.expandPlannedActions(planned)
-                    if (expanded.activePlaybook != null) {
-                        activePlaybook = expanded.activePlaybook
-                    }
-                    actionQueue.addAll(expanded.steps)
+                    if (consumeSeedPlan) {
+                        consumeSeedPlan = false
+                        val expanded = AgentActionSet.expandPlannedActions(seedActions.orEmpty())
+                        if (expanded.activeActionSet != null && activeActionSet == null) {
+                            activeActionSet = expanded.activeActionSet
+                        }
+                        actionQueue.addAll(expanded.steps)
+                        if (actionQueue.isEmpty()) {
+                            activeActionSet?.let { actionSet ->
+                                when (
+                                    processActionSetDrain(
+                                        actionSet = actionSet,
+                                        session = session,
+                                        service = service,
+                                        apiKey = apiKey,
+                                        actionQueue = actionQueue,
+                                        stepNoHolder = { stepNo },
+                                        setStepNo = { stepNo = it },
+                                    )
+                                ) {
+                                    ActionSetDrainOutcome.SIDE_EFFECT -> return@repeat
+                                    ActionSetDrainOutcome.DONE -> activeActionSet = null
+                                    ActionSetDrainOutcome.QUEUED -> Unit
+                                }
+                            }
+                        }
+                    } else {
+                        val planned = AgentPlanParser.parsePlan(json)
+                        val expanded = AgentActionSet.expandPlannedActions(planned)
+                        if (expanded.activeActionSet != null) {
+                            // 勿用新 Match 覆盖已在跑的动作组（会丢掉 askLlm 写回的 params）
+                            if (activeActionSet == null) {
+                                activeActionSet = expanded.activeActionSet
+                            }
+                        }
+                        actionQueue.addAll(expanded.steps)
 
-                    if (actionQueue.isEmpty()) {
-                        activePlaybook?.let { playbook ->
-                            AgentActionPlaybook.drainNextSteps(
-                                playbook = playbook,
-                                stepRecords = session.stepRecords,
-                            )?.let { planned ->
-                                actionQueue.addAll(planned)
+                        if (actionQueue.isEmpty()) {
+                            activeActionSet?.let { actionSet ->
+                                when (
+                                    processActionSetDrain(
+                                        actionSet = actionSet,
+                                        session = session,
+                                        service = service,
+                                        apiKey = apiKey,
+                                        actionQueue = actionQueue,
+                                        stepNoHolder = { stepNo },
+                                        setStepNo = { stepNo = it },
+                                    )
+                                ) {
+                                    ActionSetDrainOutcome.SIDE_EFFECT -> return@repeat
+                                    ActionSetDrainOutcome.DONE -> activeActionSet = null
+                                    ActionSetDrainOutcome.QUEUED -> Unit
+                                }
                             }
                         }
                     }
 
-                    if (actionQueue.isEmpty()) return@repeat
+                    // 无事可做：交给 continuePlanning 会在下方「未取到动作」路径处理；
+                    // 禁止空转 return@repeat 烧完 MAX_AGENT_STEPS。
+                    if (actionQueue.isEmpty()) {
+                        if (activeActionSet != null) {
+                            // 动作组 drain 已 Done 却未入队：结束动作组，向模型要下一步
+                            activeActionSet = null
+                        }
+                        // 落入下方会因 queue 空而无法执行；改为显式向 LLM 续跑
+                        coroutineContext.ensureActive()
+                        runContext.awaitContinuation()
+                        json = continuePlanning(
+                            "【系统】动作队列为空（动作组已结束或本轮无可执行步骤），请根据页面继续规划或 finish。",
+                        )
+                        return@repeat
+                    }
 
                 }
 
@@ -755,6 +895,7 @@ class AgentOrchestrator(
                         )
 
                         actionQueue.clear()
+                        pageObserver.requestFullContext()
 
                         json = continuePlanning("【系统阻止过早结束】\n$blockReason")
 
@@ -783,7 +924,7 @@ class AgentOrchestrator(
                         previousSnapshot = previousSnapshot,
 
                     ).also {
-                        activePlaybook = null
+                        activeActionSet = null
                     }
 
                 }
@@ -794,7 +935,10 @@ class AgentOrchestrator(
 
                     stepNo,
 
-                    if (actionQueue.isNotEmpty()) "执行：${action.action}（续）" else "执行：${action.action}",
+                    run {
+                        val name = AgentActionSet.uiLabel(action) ?: action.action
+                        if (actionQueue.isNotEmpty()) "执行：$name（续）" else "执行：$name"
+                    },
 
                 )
 
@@ -802,16 +946,17 @@ class AgentOrchestrator(
 
 
 
-                val hideOverlayForVision = VisionOverlayGuard.actionNeedsHiddenOverlay(
+                // click/手势必须藏悬浮窗：底栏「导航」会被交互卡片挡住（见 UITreeLog 窗口2）
+                val hideOverlayForTouch = VisionOverlayGuard.actionNeedsHiddenOverlay(
                     action = action,
                     snapshot = preActionSnapshot,
                 )
-                val outcome = if (hideOverlayForVision) {
+                val outcome = if (hideOverlayForTouch) {
                     VisionOverlayGuard.withHidden {
-                        executeGuardedAction(service.context(), service, session, action, previousSnapshot)
+                        executeGuardedAction(service.context(), service, session, action, previousSnapshot, observationStore)
                     }
                 } else {
-                    executeGuardedAction(service.context(), service, session, action, previousSnapshot)
+                    executeGuardedAction(service.context(), service, session, action, previousSnapshot, observationStore)
                 }
                 when (outcome) {
 
@@ -844,6 +989,7 @@ class AgentOrchestrator(
                         session.recordStep(stepNo, action, blockResult, "")
 
                         actionQueue.clear()
+                        pageObserver.requestFullContext()
 
                         val feedbackTag = if (blockReason.contains("重复")) {
 
@@ -909,8 +1055,11 @@ class AgentOrchestrator(
                         runContext.awaitContinuation()
 
                         val beforeSnapshot = previousSnapshot
-                        val observation = captureObservation(phase = "执行后")
-                        val afterSnapshot = previousSnapshot
+                        val observation = captureObservation(
+                            phase = "执行后",
+                            updatePlannerBaseline = false,
+                        )
+                        val afterSnapshot = pageObserver.lastCapturedSnapshot ?: previousSnapshot
                         val verification = AgentVerifier.verify(
                             action = action,
                             executionResult = result,
@@ -918,7 +1067,10 @@ class AgentOrchestrator(
                             afterSnapshot = afterSnapshot,
                             pageDiff = observation.pageDiff,
                         )
+                        // 动作组内：以无障碍执行结果为准。验证失败若再标 fail，
+                        // 会触发 FlowEngine 重入队同一步 →「click（续）」死循环。
                         val effectiveResult = if (
+                            activeActionSet == null &&
                             result.success &&
                             verification.status == AgentVerificationStatus.FAILED
                         ) {
@@ -1013,15 +1165,65 @@ class AgentOrchestrator(
 
 
 
+                        if (!effectiveResult.success) {
+                            actionQueue.clear()
+                            val actionSet = activeActionSet
+                            if (actionSet != null) {
+                                // 探测失败等应由动作组 onFail 分支消化，禁止直接拆掉 ActionSet
+                                when (
+                                    processActionSetDrain(
+                                        actionSet = actionSet,
+                                        session = session,
+                                        service = service,
+                                        apiKey = apiKey,
+                                        actionQueue = actionQueue,
+                                        stepNoHolder = { stepNo },
+                                        setStepNo = { stepNo = it },
+                                    )
+                                ) {
+                                    ActionSetDrainOutcome.QUEUED,
+                                    ActionSetDrainOutcome.SIDE_EFFECT,
+                                    -> return@repeat
+                                    ActionSetDrainOutcome.DONE -> {
+                                        // 动作组已尽力：轻量续规划，禁止立刻强制 FULL 重拉整树
+                                        activeActionSet = null
+                                    }
+                                }
+                            } else {
+                                pageObserver.requestFullContext()
+                            }
+                        } else if (actionQueue.isNotEmpty()) {
+                            // 本地队列（含 ActionSet 动作组）还有后续步骤：不调用 LLM
+                            return@repeat
+                        } else {
+                            val actionSet = activeActionSet
+                            if (actionSet != null) {
+                                when (
+                                    processActionSetDrain(
+                                        actionSet = actionSet,
+                                        session = session,
+                                        service = service,
+                                        apiKey = apiKey,
+                                        actionQueue = actionQueue,
+                                        stepNoHolder = { stepNo },
+                                        setStepNo = { stepNo = it },
+                                    )
+                                ) {
+                                    ActionSetDrainOutcome.QUEUED,
+                                    ActionSetDrainOutcome.SIDE_EFFECT,
+                                    -> return@repeat
+                                    ActionSetDrainOutcome.DONE -> activeActionSet = null
+                                }
+                            } else {
+                                activeActionSet = null
+                            }
+                        }
+
                         actionQueue.clear()
-
-
 
                         coroutineContext.ensureActive()
 
                         runContext.awaitContinuation()
-
-
 
                         json = continuePlanning(feedback)
 
@@ -1217,6 +1419,12 @@ class AgentOrchestrator(
 
         runContext.updateProgress(stepNo, "完成")
 
+        SafeLog.i(
+            "LLM usage[sessionEnd] session=${session.sessionId.take(8)} " +
+                "prompt=${session.promptTokensTotal} completion=${session.completionTokensTotal} " +
+                "total=${session.totalTokensTotal} steps=${session.stepRecords.size}",
+        )
+
         return AgentRunResult(true, rawSummary, updatedLogs, sessionId = session.sessionId)
 
     }
@@ -1233,6 +1441,151 @@ class AgentOrchestrator(
 
         store.saveFromSession(session, extracted)
 
+    }
+
+    private enum class ActionSetDrainOutcome {
+        QUEUED,
+        SIDE_EFFECT,
+        DONE,
+    }
+
+    /**
+     * 处理 ActionSet drain：入队普通动作；capture / askLlm 在本函数内链式做完并写伪步骤，
+     * 直到得到 UI 动作批或 Done（避免副作用每轮烧一步又落回 parsePlan）。
+     */
+    private suspend fun processActionSetDrain(
+        actionSet: AgentActionSet.Match,
+        session: AgentConversationSession,
+        service: AccessibilityGateway,
+        apiKey: String,
+        actionQueue: ArrayDeque<AgentAction>,
+        stepNoHolder: () -> Int,
+        setStepNo: (Int) -> Unit,
+    ): ActionSetDrainOutcome {
+        var sawSideEffect = false
+        repeat(8) {
+            when (val drain = AgentActionSet.drainNextSteps(actionSet, session.stepRecords)) {
+                is ActionSetDrain.RunActions -> {
+                    if (drain.steps.isEmpty()) return ActionSetDrainOutcome.DONE
+                    actionQueue.addAll(drain.steps)
+                    return ActionSetDrainOutcome.QUEUED
+                }
+                is ActionSetDrain.CapturePageTexts -> {
+                    sawSideEffect = true
+                    val next = stepNoHolder() + 1
+                    setStepNo(next)
+                    val snap = service.captureBestStructuredSnapshot()
+                    // ActionSet 窄域候选：可点文案优先（列表项多半可点），不够再用可见文字。
+                    // 绝不回传整棵 UI 树。单条上限放宽，避免淘宝商品长 desc 被裁掉。
+                    val texts = buildList {
+                        snap?.clickables?.let { addAll(it) }
+                        if (isEmpty()) snap?.visibleTexts?.let { addAll(it) }
+                    }
+                        .map { it.trim() }
+                        .filter { it.length in 2..400 }
+                        .distinct()
+                        .take(60)
+                    val joined = texts.joinToString("|")
+                    actionSet.updateParams(mapOf(drain.intoParam to joined))
+                    session.recordStep(
+                        step = next,
+                        action = AgentAction(
+                            action = ACTION_CAPTURE_PAGE_TEXTS,
+                            targetText = drain.intoParam,
+                            message = joined.take(200),
+                        ),
+                        result = ActionExecutionResult(true, "candidates=${texts.size}"),
+                        pageDiff = "",
+                    )
+                }
+                is ActionSetDrain.AskLlm -> {
+                    sawSideEffect = true
+                    val next = stepNoHolder() + 1
+                    setStepNo(next)
+                    val priorAttempts = session.stepRecords.count {
+                        it.action.action.equals(ACTION_ASK_LLM, ignoreCase = true) &&
+                            it.action.targetText == drain.phaseId
+                    }
+                    val updates = try {
+                        llmClient.resolveActionSetAsk(
+                            apiKey = apiKey,
+                            systemPrompt = drain.systemPrompt,
+                            userPrompt = drain.userPrompt,
+                            writeFields = drain.writeFields,
+                        )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        emptyMap()
+                    }
+                    actionSet.updateParams(updates)
+                    val unresolved = ActionSetAskPolicy.unresolvedFields(
+                        params = actionSet.params,
+                        writeFields = drain.writeFields,
+                    )
+                    if (unresolved.isNotEmpty()) {
+                        if (ActionSetAskPolicy.shouldRetry(priorAttempts)) {
+                            session.recordStep(
+                                step = next,
+                                action = AgentAction(
+                                    action = ACTION_ASK_LLM,
+                                    targetText = drain.phaseId,
+                                    message = "missing=${unresolved.joinToString(",")}",
+                                ),
+                                result = ActionExecutionResult(
+                                    success = false,
+                                    summary = "askLlm retry",
+                                ),
+                                pageDiff = "",
+                            )
+                            // FlowEngine 见失败伪步骤会再次 AskLlm
+                            return ActionSetDrainOutcome.SIDE_EFFECT
+                        }
+                        // 重试耗尽：记成功以越过 ask 相位，入队 finish，禁止空目标硬点
+                        session.recordStep(
+                            step = next,
+                            action = AgentAction(
+                                action = ACTION_ASK_LLM,
+                                targetText = drain.phaseId,
+                                message = "aborted=${unresolved.joinToString(",")}",
+                            ),
+                            result = ActionExecutionResult(
+                                success = true,
+                                summary = "askLlm aborted",
+                            ),
+                            pageDiff = "",
+                        )
+                        actionQueue.clear()
+                        actionQueue.add(
+                            AgentAction(
+                                action = "finish",
+                                message = ActionSetAskPolicy.abortFinishMessage(unresolved),
+                                finished = true,
+                                waitingForUser = true,
+                            ),
+                        )
+                        return ActionSetDrainOutcome.QUEUED
+                    }
+                    session.recordStep(
+                        step = next,
+                        action = AgentAction(
+                            action = ACTION_ASK_LLM,
+                            targetText = drain.phaseId,
+                            message = updates.entries.joinToString(",") { "${it.key}=${it.value}" }
+                                .take(200),
+                        ),
+                        result = ActionExecutionResult(
+                            success = true,
+                            summary = "askLlm ok",
+                        ),
+                        pageDiff = "",
+                    )
+                }
+                ActionSetDrain.Done -> return ActionSetDrainOutcome.DONE
+            }
+        }
+        // 副作用链异常过长：若刚做过副作用，让外层再进一轮；否则视为结束
+        return if (sawSideEffect) ActionSetDrainOutcome.SIDE_EFFECT else ActionSetDrainOutcome.DONE
     }
 
 
@@ -1335,6 +1688,23 @@ class AgentOrchestrator(
         for (action in steps) {
 
             runContext.awaitContinuation()
+
+            if (action.action.equals("navigate_pick", ignoreCase = true)) {
+                val query = action.targetText?.trim().orEmpty()
+                val nearLandmark = action.inputText?.trim()?.ifBlank { null }
+                stepNo++
+                val pickOutcome = handleNavigatePick(
+                    context = context,
+                    service = service,
+                    query = query,
+                    nearLandmark = nearLandmark,
+                    userCommand = userCommand,
+                    stepNo = stepNo,
+                    logs = logs,
+                )
+                if (pickOutcome != null) return pickOutcome
+                continue
+            }
 
             if (action.action.equals("finish", ignoreCase = true) || action.finished) {
 
@@ -1554,85 +1924,164 @@ class AgentOrchestrator(
     }
 
     private fun needsNavigationDelay(action: AgentAction): Boolean {
-
-        return action.action.equals("click", ignoreCase = true) ||
-
-            action.action.equals("back", ignoreCase = true) ||
-
-            action.action.equals("swipe_down", ignoreCase = true) ||
-
-            action.action.equals("open_app", ignoreCase = true)
-
+        val name = action.action.lowercase()
+        return name == "open_app" || name == "navigate_to" || name == "navigate_home"
     }
 
     private fun navigationDelayMs(action: AgentAction): Long =
-        if (action.action.equals("open_app", ignoreCase = true)) OPEN_APP_DELAY_MS else NAVIGATION_DELAY_MS
-
-    suspend fun runDisambiguatedIntent(
-
-        command: String,
-
-        intentId: String,
-
-        apiKey: String,
-
-        appContext: Context,
-
-        runContext: AgentRunContext,
-
-        onProgress: ((Int, String) -> Unit)? = null,
-
-    ): AgentRunResult {
-
-        val service = AccessibilityGateways.current
-
-            ?: return AgentRunResult(false, "无障碍服务未连接", emptyList())
-
-        val steps = IntentDisambiguationHelper.stepsForIntent(command, intentId, appContext)
-
-            ?: return AgentRunResult(false, "无法执行所选意图", emptyList())
-
-        pendingMachine.clear()
-
-        val result = executeLocalSteps(appContext, service, steps, command, runContext)
-
-        if (result.success && !result.waitingForUserConfirm && LocalFastPathGuard.isUndoable(steps)) {
-
-            LocalUndoRegistry.register(steps)
-
+        when {
+            action.action.equals("open_app", ignoreCase = true) -> OPEN_APP_DELAY_MS
+            action.action.equals("navigate_to", ignoreCase = true) -> OPEN_APP_DELAY_MS
+            else -> NAVIGATION_DELAY_MS
         }
 
+    suspend fun runDisambiguatedIntent(
+        command: String,
+        intentId: String,
+        apiKey: String,
+        appContext: Context,
+        runContext: AgentRunContext,
+        onProgress: ((Int, String) -> Unit)? = null,
+    ): AgentRunResult {
+        val service = AccessibilityGateways.current
+            ?: return AgentRunResult(false, "无障碍服务未连接", emptyList())
+        val steps = IntentDisambiguationHelper.stepsForIntent(command, intentId, appContext)
+            ?: return AgentRunResult(false, "无法执行所选意图", emptyList())
+        pendingMachine.clear()
+        val result = executeLocalSteps(appContext, service, steps, command, runContext)
+        if (result.success && !result.waitingForUserConfirm && LocalFastPathGuard.isUndoable(steps)) {
+            LocalUndoRegistry.register(steps)
+        }
         return result
-
     }
 
+    suspend fun runNavPoiPick(
+        poiIntentId: String,
+        originalCommand: String,
+        appContext: Context,
+        runContext: AgentRunContext,
+        onProgress: ((Int, String) -> Unit)? = null,
+    ): AgentRunResult {
+        val poi = NavPoiPickCodec.parse(poiIntentId)
+            ?: return AgentRunResult(false, "无法识别所选地点", emptyList())
+        pendingMachine.clear()
+        onProgress?.invoke(1, "执行：导航前往${poi.name}")
+        val exec = SystemIntentExecutor.navigateToPoi(appContext, poi)
+        return AgentRunResult(
+            success = exec.success,
+            summary = if (exec.success) "正在为您导航前往：${poi.name}" else exec.summary,
+            logs = listOf(
+                AgentStepLog(
+                    step = 1,
+                    action = AgentAction(action = "navigate_to", targetText = poi.name),
+                    success = exec.success,
+                    detail = exec.summary,
+                ),
+            ),
+        )
+    }
 
+    private fun handleNavigatePick(
+        context: Context,
+        service: AccessibilityGateway?,
+        query: String,
+        nearLandmark: String?,
+        userCommand: String,
+        stepNo: Int,
+        logs: MutableList<AgentStepLog>,
+    ): AgentRunResult? {
+        if (query.isBlank()) {
+            logs += AgentStepLog(
+                step = stepNo,
+                action = AgentAction(action = "navigate_pick"),
+                success = false,
+                detail = "未指定目的地",
+            )
+            return AgentRunResult(false, "未指定目的地", logs)
+        }
+        val displayQuery = when {
+            nearLandmark.isNullOrBlank() -> query
+            AmapPoiResolver.looksLikeAdminRegion(nearLandmark) -> "${nearLandmark}的$query"
+            else -> "${nearLandmark}附近的$query"
+        }
+        val candidates = if (!nearLandmark.isNullOrBlank()) {
+            AmapPoiResolver.searchNearLandmark(context, nearLandmark, query)
+        } else {
+            // 若 query 本身是「行政区的品类」，也要按区域搜，避免用桂阳 GPS
+            val scoped = SystemIntentLocalParser.splitScopedPoiQuery(query)
+            if (scoped != null) {
+                AmapPoiResolver.searchNearLandmark(context, scoped.landmark, scoped.poi)
+            } else {
+                AmapPoiResolver.searchCandidates(context, query)
+            }
+        }
+        when {
+            candidates.isEmpty() -> {
+                // 无 Web 结果时降级为 navigate_to（keywordNavi）
+                val fallback = SystemIntentExecutor.execute(context, "navigate_to", query, nearLandmark)
+                logs += AgentStepLog(
+                    step = stepNo,
+                    action = AgentAction(action = "navigate_to", targetText = query, inputText = nearLandmark),
+                    success = fallback.success,
+                    detail = fallback.summary,
+                )
+                return AgentRunResult(
+                    success = fallback.success,
+                    summary = if (fallback.success) "正在为您导航前往：$displayQuery" else fallback.summary,
+                    logs = logs,
+                )
+            }
+            candidates.size == 1 -> {
+                val poi = candidates.first()
+                val exec = SystemIntentExecutor.navigateToPoi(context, poi)
+                logs += AgentStepLog(
+                    step = stepNo,
+                    action = AgentAction(action = "navigate_to", targetText = poi.name),
+                    success = exec.success,
+                    detail = exec.summary,
+                )
+                return AgentRunResult(
+                    success = exec.success,
+                    summary = if (exec.success) "正在为您导航前往：${poi.name}" else exec.summary,
+                    logs = logs,
+                )
+            }
+            else -> {
+                val options = candidates.mapIndexed { index, poi ->
+                    NavPoiPickCodec.toOption(poi, index)
+                }
+                logs += AgentStepLog(
+                    step = stepNo,
+                    action = AgentAction(action = "navigate_pick", targetText = query, inputText = nearLandmark),
+                    success = true,
+                    detail = "待用户从 ${options.size} 个候选中选择",
+                )
+                val wait = pendingMachine.saveNavPoiPickPending(
+                    command = userCommand,
+                    query = displayQuery,
+                    options = options,
+                    service = service,
+                )
+                return wait.copy(logs = logs)
+            }
+        }
+    }
 
     companion object {
-
         private const val MAX_AGENT_STEPS = 30
-
         private const val ACTION_DELAY_MS = 100L
         private const val VISION_TAP_BEFORE_TYPE_MS = 800L
-
         private const val NAVIGATION_DELAY_MS = 280L
-
         private const val OPEN_APP_DELAY_MS = 500L
-
         private const val WAIT_ACTION_MS = 900L
-
         private const val PAGE_READY_TIMEOUT_MS = 6_000L
-
         private const val PAGE_READY_POLL_MS = 250L
-
         private val INFO_QUERY_ACTIONS = setOf(
             "tell_time",
             "query_weather",
             "read_unread_messages",
         )
-
     }
-
 }
 
 

@@ -2,18 +2,27 @@ package com.tetraploid.joyforold.collaboration
 
 import com.tetraploid.joyforold.assist.protocol.AssistControlMessage
 import com.tetraploid.joyforold.assist.protocol.AssistMessageJson
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import okio.ByteString
-import java.util.concurrent.TimeUnit
+import com.tetraploid.joyforold.network.JoyHttpClients
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
+import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.websocket.CloseReason
+import io.ktor.websocket.Frame
+import io.ktor.websocket.close
+import io.ktor.websocket.readBytes
+import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicReference
 
 class AssistRelayClient(
     private val listener: Listener,
-    private val client: OkHttpClient = sharedClient,
+    private val client: HttpClient = JoyHttpClients.websocket(),
 ) {
     interface Listener {
         fun onOpen()
@@ -23,66 +32,70 @@ class AssistRelayClient(
         fun onFailure(message: String)
     }
 
-    private val socketRef = AtomicReference<WebSocket?>(null)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val sessionRef = AtomicReference<DefaultClientWebSocketSession?>(null)
+    private var connectJob: Job? = null
 
     fun connect(token: String, wsBaseUrl: String) {
         disconnect()
-        val wsUrl = AssistEndpointUrls.normalizeWsBase(
-            raw = wsBaseUrl,
-            httpBase = "",
-            default = wsBaseUrl,
-        )
-        val request = Request.Builder()
-            .url("$wsUrl?token=${java.net.URLEncoder.encode(token, Charsets.UTF_8.name())}")
-            .build()
-        socketRef.set(
-            client.newWebSocket(
-                request,
-                object : WebSocketListener() {
-                    override fun onOpen(webSocket: WebSocket, response: Response) {
-                        listener.onOpen()
+        connectJob = scope.launch {
+            try {
+                val wsUrl = AssistEndpointUrls.normalizeWsBase(
+                    raw = wsBaseUrl,
+                    httpBase = "",
+                    default = wsBaseUrl,
+                )
+                val url = "$wsUrl?token=${java.net.URLEncoder.encode(token, Charsets.UTF_8.name())}"
+                client.webSocket(urlString = url) {
+                    sessionRef.set(this)
+                    listener.onOpen()
+                    try {
+                        for (frame in incoming) {
+                            when (frame) {
+                                is Frame.Text -> AssistMessageJson.decode(frame.readText())?.let(listener::onControlMessage)
+                                is Frame.Binary -> listener.onBinaryFrame(frame.readBytes())
+                                else -> Unit
+                            }
+                        }
+                        listener.onClosed(null)
+                    } finally {
+                        sessionRef.set(null)
                     }
-
-                    override fun onMessage(webSocket: WebSocket, text: String) {
-                        AssistMessageJson.decode(text)?.let(listener::onControlMessage)
-                    }
-
-                    override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                        listener.onBinaryFrame(bytes.toByteArray())
-                    }
-
-                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                        webSocket.close(code, reason)
-                    }
-
-                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                        listener.onClosed(reason.ifBlank { null })
-                    }
-
-                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                        listener.onFailure(t.message ?: "WebSocket 连接失败")
-                    }
-                },
-            ),
-        )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                listener.onFailure(error.message ?: "WebSocket 连接失败")
+            }
+        }
     }
 
-    fun sendControl(message: AssistControlMessage): Boolean =
-        socketRef.get()?.send(AssistMessageJson.encode(message)) == true
+    fun sendControl(message: AssistControlMessage): Boolean {
+        val session = sessionRef.get() ?: return false
+        return runBlocking {
+            runCatching {
+                session.send(Frame.Text(AssistMessageJson.encode(message)))
+                true
+            }.getOrDefault(false)
+        }
+    }
 
     fun sendFrame(meta: AssistControlMessage, bytes: ByteArray): Boolean {
-        val socket = socketRef.get() ?: return false
-        return socket.send(AssistMessageJson.encode(meta)) && socket.send(ByteString.of(*bytes))
+        val session = sessionRef.get() ?: return false
+        return runBlocking {
+            runCatching {
+                session.send(Frame.Text(AssistMessageJson.encode(meta)))
+                session.send(Frame.Binary(true, bytes))
+                true
+            }.getOrDefault(false)
+        }
     }
 
     fun disconnect() {
-        socketRef.getAndSet(null)?.close(1000, "client_disconnect")
-    }
-
-    companion object {
-        private val sharedClient = OkHttpClient.Builder()
-            .pingInterval(30, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.MILLISECONDS)
-            .build()
+        connectJob?.cancel()
+        connectJob = null
+        runBlocking {
+            sessionRef.getAndSet(null)?.close(CloseReason(CloseReason.Codes.NORMAL, "client_disconnect"))
+        }
     }
 }

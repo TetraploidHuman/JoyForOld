@@ -24,7 +24,7 @@ object IntentCapabilityMatrix {
         NONE,
         /** 仅一行摘要（时间/天气等） */
         MINIMAL,
-        /** 需要无障碍页面结构（微信发消息、点按钮等） */
+        /** 需要无障碍页面结构（逐步 UI 自动化等） */
         UI_FULL,
     }
 
@@ -303,6 +303,28 @@ object IntentCapabilityMatrix {
 
         putCap(
             Capability(
+                id = "navigate_to",
+                routeTier = RouteTier.LOCAL_FAST,
+                pageContextNeed = PageContextNeed.NONE,
+                requiresNetwork = true,
+                requiresAccessibility = false,
+                allowedOfflineNlu = true,
+            ),
+        )
+
+        putCap(
+            Capability(
+                id = "navigate_pick",
+                routeTier = RouteTier.LOCAL_FAST,
+                pageContextNeed = PageContextNeed.NONE,
+                requiresNetwork = true,
+                requiresAccessibility = false,
+                allowedOfflineNlu = false,
+            ),
+        )
+
+        putCap(
+            Capability(
                 id = "read_unread_messages",
                 routeTier = RouteTier.LOCAL_FAST,
                 pageContextNeed = PageContextNeed.NONE,
@@ -313,8 +335,13 @@ object IntentCapabilityMatrix {
         )
 
         // --- UI Agent 工具 ---
-        listOf("click", "type", "send", "scroll_down", "scroll_up", "back", "home", "wait",
-            "find_on_page", "read_tree", "swipe_down", "list_apps",
+        listOf(
+            "click", "type", "send", "scroll_down", "scroll_up", "back", "home", "wait",
+            "find_on_page", "read_tree",
+            AgentObservationQueries.ACTION_QUERY_PAGE,
+            AgentObservationQueries.ACTION_QUERY_DIFF,
+            AgentObservationQueries.ACTION_QUERY_TREE,
+            "swipe_down", "list_apps",
         ).forEach { id ->
             putCap(
                 Capability(
@@ -359,10 +386,22 @@ object IntentCapabilityMatrix {
         """(给|跟|和|向).{1,20}(发消息|发短信|发信息|发微信|发qq|说|告诉|通知)""",
     )
 
+    /** 已有固定 ActionSet 的意图：入口用 MINIMAL，优先 run_action_set，少传整棵 UI 树。 */
+    private val taobaoSearchGoal = Regex(
+        """(淘宝|天猫).{0,16}(搜|找|买|看看)|(在)?淘宝(上)?(搜|找)|搜.{0,12}(淘宝|天猫)""",
+    )
+
+    private val wechatMessageGoal = Regex(
+        """微信.{0,16}(发消息|发信息|告诉|通知|说)|(给|跟|和|向).{1,20}(发消息|发微信|发信息)""",
+    )
+    private val mapNavigateGoal = Regex(
+        """导航到|导航去|带我去|带我到|带我前往|去最近的|去附近的|我要去附近|我要去最近""",
+    )
+
     /** 系统 Intent 一步即可完成、无需进 App 内自动化。 */
     private val systemCompleteActions = setOf(
         "dial_contact", "send_sms", "set_alarm", "add_calendar_event",
-        "tell_time", "query_weather", "navigate_home", "emergency_help",
+        "tell_time", "query_weather", "navigate_home", "navigate_to", "navigate_pick", "emergency_help",
         "ask_family_for_help", "open_bluetooth_settings", "open_wifi_settings",
         "open_settings", "open_sound_settings", "open_mobile_data_settings",
         "open_location_settings", "open_display_settings", "open_font_settings",
@@ -387,8 +426,29 @@ object IntentCapabilityMatrix {
         if (complexQuery.containsMatchIn(text) && !uiAutomationHints.containsMatchIn(text)) {
             return PageContextNeed.NONE
         }
+        // 有现成 ActionSet：入口只给轻量上下文，把固定路径交给 run_action_set
+        if (prefersActionSetEntry(text)) return PageContextNeed.MINIMAL
         if (uiAutomationHints.containsMatchIn(text)) return PageContextNeed.UI_FULL
         return PageContextNeed.NONE
+    }
+
+    /** 是否应优先走已注册 ActionSet（入口省树）。 */
+    fun prefersActionSetEntry(command: String): Boolean {
+        val text = command.trim()
+        if (text.isBlank()) return false
+        if (taobaoSearchGoal.containsMatchIn(text)) return true
+        if (wechatMessageGoal.containsMatchIn(text)) return true
+        if (mapNavigateGoal.containsMatchIn(text) && !text.contains("回家") && !text.contains("家里")) {
+            return true
+        }
+        // 「给谁发消息」默认微信动作组；短信/QQ 仍走逐步或其它路径
+        if (contactMessageGoal.containsMatchIn(text) &&
+            !text.contains("短信") &&
+            !text.contains("qq", ignoreCase = true)
+        ) {
+            return true
+        }
+        return false
     }
 
     fun pageContextModeForNeed(need: PageContextNeed, dynamicMode: PageContextMode): PageContextMode =
@@ -436,8 +496,12 @@ object IntentCapabilityMatrix {
      */
     fun shouldExecuteRouteLocally(command: String, route: CommandRouteResolver.Route): Boolean {
         if (route.source == "template" && route.confidence >= 1.0) return true
-        if (!isMultiStepUtterance(command)) return true
         val primarySteps = route.steps.filterNot { it.action.equals("finish", ignoreCase = true) }
+        // 动作组需 Agent 循环 drain（含 capture/askLlm），不能当本地一步跑完
+        if (primarySteps.any { it.action.equals(AgentActionSet.ACTION_RUN_ACTION_SET, ignoreCase = true) }) {
+            return false
+        }
+        if (!isMultiStepUtterance(command)) return true
         if (primarySteps.isEmpty()) return true
         if (primarySteps.size == 1) {
             val action = primarySteps.first().action.lowercase()
@@ -481,9 +545,19 @@ object IntentCapabilityMatrix {
 
     fun toolsPromptForContext(need: PageContextNeed): String = when (need) {
         PageContextNeed.UI_FULL -> AgentToolRegistry.descriptionsForPrompt()
-        PageContextNeed.MINIMAL -> systemToolsOnlyPrompt()
+        PageContextNeed.MINIMAL -> actionSetPreferToolsPrompt()
         PageContextNeed.NONE -> systemToolsOnlyPrompt()
     }
+
+    /** MINIMAL：优先动作组，少带页面树；参数不全用 finish 追问。 */
+    private fun actionSetPreferToolsPrompt(): String = """
+        可用工具（action 字段）：
+        ${AgentActionSet.descriptionsForPrompt()}
+        - open_app: 打开应用（仅当动作组不适用时）
+        - finish: 结束；参数不全时 waiting_for_user:true 追问用户
+        **优先**：用户意图匹配已有动作组且参数齐全时，直接 run_action_set；不要逐步 click/type 规划整条固定路径。
+        返回 JSON：{"action":"...","target_text":"","input_text":"","message":"","finished":false,"waiting_for_user":false,"needs_binary_confirm":false}
+    """.trimIndent()
 
     private fun systemToolsOnlyPrompt(): String = """
         可用工具（action 字段）：
@@ -495,7 +569,7 @@ object IntentCapabilityMatrix {
         - open_camera / open_gallery / open_weather / open_app: 打开相机/相册/天气/应用
         - tell_time / query_weather: 查时间/天气
         - open_health_code / open_payment_code: 健康码/付款码
-        - navigate_home / ask_family_for_help / emergency_help: 导航回家/家人协助/紧急呼救
+        - navigate_home / navigate_to / ask_family_for_help / emergency_help: 导航回家/导航到目的地/家人协助/紧急呼救
         - finish: 结束；waiting_for_user:true 时等待用户回复
         返回 JSON：{"action":"...","target_text":"","input_text":"","message":"","finished":false,"waiting_for_user":false,"needs_binary_confirm":false}
     """.trimIndent()

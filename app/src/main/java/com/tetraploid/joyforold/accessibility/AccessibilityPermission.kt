@@ -5,23 +5,35 @@ import android.content.ComponentName
 import android.content.Context
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
+import com.google.android.accessibility.selecttospeak.SelectToSpeakService
 
 object AccessibilityPermission {
-    private fun expectedComponent(context: Context): ComponentName {
-        return ComponentName(context, JoyAccessibilityService::class.java)
-    }
+    private fun joyComponent(context: Context): ComponentName =
+        ComponentName(context, JoyAccessibilityService::class.java)
 
-    /** 系统设置里是否已勾选本应用的无障碍服务 */
+    private fun whitelistReaderComponent(context: Context): ComponentName =
+        ComponentName(context, SelectToSpeakService::class.java)
+
+    /** 主无障碍服务（手势、Agent）是否在系统设置中已开启 */
     fun isSettingEnabled(context: Context): Boolean {
-        if (isEnabledInSecureSettings(context)) return true
-        return isEnabledInAccessibilityManager(context)
+        if (isComponentEnabledInSecureSettings(context, joyComponent(context))) return true
+        return isComponentEnabledInAccessibilityManager(context, joyComponent(context))
     }
 
-    /** 无障碍服务进程是否已绑定到当前应用 */
+    /** 微信读取增强（白名单类名）是否在系统设置中已开启 */
+    fun isWhitelistReaderSettingEnabled(context: Context): Boolean {
+        if (isComponentEnabledInSecureSettings(context, whitelistReaderComponent(context))) return true
+        return isComponentEnabledInAccessibilityManager(context, whitelistReaderComponent(context))
+    }
+
+    /** 主服务进程是否已连接 */
     fun isServiceConnected(): Boolean = AccessibilityGateways.isConnected
 
+    /** 白名单读取服务进程是否已连接 */
+    fun isWhitelistReaderConnected(): Boolean = SelectToSpeakService.instance != null
+
     /**
-     * 兼容旧调用：设置已开或实例已连接均视为可用。
+     * 兼容旧调用：主服务设置已开或主服务实例已连接。
      * UI 状态请优先用 [isSettingEnabled] + [isServiceConnected] 分开展示。
      */
     fun isEnabled(context: Context): Boolean {
@@ -29,24 +41,26 @@ object AccessibilityPermission {
         return isSettingEnabled(context)
     }
 
-    private fun isEnabledInSecureSettings(context: Context): Boolean {
+    private fun isComponentEnabledInSecureSettings(context: Context, component: ComponentName): Boolean {
         val flat = Settings.Secure.getString(
             context.contentResolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
         ) ?: return false
-        val expected = expectedComponent(context).flattenToString()
+        val expected = component.flattenToString()
         return flat.split(':').any { it.equals(expected, ignoreCase = true) }
     }
 
-    private fun isEnabledInAccessibilityManager(context: Context): Boolean {
+    private fun isComponentEnabledInAccessibilityManager(
+        context: Context,
+        component: ComponentName,
+    ): Boolean {
         val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
             ?: return false
         if (!manager.isEnabled) return false
-        val expected = expectedComponent(context)
         val services = manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
         return services.any { info ->
             val service = info.resolveInfo.serviceInfo
-            service.packageName == expected.packageName && service.name == expected.className
+            service.packageName == component.packageName && service.name == component.className
         }
     }
 }

@@ -23,6 +23,9 @@ interface AccessibilityGateway {
 
     fun snapshotTreeForDebug(): String
 
+    /** 开启/关闭持续将 UI 树打到 logcat（内容与 [snapshotForAgent] 一致）。 */
+    fun setContinuousUiTreeLogcatEnabled(enabled: Boolean)
+
     suspend fun captureScreenshotBase64(forceFresh: Boolean = false): String?
 
     fun executeWithResult(action: AgentAction): ActionExecutionResult

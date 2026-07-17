@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/Andclaw" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/AutoGLM-Android" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/ElderBridge-Guardianos" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/Open-AutoGLM-Android" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/Sahay" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/SightSync" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/alian-android" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/androidclaw" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/droidlm" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/mantis" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/mobileClaw" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/opengui-android" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/_reference/sannabotapp" vcs="Git" />
+  </component>
+</project>

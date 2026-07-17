@@ -87,6 +87,9 @@ class DemoViewModel(
     fun setVisionDebugEnabled(enabled: Boolean) =
         runtime.setVisionDebugEnabled(getApplication(), enabled)
 
+    fun setUiTreeLogcatEnabled(enabled: Boolean) =
+        runtime.setUiTreeLogcatEnabled(getApplication(), enabled)
+
     fun refreshVisionDebugFrames() = runtime.refreshVisionDebugFrames()
 
     fun clearVisionDebugFrames() = runtime.clearVisionDebugFrames()

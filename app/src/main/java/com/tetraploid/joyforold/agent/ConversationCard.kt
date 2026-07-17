@@ -110,10 +110,49 @@ object ConversationCardFactory {
         showBinaryActions = true,
     )
 
-    fun overlayInteraction(state: AgentUiState): ConversationCard? {
-        if (!state.waitingForUserConfirm || state.confirmPrompt.isNullOrBlank()) return null
-        return confirm(state.confirmPrompt, state.needsBinaryConfirm)
+    fun overlayInteraction(
+        state: AgentUiState,
+        sessionCards: List<ConversationCard> = emptyList(),
+    ): ConversationCard? {
+        if (state.visionAgentActive) return null
+        val interactionKinds = OVERLAY_INTERACTION_KINDS
+        if (state.waitingForUserConfirm && !state.confirmPrompt.isNullOrBlank()) {
+            return sessionCards.lastOrNull { it.kind in interactionKinds }
+                ?: confirm(state.confirmPrompt, state.needsBinaryConfirm)
+        }
+        return sessionCards.lastOrNull { it.kind == ConversationCardKind.Undo }
     }
+
+    /**
+     * 悬浮层展示的会话卡片：无障碍模式显示计划/进度/确认等；视觉模式返回空。
+     */
+    fun overlaySessionCards(
+        state: AgentUiState,
+        sessionCards: List<ConversationCard> = emptyList(),
+    ): List<ConversationCard> {
+        if (state.visionAgentActive) return emptyList()
+        val filtered = sessionCards.filter { it.kind in OVERLAY_SESSION_KINDS }
+        if (filtered.isNotEmpty()) return filtered.takeLast(4)
+        // 会话列表尚未写入时，仍用确认态兜底一张卡
+        return listOfNotNull(overlayInteraction(state, sessionCards))
+    }
+
+    private val OVERLAY_INTERACTION_KINDS = setOf(
+        ConversationCardKind.Confirm,
+        ConversationCardKind.Disambiguation,
+        ConversationCardKind.Preview,
+        ConversationCardKind.Undo,
+    )
+
+    private val OVERLAY_SESSION_KINDS = setOf(
+        ConversationCardKind.Plan,
+        ConversationCardKind.Progress,
+        ConversationCardKind.Info,
+        ConversationCardKind.Confirm,
+        ConversationCardKind.Disambiguation,
+        ConversationCardKind.Preview,
+        ConversationCardKind.Undo,
+    )
 
     fun rebuildSessionCards(state: AgentUiState, userCommand: String? = null): List<ConversationCard> {
         val cards = mutableListOf<ConversationCard>()

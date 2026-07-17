@@ -32,6 +32,41 @@ class IntentCapabilityMatrixTest {
   }
 
   @Test
+  fun inferPageContextNeed_actionSetIntentsAreMinimal() {
+    assertEquals(
+      IntentCapabilityMatrix.PageContextNeed.MINIMAL,
+      IntentCapabilityMatrix.inferPageContextNeed("淘宝搜一加手机"),
+    )
+    assertEquals(
+      IntentCapabilityMatrix.PageContextNeed.MINIMAL,
+      IntentCapabilityMatrix.inferPageContextNeed("给大女儿发消息说今晚回家吃饭"),
+    )
+    assertEquals(
+      IntentCapabilityMatrix.PageContextNeed.MINIMAL,
+      IntentCapabilityMatrix.inferPageContextNeed("微信给儿子发消息"),
+    )
+  }
+
+  @Test
+  fun prefersActionSetEntry_matchesKnownSets() {
+    assertTrue(IntentCapabilityMatrix.prefersActionSetEntry("帮我在淘宝找耳机"))
+    assertTrue(IntentCapabilityMatrix.prefersActionSetEntry("给响发消息"))
+    assertTrue(IntentCapabilityMatrix.prefersActionSetEntry("带我去最近的肯德基"))
+    assertFalse(IntentCapabilityMatrix.prefersActionSetEntry("导航回家"))
+    assertFalse(IntentCapabilityMatrix.prefersActionSetEntry("给响发短信"))
+    assertFalse(IntentCapabilityMatrix.prefersActionSetEntry("帮我点击发送按钮"))
+  }
+
+  @Test
+  fun toolsPromptForMinimal_includesRunActionSet() {
+    val prompt = IntentCapabilityMatrix.toolsPromptForContext(
+      IntentCapabilityMatrix.PageContextNeed.MINIMAL,
+    )
+    assertTrue(prompt.contains("run_action_set"))
+    assertTrue(prompt.contains("taobao_search") || prompt.contains("send_im_message"))
+  }
+
+  @Test
   fun passesOfflineNluGate_riskyIntentNeedsHigherConfidence() {
     assertFalse(
       IntentCapabilityMatrix.passesOfflineNluGate(

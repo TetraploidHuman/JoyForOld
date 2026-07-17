@@ -146,6 +146,8 @@ class PendingStateMachineTest {
 
         override fun snapshotTreeForDebug(): String = ""
 
+        override fun setContinuousUiTreeLogcatEnabled(enabled: Boolean) = Unit
+
         override suspend fun captureScreenshotBase64(forceFresh: Boolean): String? = null
 
         override fun executeWithResult(action: AgentAction): ActionExecutionResult =
@@ -203,6 +205,14 @@ class PendingStateMachineTest {
             command: String,
             intentId: String,
             apiKey: String,
+            appContext: Context,
+            runContext: AgentRunContext,
+            onProgress: ((Int, String) -> Unit)?,
+        ): AgentRunResult = AgentRunResult(false, "unused", emptyList())
+
+        override suspend fun runNavPoiPick(
+            poiIntentId: String,
+            originalCommand: String,
             appContext: Context,
             runContext: AgentRunContext,
             onProgress: ((Int, String) -> Unit)?,

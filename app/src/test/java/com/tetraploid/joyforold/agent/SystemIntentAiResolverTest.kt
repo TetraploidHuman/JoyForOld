@@ -84,4 +84,119 @@ class SystemIntentAiResolverTest {
         )!!
         assertTrue(AgentToolRegistry.isSystemIntentOnly(steps))
     }
+
+    @Test
+    fun stepsFor_navigateTo_direct() {
+        val steps = SystemIntentAiResolver.stepsFor(
+            SystemIntentAiResolver.Classification(
+                intent = "navigate_to",
+                confidence = 0.93,
+                destination = "肯德基",
+            ),
+        )
+        assertNotNull(steps)
+        assertEquals("navigate_to", steps!!.first().action)
+        assertEquals("肯德基", steps.first().targetText)
+        assertEquals("finish", steps.last().action)
+    }
+
+    @Test
+    fun stepsFor_navigatePick_listsCandidates() {
+        val steps = SystemIntentAiResolver.stepsFor(
+            SystemIntentAiResolver.Classification(
+                intent = "navigate_pick",
+                confidence = 0.9,
+                destination = "桂阳一中",
+            ),
+        )
+        assertNotNull(steps)
+        assertEquals("navigate_pick", steps!!.single().action)
+        assertEquals("桂阳一中", steps.single().targetText)
+    }
+
+    @Test
+    fun stepsFor_navigateTo_normalizesEnglishBrand() {
+        val steps = SystemIntentAiResolver.stepsFor(
+            SystemIntentAiResolver.Classification(
+                intent = "navigate_to",
+                confidence = 0.9,
+                destination = "kfc",
+            ),
+        )
+        assertEquals("肯德基", steps!!.first().targetText)
+    }
+
+    @Test
+    fun stepsFor_navigatePick_withNearLandmark() {
+        val steps = SystemIntentAiResolver.stepsFor(
+            SystemIntentAiResolver.Classification(
+                intent = "navigate_pick",
+                confidence = 0.9,
+                destination = "肯德基",
+                nearLandmark = "桂阳一中",
+            ),
+        )
+        assertNotNull(steps)
+        assertEquals("navigate_pick", steps!!.single().action)
+        assertEquals("肯德基", steps.single().targetText)
+        assertEquals("桂阳一中", steps.single().inputText)
+    }
+
+    @Test
+    fun stepsFor_navigateTo_splitsCombinedDestination() {
+        val steps = SystemIntentAiResolver.stepsFor(
+            SystemIntentAiResolver.Classification(
+                intent = "navigate_to",
+                confidence = 0.9,
+                destination = "郴州高铁站附近的麦当劳",
+            ),
+        )
+        assertEquals("navigate_to", steps!!.first().action)
+        assertEquals("麦当劳", steps.first().targetText)
+        assertEquals("郴州高铁站", steps.first().inputText)
+        assertTrue(steps.last().message!!.contains("郴州高铁站附近的麦当劳"))
+    }
+
+    @Test
+    fun stepsFor_navigateTo_trustsAiLandmarkOverLocalOnly() {
+        val steps = SystemIntentAiResolver.stepsFor(
+            SystemIntentAiResolver.Classification(
+                intent = "navigate_to",
+                confidence = 0.9,
+                destination = "肯德基",
+                nearLandmark = "郴州市一中",
+            ),
+        )
+        assertEquals("navigate_to", steps!!.first().action)
+        assertEquals("肯德基", steps.first().targetText)
+        assertEquals("郴州市一中", steps.first().inputText)
+    }
+
+    @Test
+    fun stepsFor_navigateTo_aiLandmark_repairsCombinedDestination() {
+        val steps = SystemIntentAiResolver.stepsFor(
+            SystemIntentAiResolver.Classification(
+                intent = "navigate_to",
+                confidence = 0.9,
+                destination = "郴州市一中附近的kfc",
+                nearLandmark = "郴州市一中",
+            ),
+        )
+        assertEquals("肯德基", steps!!.first().targetText)
+        assertEquals("郴州市一中", steps.first().inputText)
+    }
+
+    @Test
+    fun stepsFor_navigatePick_adminRegion() {
+        val steps = SystemIntentAiResolver.stepsFor(
+            SystemIntentAiResolver.Classification(
+                intent = "navigate_pick",
+                confidence = 0.9,
+                destination = "郴州市北湖区的肯德基",
+            ),
+        )
+        assertEquals("navigate_pick", steps!!.single().action)
+        assertEquals("肯德基", steps.single().targetText)
+        assertEquals("郴州市北湖区", steps.single().inputText)
+    }
 }

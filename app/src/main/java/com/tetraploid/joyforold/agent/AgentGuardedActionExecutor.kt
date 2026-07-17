@@ -22,11 +22,12 @@ internal object AgentGuardedActionExecutor {
         session: AgentConversationSession,
         action: AgentAction,
         snapshot: StructuredPageSnapshot?,
+        observationStore: AgentObservationStore? = null,
     ): Outcome {
         AgentActionWhitelist.blockReason(action.action)?.let { return Outcome.Blocked(it) }
 
-        if (AgentActionPlaybook.isRunPlaybookAction(action)) {
-            return Outcome.Blocked("run_playbook 应在规划层展开为具体步骤，不应直接执行")
+        if (AgentActionSet.isRunActionSetAction(action)) {
+            return Outcome.Blocked("动作组（run_action_set）应在规划层展开为具体步骤，不应直接执行")
         }
 
         AgentActionGuard.sensitiveConfirmOverride(session, action)?.let {
@@ -72,7 +73,7 @@ internal object AgentGuardedActionExecutor {
             return Outcome.Blocked("需要无障碍服务才能执行：${action.action}")
         }
 
-        val result = AgentToolRegistry.execute(context, service, action)
+        val result = AgentToolRegistry.execute(context, service, action, observationStore)
         return Outcome.Executed(result)
     }
 }

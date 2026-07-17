@@ -25,13 +25,28 @@ data class PageObservationPayload(
     fun plannerVisionMode(): Boolean = visionMode || a11yUnavailable
 }
 
+/**
+ * 动态选择页面上下文粒度：FULL 扛关键决策，COMPACT 扛增量，DIFF_ONLY 仅同屏空转。
+ */
 object PageContextSelector {
+    /** 连续若干步未 FULL 后强制拉回，避免压缩漂移 */
+    const val FULL_REFRESH_EVERY_N_STEPS = 3
+
+    @Suppress("UNUSED_PARAMETER")
     fun modeFor(
         previous: StructuredPageSnapshot?,
         current: StructuredPageSnapshot,
         pageDiff: String,
+        forceFull: Boolean = false,
+        stepsSinceLastFull: Int = 0,
+        a11yUnavailable: Boolean = false,
     ): PageContextMode {
-        // 效果优先：每轮规划都传完整页面快览 + diff，不因指纹未变而省略
+        if (forceFull || a11yUnavailable) return PageContextMode.FULL
+        if (previous == null) return PageContextMode.FULL
+        if (previous.packageName != current.packageName) return PageContextMode.FULL
+        if (stepsSinceLastFull >= FULL_REFRESH_EVERY_N_STEPS) return PageContextMode.FULL
+        if (previous.fingerprint == current.fingerprint) return PageContextMode.DIFF_ONLY
+        if (PageObservation.isMinorChange(previous, current)) return PageContextMode.COMPACT
         return PageContextMode.FULL
     }
 }

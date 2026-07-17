@@ -8,6 +8,7 @@ enum class PendingKind {
     ROUTE_CLARIFY,
     TASK_ABANDON,
     INTENT_DISAMBIGUATION,
+    NAV_POI_PICK,
     LOCAL_PREVIEW,
     CONTEXT_CONSENT,
 }

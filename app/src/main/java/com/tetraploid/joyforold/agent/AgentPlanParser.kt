@@ -17,7 +17,12 @@ object AgentPlanParser {
         "send_sms",
         "send",
         "read_tree",
+        AgentObservationQueries.ACTION_QUERY_PAGE,
+        AgentObservationQueries.ACTION_QUERY_DIFF,
+        AgentObservationQueries.ACTION_QUERY_TREE,
         "navigate_home",
+        "navigate_to",
+        "navigate_pick",
         "ask_family_for_help",
         "emergency_help",
         "open_weather",
@@ -31,7 +36,7 @@ object AgentPlanParser {
         "query_weather",
         "back",
         "home",
-        AgentActionPlaybook.ACTION_RUN_PLAYBOOK,
+        AgentActionSet.ACTION_RUN_ACTION_SET,
     )
 
     fun parsePlan(json: JSONObject): List<AgentAction> {

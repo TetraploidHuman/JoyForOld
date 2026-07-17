@@ -55,7 +55,10 @@ class ConversationCardSession {
     }
 
     fun overlayInteractionCard(state: AgentUiState): ConversationCard? =
-        ConversationCardFactory.overlayInteraction(state)
+        ConversationCardFactory.overlayInteraction(state, cards)
+
+    fun overlaySessionCards(state: AgentUiState): List<ConversationCard> =
+        ConversationCardFactory.overlaySessionCards(state, cards)
 
     companion object {
         private val REPLACEABLE_KINDS = setOf(

@@ -42,6 +42,19 @@ object AgentActionGuard {
             }
         }
 
+        if (action.action.equals(AgentObservationQueries.ACTION_QUERY_TREE, ignoreCase = true) &&
+            pageUnchangedSinceLastStep
+        ) {
+            val recent = session.stepRecords.takeLast(4).count {
+                it.action.action.equals(AgentObservationQueries.ACTION_QUERY_TREE, ignoreCase = true) &&
+                    it.result.success &&
+                    actionKey(it.action) == actionKey(action)
+            }
+            if (recent >= 2) {
+                return "页面未变化，禁止重复同条件 query_tree。请换关键词，或用 query_page / click 推进。"
+            }
+        }
+
         val key = actionKey(action)
         val recentFails = session.stepRecords
             .takeLast(8)
@@ -183,6 +196,11 @@ object AgentActionGuard {
             "当前应用无障碍树不可用，请用 tap（归一化坐标）代替 click。"
         "find_on_page" ->
             "当前应用无障碍树不可用，find_on_page 无效；请根据截图规划 tap。"
+        AgentObservationQueries.ACTION_QUERY_PAGE,
+        AgentObservationQueries.ACTION_QUERY_DIFF,
+        AgentObservationQueries.ACTION_QUERY_TREE,
+        ->
+            "当前应用无障碍树不可用，观察仓查询无效；请根据截图用 tap。"
         else -> null
     }
 
@@ -190,7 +208,7 @@ object AgentActionGuard {
         if (a11yUnavailable || action.action.equals("tap", ignoreCase = true)) {
             "请根据截图换完全不同 tap 坐标，或 finish+waiting_for_user 询问用户。"
         } else {
-            "请根据页面快览/read_tree 换完全不同策略，或 finish+waiting_for_user 询问用户。"
+            "请根据页面快览/query_page/read_tree 换完全不同策略，或 finish+waiting_for_user 询问用户。"
         }
 
     private fun describe(action: AgentAction): String {

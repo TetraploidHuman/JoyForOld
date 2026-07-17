@@ -14,6 +14,9 @@ interface VisionOverlaySuppressor {
 
     suspend fun activateVisionAgentMode()
 
+    /** 页面已恢复为无障碍可读时清除视觉 UI 闩锁，不打断当前 tap/截图的临时隐藏深度。 */
+    fun clearVisionAgentModeUi()
+
     fun deactivateVisionAgentMode()
 }
 
@@ -37,6 +40,8 @@ private object NoOpVisionOverlaySuppressor : VisionOverlaySuppressor {
     override fun popSuppression() = Unit
 
     override suspend fun activateVisionAgentMode() = Unit
+
+    override fun clearVisionAgentModeUi() = Unit
 
     override fun deactivateVisionAgentMode() = Unit
 }

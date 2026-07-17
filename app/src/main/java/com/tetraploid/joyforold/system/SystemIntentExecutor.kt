@@ -12,7 +12,11 @@ import com.tetraploid.joyforold.agent.ActionExecutionResult
 import com.tetraploid.joyforold.core.AssistSessionStarters
 import com.tetraploid.joyforold.app.InstalledAppResolver
 import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
+import com.tetraploid.joyforold.network.JoyHttpClients
+import com.tetraploid.joyforold.network.getText
 import com.tetraploid.joyforold.util.NetworkStatus
+import io.ktor.client.HttpClient
+import kotlinx.coroutines.runBlocking
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.LocalDateTime
@@ -20,17 +24,11 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import java.util.concurrent.TimeUnit
-import okhttp3.OkHttpClient
-import okhttp3.Request
 
 object SystemIntentExecutor {
     private const val DEFAULT_EVENT_DURATION_MS = 60L * 60L * 1000L
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .build()
+    private val httpClient: HttpClient = JoyHttpClients.quick()
     fun execute(context: Context, action: String, targetText: String?, inputText: String?): ActionExecutionResult {
         return when (action.lowercase(Locale.getDefault())) {
             "dial_contact" -> dialContact(context, targetText)
@@ -55,6 +53,12 @@ object SystemIntentExecutor {
             "open_location_settings" -> launchSimpleIntent(context, Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS), "已打开定位设置")
             "open_app" -> openApp(context, targetText)
             "navigate_home" -> navigateHome(context)
+            "navigate_to" -> navigateTo(context, targetText, inputText)
+            "navigate_pick" -> ActionExecutionResult(
+                false,
+                "地点选择应由编排层处理",
+                detail = "navigate_pick",
+            )
             "read_unread_messages" -> readUnreadMessages(context)
             "tell_time" -> tellTime()
             "query_weather" -> queryWeather(context, targetText)
@@ -278,26 +282,22 @@ object SystemIntentExecutor {
         }
         val city = targetText?.trim().orEmpty().ifBlank { defaultWeatherCity(context) }
         val encoded = URLEncoder.encode(city, StandardCharsets.UTF_8.name())
-        val request = Request.Builder()
-            .url("https://wttr.in/$encoded?format=%l:+%c+%t+%h&lang=zh")
-            .header("User-Agent", "JoyForOld/1.0")
-            .build()
         return try {
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    return queryWeatherFallback(context, city, "天气服务暂时不可用")
-                }
-                val body = response.body?.string()?.trim().orEmpty()
-                if (body.isBlank()) {
-                    return queryWeatherFallback(context, city, "暂时没有查到天气信息")
-                }
-                val spoken = if (body.contains(city)) body else "$city，$body"
-                ActionExecutionResult(
-                    success = true,
-                    summary = spoken,
-                    detail = spoken,
+            val body = runBlocking {
+                httpClient.getText(
+                    url = "https://wttr.in/$encoded?format=%l:+%c+%t+%h&lang=zh",
+                    userAgent = "JoyForOld/1.0",
                 )
+            }.trim()
+            if (body.isBlank()) {
+                return queryWeatherFallback(context, city, "暂时没有查到天气信息")
             }
+            val spoken = if (body.contains(city)) body else "$city，$body"
+            ActionExecutionResult(
+                success = true,
+                summary = spoken,
+                detail = spoken,
+            )
         } catch (_: Exception) {
             queryWeatherFallback(context, city, "查询天气失败")
         }
@@ -340,16 +340,137 @@ object SystemIntentExecutor {
                 suggestions = listOf("先在家人协助设置里填写家的地址"),
             )
         }
-        val encoded = Uri.encode(homeAddress)
-        val amapIntent = Intent(
-            Intent.ACTION_VIEW,
-            "androidamap://route?sourceApplication=JoyForOld&dname=$encoded&dev=0&t=0".toUri(),
+        return navigateToDestination(context, homeAddress, successLabel = "家")
+    }
+
+    /**
+     * 用地图深链直接发起到目的地的路线规划，避免 open_app 后落在上次搜索页、
+     * 或在 POI 列表里搜完就误判任务完成。
+     */
+    private fun navigateTo(context: Context, targetText: String?, inputText: String?): ActionExecutionResult {
+        val destination = targetText?.trim().orEmpty()
+        if (destination.isBlank()) {
+            return ActionExecutionResult(
+                false,
+                "未指定目的地",
+                suggestions = listOf("请说明要去哪里，例如「附近的肯德基」"),
+            )
+        }
+        val landmark = inputText?.trim().orEmpty()
+        val label = when {
+            landmark.isBlank() -> destination
+            AmapPoiResolver.looksLikeAdminRegion(landmark) -> "${landmark}的$destination"
+            else -> "${landmark}附近的$destination"
+        }
+        return navigateToDestination(
+            context,
+            destination,
+            successLabel = label,
+            nearLandmark = landmark.ifBlank { null },
         )
-        val amapResult = launchSimpleIntent(context, amapIntent, "已尝试打开高德地图并导航回家")
+    }
+
+    private fun navigateToDestination(
+        context: Context,
+        destination: String,
+        successLabel: String,
+        nearLandmark: String? = null,
+    ): ActionExecutionResult {
+        // 地标/行政区：先解析锚点，再周边搜品类/品牌（不用设备当前位置）
+        if (!nearLandmark.isNullOrBlank()) {
+            val nearHits = AmapPoiResolver.searchNearLandmark(context, nearLandmark, destination, limit = 1)
+            nearHits.firstOrNull()?.let { return navigateToPoi(context, it) }
+        }
+
+        // 目的地字符串里自带「行政区的品类」时也要拆开，避免整串按当前位置 around
+        val scoped = com.tetraploid.joyforold.agent.SystemIntentLocalParser.splitScopedPoiQuery(destination)
+        if (scoped != null && nearLandmark.isNullOrBlank()) {
+            val nearHits = AmapPoiResolver.searchNearLandmark(context, scoped.landmark, scoped.poi, limit = 1)
+            nearHits.firstOrNull()?.let { return navigateToPoi(context, it) }
+        }
+
+        val effectiveKeyword = scoped?.poi ?: destination
+        val effectiveScope = nearLandmark ?: scoped?.landmark
+
+        // 1) 有 Web Key：检索最近/最匹配 POI → navi 直达（无候选列表）
+        val resolved = if (effectiveScope.isNullOrBlank() && looksLikeSpecificAddress(effectiveKeyword)) {
+            AmapPoiResolver.geocodeAddress(
+                effectiveKeyword,
+                cityHint = AmapPoiResolver.extractCityHintFromPlace(effectiveKeyword) ?: inferCityHint(context),
+            ) ?: AmapPoiResolver.resolveNearest(context, effectiveKeyword)
+        } else {
+            AmapPoiResolver.resolveNearest(context, effectiveKeyword, regionOrLandmark = effectiveScope)
+        }
+        if (resolved != null) {
+            return navigateToPoi(context, resolved)
+        }
+
+        val encoded = Uri.encode(if (effectiveScope != null) "$effectiveScope$effectiveKeyword" else effectiveKeyword)
+        // 2) 具体地址：路线规划（回家同款）；否则 keywordNavi（会出候选，作降级）
+        val amapUri = if (effectiveScope.isNullOrBlank() && looksLikeSpecificAddress(effectiveKeyword)) {
+            "androidamap://route?sourceApplication=JoyForOld&dname=$encoded&dev=0&t=0"
+        } else {
+            "androidamap://keywordNavi?sourceApplication=JoyForOld&keyword=$encoded&style=2"
+        }
+        val summary = when {
+            !AmapPoiResolver.isConfigured() && !looksLikeSpecificAddress(effectiveKeyword) ->
+                "已打开高德关键词导航：$successLabel（未配置 amap.web.key，可能出现候选列表）"
+            resolved == null && !looksLikeSpecificAddress(effectiveKeyword) ->
+                "已打开高德关键词导航：$successLabel（地点解析未命中，可能出现候选列表）"
+            else -> "已尝试打开高德地图并导航前往：$successLabel"
+        }
+        val amapResult = launchSimpleIntent(
+            context,
+            Intent(Intent.ACTION_VIEW, amapUri.toUri()).apply {
+                setPackage("com.autonavi.minimap")
+            },
+            summary,
+        )
         if (amapResult.success) return amapResult
 
+        val baiduIntent = Intent(
+            Intent.ACTION_VIEW,
+            "baidumap://map/direction?destination=name:$encoded&mode=driving&src=JoyForOld".toUri(),
+        )
+        val baiduResult = launchSimpleIntent(
+            context,
+            baiduIntent,
+            "已尝试打开百度地图并规划前往：$successLabel",
+        )
+        if (baiduResult.success) return baiduResult
+
         val geoIntent = Intent(Intent.ACTION_VIEW, "geo:0,0?q=$encoded".toUri())
-        return launchSimpleIntent(context, geoIntent, "已尝试打开地图并搜索家的地址")
+        return launchSimpleIntent(context, geoIntent, "已尝试打开地图并搜索：$successLabel")
+    }
+
+    /** 已知坐标时直达高德导航（候选点选定后调用）。 */
+    fun navigateToPoi(context: Context, poi: AmapPoiResolver.Poi): ActionExecutionResult {
+        val naviUri =
+            "androidamap://navi?sourceApplication=JoyForOld" +
+                "&poiname=${Uri.encode(poi.name)}" +
+                "&lat=${poi.lat}&lon=${poi.lon}&dev=0&style=2"
+        return launchSimpleIntent(
+            context,
+            Intent(Intent.ACTION_VIEW, naviUri.toUri()).apply {
+                setPackage("com.autonavi.minimap")
+            },
+            "已尝试打开高德地图并导航前往：${poi.name}",
+        )
+    }
+
+    private fun inferCityHint(context: Context): String? {
+        val home = CaregiverSupportStore(context).loadHomeAddress().trim()
+        if (home.isBlank()) return null
+        return Regex("""([\u4e00-\u9fa5]{2,10}(?:市|县|州|区))""").find(home)?.groupValues?.get(1)
+    }
+
+    /** 含路名门牌等更像具体地址；学校名/品牌等走 POI 检索。 */
+    private fun looksLikeSpecificAddress(destination: String): Boolean {
+        if (destination.length < 6) return false
+        if (com.tetraploid.joyforold.agent.SystemIntentLocalParser.splitScopedPoiQuery(destination) != null) {
+            return false
+        }
+        return destination.contains(Regex("""[路街道巷弄号栋楼区县镇村市省]"""))
     }
 
     private fun openByAlias(context: Context, alias: String, successSummary: String): ActionExecutionResult {

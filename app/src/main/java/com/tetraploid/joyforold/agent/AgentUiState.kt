@@ -11,6 +11,8 @@ import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 data class AgentPermissionUiState(
     val accessibilityEnabled: Boolean = false,
     val accessibilityServiceConnected: Boolean = false,
+    val accessibilityWhitelistReaderEnabled: Boolean = false,
+    val accessibilityWhitelistReaderConnected: Boolean = false,
     val joyImeEnabled: Boolean = false,
     val joyImeSelectedAsDefault: Boolean = false,
     val recordAudioGranted: Boolean = false,
@@ -84,6 +86,8 @@ data class AgentUiState(
     val taskPhases: List<TaskPhaseItem> = emptyList(),
     val conversationCards: List<ConversationCard> = emptyList(),
     val overlayInteractionCard: ConversationCard? = null,
+    /** 悬浮层会话卡片（计划/进度/确认）；视觉模式下为空 */
+    val overlaySessionCards: List<ConversationCard> = emptyList(),
     val sessionId: String? = null,
     val recentMemories: List<String> = emptyList(),
     val wakeWord: AgentWakeWordUiState = AgentWakeWordUiState(),
@@ -98,10 +102,16 @@ data class AgentUiState(
     val voiceBargeInEnabled: Boolean = true,
     val visionDebugEnabled: Boolean = false,
     val visionDebugFrames: List<VisionDebugFrame> = emptyList(),
+    /** 持续把主应用 UI 树（snapshotForAgent）输出到 Logcat */
+    val uiTreeLogcatEnabled: Boolean = false,
+    /** 视觉兜底模式：隐藏悬浮交互卡片，截图/tap 期间仍由 overlay suppression 临时隐藏整层 */
+    val visionAgentActive: Boolean = false,
     val assist: AgentAssistUiState = AgentAssistUiState(),
 ) {
     val accessibilityEnabled get() = permissions.accessibilityEnabled
     val accessibilityServiceConnected get() = permissions.accessibilityServiceConnected
+    val accessibilityWhitelistReaderEnabled get() = permissions.accessibilityWhitelistReaderEnabled
+    val accessibilityWhitelistReaderConnected get() = permissions.accessibilityWhitelistReaderConnected
     val joyImeEnabled get() = permissions.joyImeEnabled
     val joyImeSelectedAsDefault get() = permissions.joyImeSelectedAsDefault
     val recordAudioGranted get() = permissions.recordAudioGranted

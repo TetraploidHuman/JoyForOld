@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.view.accessibility.AccessibilityManager
 import com.tetraploid.joyforold.accessibility.AccessibilityPermission
 import com.tetraploid.joyforold.accessibility.AccessibilityGateways
+import com.tetraploid.joyforold.accessibility.UiTreeLogcatStore
 import com.tetraploid.joyforold.core.AssistSessionStarter
 import com.tetraploid.joyforold.core.AssistSessionStarters
 import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
@@ -78,6 +79,7 @@ class AgentRuntime(
     private val asrSpeakerProfileStore: AsrSpeakerProfileStore,
     private val proactiveAssistantEngine: ProactiveAssistantEngine,
     private val visionDebugStore: VisionDebugStore,
+    private val uiTreeLogcatStore: UiTreeLogcatStore,
     private val assistPairingStore: AssistPairingStore,
 ) : VisionOverlaySuppressor {
     init {
@@ -170,6 +172,17 @@ class AgentRuntime(
             appContext = appContext,
             runContext = AgentRunContext(),
         )
+
+        override suspend fun runNavPoiPick(
+            poiIntentId: String,
+            originalCommand: String,
+            appContext: android.content.Context,
+        ) = orchestrator.runNavPoiPick(
+            poiIntentId = poiIntentId,
+            originalCommand = originalCommand,
+            appContext = appContext,
+            runContext = AgentRunContext(),
+        )
     }
 
     private fun voiceSession(): VoiceSessionController? {
@@ -231,8 +244,11 @@ class AgentRuntime(
                     voiceBargeInEnabled = voiceInteractionConfigStore.isBargeInEnabled(),
                     visionDebugEnabled = visionDebugStore.isEnabled(),
                     visionDebugFrames = visionDebugStore.listFrames(),
+                    uiTreeLogcatEnabled = uiTreeLogcatStore.isEnabled(),
                 )
             }
+            // 服务若已连接，同步开关状态
+            AccessibilityGateways.current?.setContinuousUiTreeLogcatEnabled(uiTreeLogcatStore.isEnabled())
             wakeWordController?.preloadModelsIfNeeded()
             wakeWordController?.runMigrationsIfNeeded()
             wakeWordController?.syncService()
@@ -247,6 +263,9 @@ class AgentRuntime(
         val settingEnabled = app?.let { AccessibilityPermission.isSettingEnabled(it) }
             ?: AccessibilityPermission.isServiceConnected()
         val connected = AccessibilityPermission.isServiceConnected()
+        val whitelistReaderEnabled = app?.let { AccessibilityPermission.isWhitelistReaderSettingEnabled(it) }
+            ?: false
+        val whitelistReaderConnected = AccessibilityPermission.isWhitelistReaderConnected()
         val imeEnabled = app?.let { JoyImeHelper.isEnabled(it) } ?: false
         val imeDefault = app?.let { JoyImeHelper.isSelectedAsDefault(it) } ?: false
         _state.update {
@@ -254,6 +273,8 @@ class AgentRuntime(
                 permissions = it.permissions.copy(
                     accessibilityEnabled = settingEnabled,
                     accessibilityServiceConnected = connected,
+                    accessibilityWhitelistReaderEnabled = whitelistReaderEnabled,
+                    accessibilityWhitelistReaderConnected = whitelistReaderConnected,
                     joyImeEnabled = imeEnabled,
                     joyImeSelectedAsDefault = imeDefault,
                     recordAudioGranted = app?.let { ctx -> hasRecordAudioPermission(ctx) }
@@ -330,12 +351,34 @@ class AgentRuntime(
                 needsBinaryConfirm = orchestrator.peekPendingNeedsBinaryConfirm(),
             )
         }
+            when (orchestrator.peekPendingKind()) {
+                PendingKind.INTENT_DISAMBIGUATION, PendingKind.NAV_POI_PICK -> {
+                    val options = orchestrator.peekDisambiguationOptions()
+                    upsertSessionCard(
+                        ConversationCardFactory.disambiguation(
+                            prompt,
+                            options,
+                        ),
+                    )
+                }
+                PendingKind.LOCAL_PREVIEW -> {
+                    upsertSessionCard(ConversationCardFactory.preview(prompt))
+                }
+                else -> {
+                    upsertSessionCard(
+                        ConversationCardFactory.confirm(
+                            prompt,
+                            orchestrator.peekPendingNeedsBinaryConfirm(),
+                        ),
+                    )
+                }
+            }
+        publishConversationCards()
         syncOverlayVisibility()
     }
 
     private fun shouldShowOverlay(state: AgentUiState): Boolean {
         if (appInForeground) return false
-        if (visionAgentActive) return false
         return state.isRunning ||
             state.isListening ||
             state.waitingForUserConfirm ||
@@ -372,12 +415,30 @@ class AgentRuntime(
     }
 
     fun clearInteraction() {
+        val snapshot = _state.value
         when {
-            _state.value.isListening -> stopVoiceInput()
-            _state.value.waitingForUserConfirm -> clearPendingConfirmUI()
-            else -> _state.update { it.copy(command = "", speechText = "") }
+            snapshot.isListening ||
+                snapshot.voiceInteractionState != VoiceInteractionState.Idle -> {
+                // 叉叉 = 取消语音，不能用 stopVoiceInput（那会提交并可能直接跑 Agent）
+                voiceSession()?.abortInput()
+                voiceSession()?.sessionActive = false
+                _state.update {
+                    it.copy(
+                        command = "",
+                        speechText = "",
+                        isListening = false,
+                        voiceInteractionState = VoiceInteractionState.Idle,
+                    )
+                }
+                wakeWordController?.ensureRunning()
+                syncOverlayVisibility()
+            }
+            snapshot.waitingForUserConfirm -> clearPendingConfirmUI()
+            else -> {
+                _state.update { it.copy(command = "", speechText = "") }
+                voiceSession()?.sessionActive = false
+            }
         }
-        voiceSession()?.sessionActive = false
     }
 
     private fun syncOverlayVisibility() {
@@ -396,6 +457,11 @@ class AgentRuntime(
         }
     }
 
+    /** 悬浮服务 onCreate 完成后回调，消化 ensureStarted/showDialog 竞态。 */
+    fun syncOverlayVisibilityFromService() {
+        syncOverlayVisibility()
+    }
+
     suspend fun pushVisionOverlaySuppressionAwait(waitFrame: Boolean = false) {
         if (visionOverlaySuppressionDepth++ == 0) {
             val app = application
@@ -408,7 +474,7 @@ class AgentRuntime(
 
     fun popVisionOverlaySuppression() {
         if (visionOverlaySuppressionDepth <= 0) return
-        if (--visionOverlaySuppressionDepth == 0 && !visionAgentActive) {
+        if (--visionOverlaySuppressionDepth == 0) {
             syncOverlayVisibility()
         }
     }
@@ -416,15 +482,20 @@ class AgentRuntime(
     override suspend fun activateVisionAgentMode() {
         if (visionAgentActive) return
         visionAgentActive = true
-        val app = application
-        if (app != null && OverlayPermission.canDrawOverlays(app)) {
-            FloatingOverlayService.ensureStarted(app)
-            FloatingOverlayService.hideDialogAwait(waitFrame = false)
-        }
+        _state.update { it.copy(visionAgentActive = true) }
+        publishConversationCards()
         syncOverlayVisibility()
     }
 
     override fun isVisionAgentActive(): Boolean = visionAgentActive
+
+    override fun clearVisionAgentModeUi() {
+        if (!visionAgentActive) return
+        visionAgentActive = false
+        _state.update { it.copy(visionAgentActive = false) }
+        publishConversationCards()
+        syncOverlayVisibility()
+    }
 
     override suspend fun pushSuppressionAwait(waitFrame: Boolean) {
         pushVisionOverlaySuppressionAwait(waitFrame)
@@ -437,11 +508,13 @@ class AgentRuntime(
     override fun deactivateVisionAgentMode() {
         visionAgentActive = false
         visionOverlaySuppressionDepth = 0
+        _state.update { it.copy(visionAgentActive = false) }
+        publishConversationCards()
         syncOverlayVisibility()
     }
 
     fun resetVisionOverlaySuppression() {
-        if (visionOverlaySuppressionDepth == 0 && !visionAgentActive) return
+        if (visionOverlaySuppressionDepth == 0) return
         visionOverlaySuppressionDepth = 0
         syncOverlayVisibility()
     }
@@ -449,7 +522,10 @@ class AgentRuntime(
     private fun publishConversationCards() {
         _state.update { state ->
             val merged = state.copy(conversationCards = conversationCards.list())
-            merged.copy(overlayInteractionCard = conversationCards.overlayInteractionCard(merged))
+            merged.copy(
+                overlayInteractionCard = conversationCards.overlayInteractionCard(merged),
+                overlaySessionCards = conversationCards.overlaySessionCards(merged),
+            )
         }
     }
 
@@ -476,7 +552,7 @@ class AgentRuntime(
         removeSessionCardsByKind(ConversationCardKind.Progress)
         if (result.waitingForUserConfirm && !result.confirmPrompt.isNullOrBlank()) {
             when (orchestrator.peekPendingKind()) {
-                PendingKind.INTENT_DISAMBIGUATION -> {
+                PendingKind.INTENT_DISAMBIGUATION, PendingKind.NAV_POI_PICK -> {
                     val options = orchestrator.peekDisambiguationOptions()
                     upsertSessionCard(
                         ConversationCardFactory.disambiguation(
@@ -536,13 +612,18 @@ class AgentRuntime(
         publishConversationCards()
         syncOverlayVisibility()
         val voice = voiceSession()
+        val deferPromptToListen = result.waitingForUserConfirm &&
+            orchestrator.peekPendingKind() in setOf(
+                PendingKind.NAV_POI_PICK,
+                PendingKind.INTENT_DISAMBIGUATION,
+            )
         when {
             result.waitingForUserConfirm && voice?.sessionActive == true &&
-                !result.confirmPrompt.isNullOrBlank() -> {
+                !result.confirmPrompt.isNullOrBlank() && !deferPromptToListen -> {
                 voice.recordVoicePrompt(result.confirmPrompt)
                 voice.applyBargeInPreRoll(voice.speakPromptWithOptionalBargeIn(result.confirmPrompt))
             }
-            result.summary.isNotBlank() -> voice?.speakStatus(result.summary)
+            result.summary.isNotBlank() && !result.waitingForUserConfirm -> voice?.speakStatus(result.summary)
         }
         voice?.continueConversationAfterAgentResult(application, result)
     }
@@ -580,14 +661,28 @@ class AgentRuntime(
         recordUserInteraction()
         agentJob?.cancel()
         agentScope.launch {
-            val result = orchestrator.runDisambiguatedIntent(
-                command = orchestrator.peekPendingOriginalCommand()
-                    ?: _state.value.command,
-                intentId = intentId,
-                apiKey = _state.value.apiKey.ifBlank { apiKeyStore.getApiKey() },
-                appContext = app,
-                runContext = AgentRunContext(),
-            )
+            val result = when {
+                NavPoiPickCodec.isNavPoiId(intentId) ||
+                    orchestrator.peekPendingKind() == PendingKind.NAV_POI_PICK -> {
+                    orchestrator.runNavPoiPick(
+                        poiIntentId = intentId,
+                        originalCommand = orchestrator.peekPendingOriginalCommand()
+                            ?: _state.value.command,
+                        appContext = app,
+                        runContext = AgentRunContext(),
+                    )
+                }
+                else -> {
+                    orchestrator.runDisambiguatedIntent(
+                        command = orchestrator.peekPendingOriginalCommand()
+                            ?: _state.value.command,
+                        intentId = intentId,
+                        apiKey = _state.value.apiKey.ifBlank { apiKeyStore.getApiKey() },
+                        appContext = app,
+                        runContext = AgentRunContext(),
+                    )
+                }
+            }
             handleStandaloneAgentResult(app, result)
         }
     }
@@ -774,6 +869,8 @@ class AgentRuntime(
                 isListening = false,
                 voiceInteractionState = VoiceInteractionState.Idle,
                 statusMessage = "已停止",
+                command = "",
+                speechText = "",
             )
         }
         appendLog("Agent 已停止")
@@ -797,6 +894,10 @@ class AgentRuntime(
 
     fun startVoiceInput() {
         application?.let { initIfNeeded(it) }
+        if (_state.value.waitingForUserConfirm) {
+            application?.let { startVoiceReplyToConfirm(it) }
+            return
+        }
         voiceSession()?.startVoiceInput()
     }
 
@@ -842,6 +943,7 @@ class AgentRuntime(
         val preset = presetStore.findByPhrase(command) ?: return command
         return when (preset.action) {
             "navigate_home" -> "导航回家"
+            "navigate_to" -> "导航前往"
             else -> command
         }
     }
@@ -876,8 +978,10 @@ class AgentRuntime(
                 }
             }
             removeSessionCardsByKind(ConversationCardKind.Confirm)
-            val initialPhases = TaskPhasePlanner.planFromCommand(effectiveCommand)
-            ConversationCardFactory.plan(initialPhases)?.let { upsertSessionCard(it) }
+            removeSessionCardsByKind(ConversationCardKind.Progress)
+            // 新任务默认按无障碍交互展示；真正进入视觉兜底后再闩锁隐藏卡片
+            clearVisionAgentModeUi()
+            upsertSessionCard(ConversationCardFactory.progress("正在制定计划"))
             _state.update {
                 it.copy(
                     isRunning = true,
@@ -885,15 +989,36 @@ class AgentRuntime(
                     waitingForUserConfirm = false,
                     confirmPrompt = null,
                     needsBinaryConfirm = false,
+                    visionAgentActive = false,
                     overlayInteractionCard = null,
+                    overlaySessionCards = emptyList(),
                     currentStep = 0,
-                    statusMessage = "启动中",
+                    statusMessage = "正在制定计划",
                     taskSteps = emptyList(),
+                    taskPhases = emptyList(),
+                )
+            }
+            publishConversationCards()
+            syncOverlayVisibility()
+
+            val apiKey = current.apiKey.ifBlank { apiKeyStore.getApiKey() }
+            val initialPhases = if (shouldResumePending) {
+                TaskPhasePlanner.planFromCommand(effectiveCommand)
+            } else {
+                appendLog("正在制定计划：$effectiveCommand")
+                orchestrator.planUserFacingPhases(apiKey, effectiveCommand)
+            }
+            ConversationCardFactory.plan(initialPhases)?.let { upsertSessionCard(it) }
+            upsertSessionCard(ConversationCardFactory.progress("启动中"))
+            _state.update {
+                it.copy(
+                    statusMessage = "启动中",
                     taskPhases = initialPhases,
                 )
             }
             publishConversationCards()
             syncOverlayVisibility()
+
             val startedAt = System.currentTimeMillis()
             if (effectiveCommand != current.command) {
                 appendLog("预设指令命中：${current.command} -> $effectiveCommand")
@@ -907,7 +1032,7 @@ class AgentRuntime(
             try {
                 val result = orchestrator.run(
                     userCommand = effectiveCommand,
-                    apiKey = current.apiKey.ifBlank { apiKeyStore.getApiKey() },
+                    apiKey = apiKey,
                     appContext = application,
                     runContext = context,
                     resumePendingConfirm = shouldResumePending,
@@ -954,19 +1079,7 @@ class AgentRuntime(
                     if (result.success) "完成（${elapsed}ms）：${result.summary}"
                     else "结束（${elapsed}ms）：${result.summary}",
                 )
-                when {
-                    result.waitingForUserConfirm && voice?.sessionActive == true &&
-                        !result.confirmPrompt.isNullOrBlank() -> {
-                        voice.recordVoicePrompt(result.confirmPrompt)
-                        voice.applyBargeInPreRoll(voice.speakPromptWithOptionalBargeIn(result.confirmPrompt))
-                    }
-                    result.waitingForUserConfirm -> Unit
-                    voice?.sessionActive == true && result.summary.isNotBlank() -> {
-                        voice.recordVoicePrompt(result.summary)
-                        voice.applyBargeInPreRoll(voice.speakPromptWithOptionalBargeIn(result.summary))
-                    }
-                    result.summary.isNotBlank() -> voice?.speakStatus(result.summary, flush = true)
-                }
+                // 先更新确认 UI，再播 TTS，避免弹窗等播报结束才出现
                 refreshMemories()
                 _state.update {
                     it.copy(
@@ -977,6 +1090,9 @@ class AgentRuntime(
                         needsBinaryConfirm = result.needsBinaryConfirm,
                         sessionId = result.sessionId,
                         statusMessage = if (result.success) result.summary else result.summary,
+                        // 非确认结束时清空输入，右侧按钮回到麦克风
+                        command = if (result.waitingForUserConfirm) it.command else "",
+                        speechText = if (result.waitingForUserConfirm) it.speechText else "",
                         taskSteps = if (result.success && !result.waitingForUserConfirm) {
                             TaskStepTracker.markAllCompleted(it.taskSteps)
                         } else {
@@ -994,6 +1110,24 @@ class AgentRuntime(
                 syncOverlayVisibility()
                 refreshVisionDebugFrames()
                 relayRemoteAssistStatus(result.success, result.summary)
+                val deferPromptToListen = result.waitingForUserConfirm &&
+                    orchestrator.peekPendingKind() in setOf(
+                        PendingKind.NAV_POI_PICK,
+                        PendingKind.INTENT_DISAMBIGUATION,
+                    )
+                when {
+                    result.waitingForUserConfirm && voice?.sessionActive == true &&
+                        !result.confirmPrompt.isNullOrBlank() && !deferPromptToListen -> {
+                        voice.recordVoicePrompt(result.confirmPrompt)
+                        voice.applyBargeInPreRoll(voice.speakPromptWithOptionalBargeIn(result.confirmPrompt))
+                    }
+                    result.waitingForUserConfirm -> Unit
+                    voice?.sessionActive == true && result.summary.isNotBlank() -> {
+                        voice.recordVoicePrompt(result.summary)
+                        voice.applyBargeInPreRoll(voice.speakPromptWithOptionalBargeIn(result.summary))
+                    }
+                    result.summary.isNotBlank() -> voice?.speakStatus(result.summary, flush = true)
+                }
                 voice?.continueConversationAfterAgentResult(application, result)
             } catch (_: CancellationException) {
                 relayRemoteAssistStatus(success = false, summary = "已停止")
@@ -1059,6 +1193,20 @@ class AgentRuntime(
         visionDebugStore.setEnabled(enabled)
         _state.update { it.copy(visionDebugEnabled = enabled) }
         appendLog(if (enabled) "视觉调试已开启：Agent 将保存带坐标标记的截图" else "视觉调试已关闭")
+    }
+
+    fun setUiTreeLogcatEnabled(application: Application, enabled: Boolean) {
+        initIfNeeded(application)
+        uiTreeLogcatStore.setEnabled(enabled)
+        AccessibilityGateways.current?.setContinuousUiTreeLogcatEnabled(enabled)
+        _state.update { it.copy(uiTreeLogcatEnabled = enabled) }
+        appendLog(
+            if (enabled) {
+                "持续 UI 树 Logcat 已开启（tag=JoyForOld/UiTree，内容与「读取页面」相同）"
+            } else {
+                "持续 UI 树 Logcat 已关闭"
+            },
+        )
     }
 
     fun refreshVisionDebugFrames() {

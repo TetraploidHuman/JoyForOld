@@ -116,6 +116,16 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         windowManager.addView(composeView, layoutParams)
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
         runtime.refreshAccessibilityState()
+        // ensureStarted 后 showDialog 可能早于 instance 就绪，创建完成后按 pending / Agent 状态同步一次
+        applyPendingOrAgentVisibility()
+    }
+
+    private fun applyPendingOrAgentVisibility() {
+        when (pendingVisible) {
+            true -> setDialogVisible(true)
+            false -> setDialogVisible(false)
+            null -> agentRuntime().syncOverlayVisibilityFromService()
+        }
     }
 
     override fun onDestroy() {
@@ -199,6 +209,10 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         var instance: FloatingOverlayService? = null
             private set
 
+        /** null=无待定；true/false=服务尚未就绪时缓存的显隐意图 */
+        @Volatile
+        private var pendingVisible: Boolean? = null
+
         private val mainHandler = Handler(Looper.getMainLooper())
 
         fun start(context: Context) {
@@ -212,6 +226,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         }
 
         fun stop(context: Context) {
+            pendingVisible = null
             context.stopService(Intent(context, FloatingOverlayService::class.java))
         }
 
@@ -221,7 +236,11 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         }
 
         fun showDialog() {
-            if (agentRuntime().isAppInForeground()) return
+            if (agentRuntime().isAppInForeground()) {
+                pendingVisible = false
+                return
+            }
+            pendingVisible = true
             val service = instance ?: return
             if (Looper.myLooper() == Looper.getMainLooper()) {
                 service.setDialogVisible(true)
@@ -231,6 +250,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
         }
 
         fun hideDialog() {
+            pendingVisible = false
             val service = instance ?: return
             if (Looper.myLooper() == Looper.getMainLooper()) {
                 service.setDialogVisible(false)
@@ -241,6 +261,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
 
         /** 主线程 GONE；[waitFrame] 时再等一帧合成，供截图使用。 */
         suspend fun hideDialogAwait(waitFrame: Boolean = false) {
+            pendingVisible = false
             awaitInstance()
             val service = instance ?: return
             suspendCancellableCoroutine { cont ->

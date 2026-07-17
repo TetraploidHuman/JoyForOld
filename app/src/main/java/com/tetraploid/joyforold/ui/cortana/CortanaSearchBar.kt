@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.Icon
@@ -20,16 +20,35 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.ui.theme.CortanaColors
 
-private enum class InputActionMode {
+internal enum class InputActionMode {
     Mic,
     Send,
     Cancel,
+}
+
+/**
+ * 底部输入框右侧动作：
+ * - 空闲且无文字 → 麦克风
+ * - 有文字 → 发送（聆听中已识别出文字时可点发送以结束并执行）
+ * - 执行中 / 语音忙且尚无文字 → 叉叉取消
+ */
+internal fun resolveInputActionMode(
+    value: String,
+    isListening: Boolean,
+    isRunning: Boolean,
+    voiceBusy: Boolean = false,
+): InputActionMode = when {
+    isRunning -> InputActionMode.Cancel
+    (isListening || voiceBusy) && value.isBlank() -> InputActionMode.Cancel
+    value.isNotBlank() -> InputActionMode.Send
+    else -> InputActionMode.Mic
 }
 
 @Composable
@@ -43,31 +62,38 @@ fun CortanaSearchBar(
     placeholder: String = "在此输入或说话…",
     isListening: Boolean = false,
     isRunning: Boolean = false,
+    /** 播报提示 / 识别处理中等：尚未开麦或刚结束聆听，应显示取消而非麦克风 */
+    voiceBusy: Boolean = false,
     enabled: Boolean = true,
-    canExecute: Boolean = false,
+    @Suppress("UNUSED_PARAMETER") canExecute: Boolean = false,
 ) {
-    val actionMode = when {
-        isRunning -> InputActionMode.Cancel
-        value.isNotBlank() -> InputActionMode.Send
-        else -> InputActionMode.Mic
-    }
+    val actionMode = resolveInputActionMode(
+        value = value,
+        isListening = isListening,
+        isRunning = isRunning,
+        voiceBusy = voiceBusy,
+    )
 
     val actionEnabled = when (actionMode) {
         InputActionMode.Mic -> enabled
-        InputActionMode.Send -> enabled && value.isNotBlank()
+        InputActionMode.Send -> value.isNotBlank() && (enabled || isListening)
         InputActionMode.Cancel -> true
     }
 
     val actionIcon: ImageVector = when (actionMode) {
         InputActionMode.Mic -> Icons.Outlined.Mic
-        InputActionMode.Send -> Icons.AutoMirrored.Outlined.ArrowBack
+        InputActionMode.Send -> Icons.AutoMirrored.Outlined.Send
         InputActionMode.Cancel -> Icons.Outlined.Close
     }
 
     val actionDescription = when (actionMode) {
-        InputActionMode.Mic -> if (isListening) "录音中" else "开始录音"
-        InputActionMode.Send -> "发送"
-        InputActionMode.Cancel -> "取消"
+        InputActionMode.Mic -> "开始录音"
+        InputActionMode.Send -> if (isListening) "结束并发送" else "发送"
+        InputActionMode.Cancel -> when {
+            isRunning -> "取消任务"
+            isListening || voiceBusy -> "取消语音"
+            else -> "取消"
+        }
     }
 
     Row(
@@ -83,7 +109,7 @@ fun CortanaSearchBar(
             modifier = Modifier
                 .weight(1f)
                 .padding(horizontal = 12.dp, vertical = 12.dp),
-            enabled = enabled && !isListening && !isRunning,
+            enabled = enabled && !isListening && !isRunning && !voiceBusy,
             singleLine = true,
             textStyle = androidx.compose.ui.text.TextStyle(
                 color = CortanaColors.SearchBarText,
@@ -123,7 +149,8 @@ fun CortanaSearchBar(
             Icon(
                 imageVector = actionIcon,
                 contentDescription = actionDescription,
-                tint = CortanaColors.OnBackground,
+                // 动作键始终蓝底，固定用白图标，避免随主题 OnBackground 反色后「看起来没切换」
+                tint = Color.White,
                 modifier = Modifier.size(22.dp),
             )
         }

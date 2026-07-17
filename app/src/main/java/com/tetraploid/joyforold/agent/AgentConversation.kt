@@ -30,6 +30,23 @@ class AgentConversationSession(
     private val answeredConfirmPrompts = answeredConfirmPrompts.toMutableSet()
     private val resolvedConfirmTopics = resolvedConfirmTopics.toMutableSet()
 
+    /** 本会话累计 prompt tokens（来自 API usage，缺省为 0） */
+    var promptTokensTotal: Int = 0
+        private set
+    var completionTokensTotal: Int = 0
+        private set
+    val totalTokensTotal: Int
+        get() = promptTokensTotal + completionTokensTotal
+
+    fun addTokenUsage(usage: LlmApiSupport.TokenUsage) {
+        usage.promptTokens?.let { promptTokensTotal += it }
+        usage.completionTokens?.let { completionTokensTotal += it }
+        // 若只有 total、没有分项，计入 prompt 侧以免丢总量（少见）
+        if (usage.promptTokens == null && usage.completionTokens == null) {
+            usage.totalTokens?.let { promptTokensTotal += it }
+        }
+    }
+
     fun hasAnsweredConfirmPrompt(prompt: String): Boolean {
         return answeredConfirmPrompts.contains(prompt.trim())
     }
@@ -170,6 +187,11 @@ class AgentConversationSession(
         appendLine("指令：$rootCommand")
         appendLine("状态：$status")
         if (finalSummary.isNotBlank()) appendLine("结果：$finalSummary")
+        if (promptTokensTotal > 0 || completionTokensTotal > 0) {
+            appendLine(
+                "Token：prompt=$promptTokensTotal completion=$completionTokensTotal total=$totalTokensTotal",
+            )
+        }
         stepRecords.takeLast(20).forEach { record ->
             val target = record.action.targetText?.let { " target=$it" }.orEmpty()
             val input = record.action.inputText?.let { " input=$it" }.orEmpty()

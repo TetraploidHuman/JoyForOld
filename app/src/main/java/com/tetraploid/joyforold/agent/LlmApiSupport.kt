@@ -4,6 +4,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object LlmApiSupport {
+    data class TokenUsage(
+        val promptTokens: Int? = null,
+        val completionTokens: Int? = null,
+        val totalTokens: Int? = null,
+    ) {
+        val resolvedTotal: Int?
+            get() = totalTokens
+                ?: listOfNotNull(promptTokens, completionTokens).takeIf { it.size == 2 }?.sum()
+    }
+
     fun usesResponsesApi(baseUrl: String): Boolean =
         baseUrl.contains("/api/v3/responses", ignoreCase = true)
 
@@ -109,6 +119,46 @@ object LlmApiSupport {
             extractFromResponsesOutput(root)?.let { return it }
         }
         return extractFromChatCompletions(root, responseBody)
+    }
+
+    /**
+     * 解析 Chat Completions / Responses API 的 usage；字段名不完全统一时做兼容。
+     */
+    fun extractUsage(responseBody: String, baseUrl: String): TokenUsage? {
+        return try {
+            val root = JSONObject(responseBody)
+            val usage = root.optJSONObject("usage") ?: return null
+            val promptKeys = if (usesResponsesApi(baseUrl)) {
+                listOf("input_tokens", "prompt_tokens")
+            } else {
+                listOf("prompt_tokens", "input_tokens")
+            }
+            val completionKeys = if (usesResponsesApi(baseUrl)) {
+                listOf("output_tokens", "completion_tokens")
+            } else {
+                listOf("completion_tokens", "output_tokens")
+            }
+            TokenUsage(
+                promptTokens = readTokenCount(usage, promptKeys),
+                completionTokens = readTokenCount(usage, completionKeys),
+                totalTokens = readTokenCount(usage, listOf("total_tokens")),
+            ).takeIf {
+                it.promptTokens != null || it.completionTokens != null || it.totalTokens != null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun readTokenCount(usage: JSONObject, keys: List<String>): Int? {
+        for (key in keys) {
+            if (!usage.has(key) || usage.isNull(key)) continue
+            when (val raw = usage.opt(key)) {
+                is Number -> return raw.toInt().coerceAtLeast(0)
+                is String -> raw.trim().toIntOrNull()?.coerceAtLeast(0)?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun extractFromResponsesOutput(root: JSONObject): String? {

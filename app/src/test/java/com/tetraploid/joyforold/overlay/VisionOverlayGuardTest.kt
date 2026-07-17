@@ -19,7 +19,7 @@ class VisionOverlayGuardTest {
     }
 
     @Test
-    fun skips_open_app_and_readable_snapshot() {
+    fun skips_open_app_and_readable_snapshot_tap() {
         val readable = StructuredPageSnapshot(
             packageName = "com.android.settings",
             appHint = "",
@@ -38,6 +38,25 @@ class VisionOverlayGuardTest {
         assertFalse(
             VisionOverlayGuard.actionNeedsHiddenOverlay(
                 AgentAction(action = "tap", targetText = "500,500"),
+                readable,
+            ),
+        )
+    }
+
+    @Test
+    fun a11y_click_always_hides_overlay_even_when_tree_readable() {
+        val readable = StructuredPageSnapshot(
+            packageName = "com.autonavi.minimap",
+            appHint = "当前为高德地图",
+            clickables = listOf("导航", "路线"),
+            editables = emptyList(),
+            visibleTexts = listOf("导航", "路线"),
+            sendButtons = emptyList(),
+            fingerprint = "amap",
+        )
+        assertTrue(
+            VisionOverlayGuard.actionNeedsHiddenOverlay(
+                AgentAction(action = "click", targetText = "导航"),
                 readable,
             ),
         )

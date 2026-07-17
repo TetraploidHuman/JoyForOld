@@ -12,21 +12,39 @@ class AgentPageObservationCapture(
     private val appHintStore: AppHintStore?,
     private val visionDebugStore: VisionDebugStore?,
 ) {
+    /** 供规划器做 diff 的上一帧基线 */
     var previousSnapshot: StructuredPageSnapshot? = null
+        private set
+
+    /** 最近一次实际采到的快照（含「执行后」验证，不必然已写入基线） */
+    var lastCapturedSnapshot: StructuredPageSnapshot? = null
         private set
 
     fun seedPreviousSnapshot(snapshot: StructuredPageSnapshot?) {
         previousSnapshot = snapshot
+        lastCapturedSnapshot = snapshot
+    }
+
+    /** 下一步规划强制 FULL（失败 / 无进展回拉） */
+    fun requestFullContext() {
+        forceFullNext = true
     }
 
     private var previousVisionFingerprint: String? = null
+    private var forceFullNext: Boolean = false
+    private var stepsSinceLastFull: Int = 0
 
+    /**
+     * @param updatePlannerBaseline false 时仅采快照/diff 供验证，不推动规划基线与 mode 计数
+     * （避免「执行后」与「规划续步」双采导致续规划误进 DIFF_ONLY）。
+     */
     suspend fun capture(
         service: AccessibilityGateway,
         session: AgentConversationSession,
         stepNo: Int,
         pageContextNeed: IntentCapabilityMatrix.PageContextNeed,
         phase: String = "规划前",
+        updatePlannerBaseline: Boolean = true,
     ): PageObservationPayload {
         if (pageContextNeed == IntentCapabilityMatrix.PageContextNeed.NONE) {
             return PageObservationPayload(
@@ -39,10 +57,18 @@ class AgentPageObservationCapture(
 
         val merged = service.captureBestStructuredSnapshot()
         if (merged == null) {
-            return captureWithoutA11yTree(service, session, stepNo, pageContextNeed, phase)
+            return captureWithoutA11yTree(
+                service = service,
+                session = session,
+                stepNo = stepNo,
+                pageContextNeed = pageContextNeed,
+                phase = phase,
+                updatePlannerBaseline = updatePlannerBaseline,
+            )
         }
 
         val enriched = enrichWithAppHints(merged)
+        lastCapturedSnapshot = enriched
         val readable = PageReadiness.isReadable(enriched)
         val visionFallback = PageReadiness.needsVisionFallback(enriched)
         val screenshot = if (visionFallback) captureVisionScreenshot(service) else null
@@ -61,13 +87,28 @@ class AgentPageObservationCapture(
                 PageObservation.diff(previousSnapshot, enriched)
             },
         )
-        if (currentVisionFp != null) {
+        if (currentVisionFp != null && updatePlannerBaseline) {
             previousVisionFingerprint = currentVisionFp
         }
 
-        val dynamicMode = PageContextSelector.modeFor(previousSnapshot, enriched, pageDiff)
-        previousSnapshot = enriched
-        val mode = IntentCapabilityMatrix.pageContextModeForNeed(pageContextNeed, dynamicMode)
+        val mode = if (updatePlannerBaseline) {
+            val forceFull = forceFullNext
+            forceFullNext = false
+            val dynamicMode = PageContextSelector.modeFor(
+                previous = previousSnapshot,
+                current = enriched,
+                pageDiff = pageDiff,
+                forceFull = forceFull,
+                stepsSinceLastFull = stepsSinceLastFull,
+                a11yUnavailable = visionFallback,
+            )
+            previousSnapshot = enriched
+            val resolved = IntentCapabilityMatrix.pageContextModeForNeed(pageContextNeed, dynamicMode)
+            rememberModeUsage(resolved)
+            resolved
+        } else {
+            PageContextMode.FULL
+        }
 
         AgentPageDebugLog.logObservation(
             stepNo = stepNo,
@@ -162,6 +203,7 @@ class AgentPageObservationCapture(
         stepNo: Int,
         pageContextNeed: IntentCapabilityMatrix.PageContextNeed,
         phase: String,
+        updatePlannerBaseline: Boolean,
     ): PageObservationPayload {
         val screenshot = captureVisionScreenshot(service)
         val visionMode = PageReadiness.shouldEnterVisionMode(null, screenshot)
@@ -178,7 +220,7 @@ class AgentPageObservationCapture(
         } else {
             baseDiff
         }
-        if (currentVisionFp != null) {
+        if (currentVisionFp != null && updatePlannerBaseline) {
             previousVisionFingerprint = currentVisionFp
         }
         AgentPageDebugLog.logObservation(
@@ -204,8 +246,19 @@ class AgentPageObservationCapture(
             visionMode = visionMode,
             a11yUnavailable = true,
         )
+        if (updatePlannerBaseline) {
+            rememberModeUsage(PageContextMode.FULL)
+        }
         maybeActivateVisionAgent(payload)
         return payload
+    }
+
+    private fun rememberModeUsage(mode: PageContextMode) {
+        when (mode) {
+            PageContextMode.FULL -> stepsSinceLastFull = 0
+            PageContextMode.COMPACT, PageContextMode.DIFF_ONLY -> stepsSinceLastFull++
+            PageContextMode.NONE -> Unit
+        }
     }
 
     private suspend fun captureVisionScreenshot(service: AccessibilityGateway): String? =
@@ -216,6 +269,9 @@ class AgentPageObservationCapture(
     private suspend fun maybeActivateVisionAgent(payload: PageObservationPayload) {
         if (payload.visionMode) {
             VisionOverlaySuppressors.current.activateVisionAgentMode()
+        } else {
+            // 启动瞬间树为空会先进入视觉闩锁；恢复可读后必须清掉，否则无障碍全程不再显示悬浮卡片
+            VisionOverlaySuppressors.current.clearVisionAgentModeUi()
         }
     }
 

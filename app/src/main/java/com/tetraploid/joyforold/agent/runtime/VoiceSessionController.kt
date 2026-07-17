@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import com.tetraploid.joyforold.MainActivity
 import com.tetraploid.joyforold.agent.AgentRunResult
+import com.tetraploid.joyforold.agent.NavPoiPickCodec
 import com.tetraploid.joyforold.agent.PendingAbandonPhraseMatcher
 import com.tetraploid.joyforold.agent.PendingKind
 import com.tetraploid.joyforold.agent.RuntimePermissionKind
@@ -89,6 +90,10 @@ internal class VoiceSessionController(
             appendLog("协助进行中：请在协作页远程操作")
             return
         }
+        if (state.read().waitingForUserConfirm) {
+            applicationProvider()?.let { startVoiceReplyToConfirm(it) }
+            return
+        }
         sessionActive = true
         startVoiceInputInternal(
             confirmReplyMode = false,
@@ -124,12 +129,40 @@ internal class VoiceSessionController(
 
     fun startVoiceReplyToConfirm(application: Application) {
         if (!state.read().waitingForUserConfirm) return
-        if (state.read().isListening || state.read().isRunning) return
+        if (state.read().isRunning) return
         sessionActive = true
         mainScope.launch {
-            androidTtsOutputProvider()?.awaitIdle()
-            startVoiceInputInternal(confirmReplyMode = true, application = application)
+            restartPendingVoiceListen(application, speakReprompt = false)
         }
+    }
+
+    private suspend fun restartPendingVoiceListen(
+        application: Application,
+        speakReprompt: Boolean,
+    ) {
+        voiceTurnCoordinator?.cancelVoice()
+        speechInput?.cancelActiveSession()
+        androidTtsOutputProvider()?.awaitIdle()
+        if (speakReprompt) {
+            val hint = when (orchestratorBridge.peekPendingKind()) {
+                PendingKind.NAV_POI_PICK ->
+                    "没听清您选的地点，请说第几个，或直接说学校或店名"
+                PendingKind.INTENT_DISAMBIGUATION ->
+                    "没听清，请说出或点选要执行的操作"
+                else -> "没有听清，请再说一次"
+            }
+            voiceTurnCoordinator?.speakResult(hint)
+            androidTtsOutputProvider()?.awaitIdle()
+        }
+        startVoiceInputInternal(
+            confirmReplyMode = true,
+            application = application,
+            skipPrompt = !speakReprompt &&
+                orchestratorBridge.peekPendingKind() !in setOf(
+                    PendingKind.NAV_POI_PICK,
+                    PendingKind.INTENT_DISAMBIGUATION,
+                ),
+        )
     }
 
     fun startVoiceOpenFollowUp(application: Application) {
@@ -240,10 +273,14 @@ internal class VoiceSessionController(
             when {
                 result.waitingForUserConfirm -> {
                     sessionActive = true
+                    val kind = orchestratorBridge.peekPendingKind()
+                    val isPickList = kind == PendingKind.NAV_POI_PICK ||
+                        kind == PendingKind.INTENT_DISAMBIGUATION
                     startVoiceInputInternal(
                         confirmReplyMode = true,
                         application = application,
-                        skipPrompt = true,
+                        // 地点/意图候选：在这里播报并开麦，避免与 AgentRuntime 重复 TTS
+                        skipPrompt = !isPickList,
                     )
                 }
                 result.success && shouldContinueConversation(result.summary) -> {
@@ -326,7 +363,7 @@ internal class VoiceSessionController(
             withContext(Dispatchers.Main.immediate) {
                 state.update {
                     it.copy(
-                        isListening = false,
+                        isListening = prompt.isNullOrBlank(),
                         speechText = "",
                         voiceInteractionState = if (prompt.isNullOrBlank()) {
                             VoiceInteractionState.Listening
@@ -414,8 +451,7 @@ internal class VoiceSessionController(
             if (isConfirmReply && app != null && state.read().waitingForUserConfirm) {
                 appendLog("未听清，请再说一次")
                 mainScope.launch {
-                    voiceTurnCoordinator?.speakResult("没有听清，请再说一次")
-                    startVoiceReplyToConfirm(app)
+                    restartPendingVoiceListen(app, speakReprompt = true)
                 }
             } else {
                 wakeWordControllerProvider()?.ensureRunning()
@@ -491,8 +527,28 @@ internal class VoiceSessionController(
                     }
                     appendLog("消歧选择未听清：$merged")
                     mainScope.launch {
-                        voiceTurnCoordinator?.speakResult("请说出或点选要执行的操作")
-                        startVoiceReplyToConfirm(app!!)
+                        restartPendingVoiceListen(app!!, speakReprompt = true)
+                    }
+                    return
+                }
+                PendingKind.NAV_POI_PICK -> {
+                    val options = orchestratorBridge.peekDisambiguationOptions()
+                    val matched = NavPoiPickCodec.matchReply(merged, options)
+                    if (matched != null) {
+                        appendLog("用户选择地点：${matched.label}")
+                        mainScope.launch {
+                            val result = orchestratorBridge.runNavPoiPick(
+                                poiIntentId = matched.intentId,
+                                originalCommand = orchestratorBridge.peekPendingOriginalCommand().orEmpty(),
+                                appContext = app!!,
+                            )
+                            onHandleStandaloneResult(app, result)
+                        }
+                        return
+                    }
+                    appendLog("地点选择未听清：$merged")
+                    mainScope.launch {
+                        restartPendingVoiceListen(app!!, speakReprompt = true)
                     }
                     return
                 }
@@ -693,6 +749,12 @@ internal interface VoiceOrchestratorBridge {
         command: String,
         intentId: String,
         apiKey: String,
+        appContext: android.content.Context,
+    ): AgentRunResult
+
+    suspend fun runNavPoiPick(
+        poiIntentId: String,
+        originalCommand: String,
         appContext: android.content.Context,
     ): AgentRunResult
 }

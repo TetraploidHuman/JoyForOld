@@ -2,24 +2,23 @@ package com.tetraploid.joyforold.wakeword
 
 import android.content.Context
 import android.util.Log
+import com.tetraploid.joyforold.network.JoyHttpClients
+import com.tetraploid.joyforold.network.downloadToFile
+import com.tetraploid.joyforold.network.getText
+import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
 
 class SherpaOnnxModelManager(
     context: Context,
-    private val httpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .build(),
+    private val httpClient: HttpClient = JoyHttpClients.longDownload(),
 ) {
     private val logTag = "SherpaOnnxModelMgr"
     private val appContext = context.applicationContext
@@ -206,13 +205,8 @@ class SherpaOnnxModelManager(
         modelDir.mkdirs()
         val archive = File(parentDir, "wakeword-model.tar.bz2")
         val expectedSha256 = fetchExpectedSha256()
-        val request = Request.Builder().url(MODEL_URL).build()
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) error("下载唤醒模型失败：HTTP ${response.code}")
-            val body = response.body ?: error("下载唤醒模型失败：空响应")
-            FileOutputStream(archive).use { output ->
-                body.byteStream().use { input -> input.copyTo(output) }
-            }
+        runBlocking {
+            httpClient.downloadToFile(MODEL_URL, archive)
         }
         val actualSha256 = sha256Hex(archive)
         if (!expectedSha256.equals(actualSha256, ignoreCase = true)) {
@@ -233,16 +227,12 @@ class SherpaOnnxModelManager(
     }
 
     private fun fetchExpectedSha256(): String {
-        val request = Request.Builder().url(CHECKSUM_URL).build()
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) error("获取唤醒模型校验信息失败：HTTP ${response.code}")
-            val text = response.body?.string().orEmpty()
-            val line = text.lineSequence().firstOrNull { it.contains(MODEL_ARCHIVE_NAME) }
-                ?: error("校验文件缺少条目：$MODEL_ARCHIVE_NAME")
-            // checksum.txt 格式：<sha256> <filename>
-            return line.trim().split(Regex("\\s+")).firstOrNull().orEmpty().also {
-                if (it.length < 32) error("校验文件格式异常：$line")
-            }
+        val text = runBlocking { httpClient.getText(CHECKSUM_URL) }
+        val line = text.lineSequence().firstOrNull { it.contains(MODEL_ARCHIVE_NAME) }
+            ?: error("校验文件缺少条目：$MODEL_ARCHIVE_NAME")
+        // checksum.txt 格式：<sha256> <filename>
+        return line.trim().split(Regex("\\s+")).firstOrNull().orEmpty().also {
+            if (it.length < 32) error("校验文件格式异常：$line")
         }
     }
 
@@ -289,7 +279,8 @@ class SherpaOnnxModelManager(
     )
 
     companion object {
-        const val MODEL_VERSION = "kws-zh-en-3M-2025-12-20-v1"
+        // v2: force re-copy bundled assets so full en.phone (CMU lexicon) replaces the 260B stub.
+        const val MODEL_VERSION = "kws-zh-en-3M-2025-12-20-v2"
         private const val MODEL_DIR_NAME = "wakeword-sherpa"
         private const val MODEL_FOLDER_NAME = "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20"
         private const val MODEL_ARCHIVE_NAME = "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2"

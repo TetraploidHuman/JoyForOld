@@ -17,17 +17,20 @@ import com.tetraploid.joyforold.assist.protocol.JoinPairRequest
 import com.tetraploid.joyforold.assist.protocol.JoinPairResponse
 import com.tetraploid.joyforold.assist.protocol.ListBindingsRequest
 import com.tetraploid.joyforold.assist.protocol.ListBindingsResponse
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
+import com.tetraploid.joyforold.network.JoyHttpClients
+import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+import kotlinx.coroutines.runBlocking
 
 class AssistApiClient(
-    private val httpClient: OkHttpClient = sharedClient,
+    private val httpClient: HttpClient = JoyHttpClients.default(),
 ) {
-    private val mediaType = "application/json; charset=utf-8".toMediaType()
-
     fun createPair(baseUrl: String, request: CreatePairRequest): Result<CreatePairResponse> =
         post("$baseUrl/api/v1/pair/create", request)
 
@@ -50,25 +53,25 @@ class AssistApiClient(
         post("$baseUrl/api/v1/pair/elder-sync", request)
 
     fun pingHealth(baseUrl: String): Result<Boolean> = runCatching {
-        val requestUrl = "${normalizeApiUrl("$baseUrl/api/v1/health")}"
-        val request = Request.Builder().url(requestUrl).get().build()
-        httpClient.newCall(request).execute().use { response ->
-            response.isSuccessful
+        runBlocking {
+            val requestUrl = normalizeApiUrl("$baseUrl/api/v1/health")
+            val response = httpClient.get(requestUrl)
+            response.status.isSuccess()
         }
     }
 
     private inline fun <reified Req : Any, reified Res : Any> post(url: String, body: Req): Result<Res> = runCatching {
-        val requestUrl = normalizeApiUrl(url)
-        val payload = AssistHttpJson.encode(body)
-        val request = Request.Builder()
-            .url(requestUrl)
-            .post(payload.toRequestBody(mediaType))
-            .build()
-        httpClient.newCall(request).execute().use { response ->
-            val text = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
+        runBlocking {
+            val requestUrl = normalizeApiUrl(url)
+            val payload = AssistHttpJson.encode(body)
+            val response = httpClient.post(requestUrl) {
+                contentType(ContentType.Application.Json)
+                setBody(payload)
+            }
+            val text = response.bodyAsText()
+            if (!response.status.isSuccess()) {
                 val error = runCatching { AssistHttpJson.decode<ErrorResponse>(text) }.getOrNull()?.error
-                error("HTTP ${response.code}: ${error ?: text}")
+                error("HTTP ${response.status.value}: ${error ?: text}")
             }
             AssistHttpJson.decode(text)
         }
@@ -86,13 +89,5 @@ class AssistApiClient(
             if (base.isBlank()) error("协助服务器 HTTP 地址未配置")
             base
         }
-    }
-
-    companion object {
-        private val sharedClient = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .build()
     }
 }

@@ -134,7 +134,7 @@ fun MainPivotScreen(
         permissionDialog = PermissionDialogRequest(
             kind = PermissionDialogKind.Accessibility,
             title = "需要无障碍权限",
-            message = "执行语音或文字指令需要开启无障碍服务，以便助手操作屏幕。",
+            message = "执行语音或文字指令需要开启「JoyForOld」无障碍服务。若要操作微信，请再到设置 → 组件里启用「微信支持」（系统无障碍中打开「JoyForOld · 微信支持组件」）。",
         )
     }
 
@@ -148,10 +148,23 @@ fun MainPivotScreen(
             return
         }
         if (uiState.recordAudioGranted) {
-            viewModel.startVoiceInput()
+            if (uiState.waitingForUserConfirm) {
+                viewModel.startVoiceReplyToConfirm()
+            } else {
+                viewModel.startVoiceInput()
+            }
         } else {
-            showRecordAudioDialog("语音输入需要麦克风权限，用于聆听您的指令。") {
+            showRecordAudioDialog(
+                if (uiState.waitingForUserConfirm) {
+                    "语音回答需要麦克风权限，用于聆听您的选择。"
+                } else {
+                    "语音输入需要麦克风权限，用于聆听您的指令。"
+                },
+            ) {
                 pendingVoiceInputAfterPermission = true
+                if (uiState.waitingForUserConfirm) {
+                    pendingVoiceAfterPermission = true
+                }
             }
         }
     }
@@ -333,6 +346,7 @@ fun MainPivotScreen(
                         onUpdateCommand = viewModel::updateCommand,
                         onRunAgent = viewModel::runAgent,
                         onPreviewPage = viewModel::previewPageTree,
+                        onSetUiTreeLogcatEnabled = viewModel::setUiTreeLogcatEnabled,
                         onSetVisionDebugEnabled = { enabled ->
                             viewModel.setVisionDebugEnabled(enabled)
                         },

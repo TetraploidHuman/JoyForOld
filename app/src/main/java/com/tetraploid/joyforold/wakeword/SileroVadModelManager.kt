@@ -2,20 +2,18 @@ package com.tetraploid.joyforold.wakeword
 
 import android.content.Context
 import android.util.Log
+import com.tetraploid.joyforold.network.JoyHttpClients
+import com.tetraploid.joyforold.network.downloadToFile
+import io.ktor.client.HttpClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
-import java.util.concurrent.TimeUnit
 
 class SileroVadModelManager(
     context: Context,
-    private val httpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .build(),
+    private val httpClient: HttpClient = JoyHttpClients.longDownload(),
 ) {
     private val logTag = "SileroVadModelMgr"
     private val appContext = context.applicationContext
@@ -49,13 +47,8 @@ class SileroVadModelManager(
     }
 
     private fun downloadModel() {
-        val request = Request.Builder().url(MODEL_URL).build()
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) error("下载 Silero VAD 失败：HTTP ${response.code}")
-            val body = response.body ?: error("下载 Silero VAD 失败：空响应")
-            FileOutputStream(modelFile).use { output ->
-                body.byteStream().use { input -> input.copyTo(output) }
-            }
+        runBlocking {
+            httpClient.downloadToFile(MODEL_URL, modelFile)
         }
         Log.i(logTag, "silero_vad downloaded to ${modelFile.absolutePath}")
     }

@@ -28,7 +28,7 @@ object LocalFastPathGuard {
         }，确认吗？"
     }
 
-    private val undoableActions = setOf("open_app", "navigate_home")
+    private val undoableActions = setOf("open_app", "navigate_home", "navigate_to")
 
     fun isUndoable(steps: List<AgentAction>): Boolean {
         val action = IntentCapabilityMatrix.primaryActionOf(steps).orEmpty()

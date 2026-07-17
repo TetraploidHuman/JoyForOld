@@ -12,6 +12,7 @@ class FakeAgentLlmClient : AgentLlmClient {
     val classifyPresetIntentCalls = mutableListOf<String>()
     val classifySystemIntentCalls = mutableListOf<String>()
     val extractKeyMemoryCalls = mutableListOf<String>()
+    val actionSetAskCalls = mutableListOf<Pair<String, String>>()
 
     var presetIntentHandler: suspend (apiKey: String, utterance: String) -> Pair<String, Double>? =
         { _, _ -> null }
@@ -19,6 +20,12 @@ class FakeAgentLlmClient : AgentLlmClient {
         { _, _ -> null }
     var extractKeyMemoryHandler: suspend (apiKey: String, sessionSummary: String) -> String =
         { _, _ -> "" }
+    var actionSetAskHandler: suspend (
+        apiKey: String,
+        systemPrompt: String,
+        userPrompt: String,
+        writeFields: List<String>,
+    ) -> Map<String, String> = { _, _, _, _ -> emptyMap() }
 
     private val planningResponses = ArrayDeque<JSONObject>()
 
@@ -104,6 +111,14 @@ class FakeAgentLlmClient : AgentLlmClient {
         return extractKeyMemoryHandler(apiKey, sessionSummary)
     }
 
+    var planUserFacingPhasesHandler: suspend (apiKey: String, userCommand: String) -> List<TaskPhaseItem> =
+        { _, command -> TaskPhasePlanner.planFromCommand(command) }
+
+    override suspend fun planUserFacingPhases(
+        apiKey: String,
+        userCommand: String,
+    ): List<TaskPhaseItem> = planUserFacingPhasesHandler(apiKey, userCommand)
+
     override fun ensureSystemSeeded(
         conversation: AgentConversationSession,
         keyMemories: String,
@@ -139,6 +154,16 @@ class FakeAgentLlmClient : AgentLlmClient {
     ): SystemIntentAiResolver.Classification? {
         classifySystemIntentCalls += utterance
         return systemIntentHandler(apiKey, utterance)
+    }
+
+    override suspend fun resolveActionSetAsk(
+        apiKey: String,
+        systemPrompt: String,
+        userPrompt: String,
+        writeFields: List<String>,
+    ): Map<String, String> {
+        actionSetAskCalls += systemPrompt to userPrompt
+        return actionSetAskHandler(apiKey, systemPrompt, userPrompt, writeFields)
     }
 
     private fun defaultFinishResponse(): JSONObject = JSONObject(

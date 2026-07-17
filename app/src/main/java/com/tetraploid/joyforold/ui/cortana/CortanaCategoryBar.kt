@@ -143,6 +143,7 @@ fun CortanaBottomDock(
     onCancelClick: () -> Unit,
     canExecute: Boolean,
     isRunning: Boolean = false,
+    voiceBusy: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -190,6 +191,7 @@ fun CortanaBottomDock(
             onCancelClick = onCancelClick,
             isListening = isListening,
             isRunning = isRunning,
+            voiceBusy = voiceBusy,
             enabled = enabled,
             canExecute = canExecute,
             placeholder = when (selectedCategory) {

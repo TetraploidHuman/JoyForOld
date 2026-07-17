@@ -140,6 +140,22 @@ private fun ConversationCardItem(
                     Text(label, color = CortanaColors.AccentMuted)
                 }
             }
+            Text(
+                text = if (isListening) {
+                    "正在听您说话，可说「第一个」或学校/店名"
+                } else {
+                    "请直接说话或点选上面一项"
+                },
+                color = CortanaColors.OnBackgroundMuted,
+                fontSize = 13.sp,
+            )
+            if (speechText.isNotBlank()) {
+                Text(
+                    text = "识别：$speechText",
+                    color = CortanaColors.AccentMuted,
+                    fontSize = 13.sp,
+                )
+            }
         } else {
             card.bullets.forEach { line ->
                 Text(

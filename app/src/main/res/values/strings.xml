@@ -1,6 +1,9 @@
 <resources>
     <string name="app_name">JoyForOld</string>
     <string name="accessibility_service_description">JoyForOld 需要无障碍权限来读取屏幕内容并帮老人执行点击、输入等操作。</string>
+    <string name="accessibility_whitelist_reader_label">JoyForOld · 微信支持组件</string>
+    <string name="accessibility_whitelist_reader_description">JoyForOld 内置组件：用于读取微信等应用的界面结构。请与「JoyForOld」主无障碍服务同时开启。</string>
+    <string name="accessibility_whitelist_reader_hint">使用微信时，请在无障碍里同时开启「JoyForOld」和「JoyForOld · 微信支持组件」。</string>
     <string name="joy_ime_label">Joy 输入助手</string>
     <string name="joy_ime_settings_hint">可选优化：在系统输入法里启用「Joy 输入助手」并设为默认，助手自动输入微信等更稳。Joy 没有可见键盘——您自己点输入框打字时，会自动切回原来的搜狗/系统键盘，不影响日常输入。不设默认也可以，助手会优先用粘贴方式输入。</string>
     <string name="overlay_channel_name">JoyForOld 悬浮助手</string>

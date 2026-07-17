@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tetraploid.joyforold.accessibility.WeChatA11yComponent
 import com.tetraploid.joyforold.agent.AgentUiState
 import com.tetraploid.joyforold.ime.JoyImeHelper
 import com.tetraploid.joyforold.overlay.FloatingOverlayService
@@ -67,6 +68,7 @@ fun SettingsPage(
     onUpdateCommand: (String) -> Unit,
     onRunAgent: () -> Unit,
     onPreviewPage: () -> Unit,
+    onSetUiTreeLogcatEnabled: (Boolean) -> Unit,
     onSetVisionDebugEnabled: (Boolean) -> Unit,
     onRefreshVisionDebug: () -> Unit,
     onClearVisionDebug: () -> Unit,
@@ -120,7 +122,7 @@ fun SettingsPage(
         )
         SectionDivider()
         SectionTitle("权限与服务")
-        StatusLine("无障碍", uiState.accessibilityEnabled)
+        StatusLine("无障碍（主服务）", uiState.accessibilityEnabled)
         if (uiState.accessibilityEnabled && !uiState.accessibilityServiceConnected) {
             Text(
                 text = "已开启，服务连接中…",
@@ -135,6 +137,16 @@ fun SettingsPage(
             fontSize = 12.sp,
             modifier = Modifier.padding(vertical = 4.dp),
         )
+
+        SectionDivider()
+        SectionTitle("组件")
+        WeChatSupportComponentCard(
+            status = WeChatA11yComponent.status(context),
+            onOpenSettings = {
+                context.startActivity(WeChatA11yComponent.openAccessibilitySettingsIntent())
+            },
+        )
+
         StatusLine("麦克风", uiState.recordAudioGranted)
         StatusLine("联系人", uiState.readContactsGranted)
         StatusLine("通知使用权", uiState.notificationAccessGranted)
@@ -440,6 +452,33 @@ fun SettingsPage(
                 modifier = Modifier.weight(1f),
             ) { Text("读取页面") }
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "持续输出 UI 树到 Logcat",
+                    color = CortanaColors.OnBackground,
+                    fontSize = 15.sp,
+                )
+                Text(
+                    text = "与「读取页面」相同内容；过滤 tag=JoyForOld/UiTree",
+                    color = CortanaColors.OnBackgroundMuted,
+                    fontSize = 12.sp,
+                )
+            }
+            Switch(
+                checked = uiState.uiTreeLogcatEnabled,
+                onCheckedChange = onSetUiTreeLogcatEnabled,
+                enabled = uiState.accessibilityEnabled,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = CortanaColors.Accent,
+                    checkedTrackColor = CortanaColors.SurfaceElevated,
+                ),
+            )
+        }
 
         SectionDivider()
         SectionTitle("视觉调试")
@@ -455,6 +494,61 @@ fun SettingsPage(
         SectionTitle("运行日志")
         uiState.logs.takeLast(20).forEach { line ->
             Text(line, color = CortanaColors.OnBackgroundMuted, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+private fun WeChatSupportComponentCard(
+    status: WeChatA11yComponent.Status,
+    onOpenSettings: () -> Unit,
+) {
+    val statusColor = when (status) {
+        WeChatA11yComponent.Status.ACTIVE -> CortanaColors.Success
+        WeChatA11yComponent.Status.PENDING -> CortanaColors.OnBackgroundSecondary
+        WeChatA11yComponent.Status.OFF -> CortanaColors.OnBackgroundMuted
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = WeChatA11yComponent.DISPLAY_NAME,
+                color = CortanaColors.OnBackground,
+                fontSize = 15.sp,
+            )
+            Text(
+                text = WeChatA11yComponent.statusLabel(status),
+                color = statusColor,
+                fontSize = 13.sp,
+            )
+        }
+        Text(
+            text = "内置组件 · 随主应用一起安装",
+            color = CortanaColors.OnBackgroundMuted,
+            fontSize = 12.sp,
+        )
+        Text(
+            text = WeChatA11yComponent.statusHint(status),
+            color = CortanaColors.OnBackgroundSecondary,
+            fontSize = 12.sp,
+        )
+        OutlinedButton(
+            onClick = onOpenSettings,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                when (status) {
+                    WeChatA11yComponent.Status.ACTIVE -> "管理无障碍服务"
+                    WeChatA11yComponent.Status.PENDING -> "打开无障碍设置"
+                    WeChatA11yComponent.Status.OFF -> "启用微信支持组件"
+                },
+            )
         }
     }
 }

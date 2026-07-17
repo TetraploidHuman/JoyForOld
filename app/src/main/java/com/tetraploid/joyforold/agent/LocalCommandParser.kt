@@ -136,6 +136,6 @@ object LocalCommandParser {
             }
         }
 
-        return AgentActionPlaybook.stepsOnOpenChatPage(message)
+        return AgentActionSet.stepsOnOpenChatPage(message)
     }
 }

@@ -179,6 +179,7 @@ object TaskPhasePlanner {
             "open_mobile_data_settings" -> "打开移动数据"
             "open_location_settings" -> "打开定位设置"
             "navigate_home" -> "导航回家"
+            "navigate_to" -> "导航前往${action.targetText.orEmpty()}"
             "dial_contact" -> "拨打${action.targetText.orEmpty()}"
             "send_sms" -> "给${action.targetText.orEmpty()}发短信"
             "read_unread_messages" -> "读取未读消息"
@@ -198,6 +199,7 @@ object TaskPhasePlanner {
             }
             "type" -> "输入「${action.inputText.orEmpty()}」"
             "send" -> "发送消息"
+            AgentActionSet.ACTION_RUN_ACTION_SET -> AgentActionSet.uiLabel(action)
             "scroll_down", "swipe_down" -> "向下滚动"
             "scroll_up" -> "向上滚动"
             "back" -> "返回上一页"
@@ -213,14 +215,62 @@ object TaskPhasePlanner {
         return if (compact.length <= 20) compact else compact.take(20) + "…"
     }
 
-    private fun phases(vararg labels: String): List<TaskPhaseItem> {
-        return labels.mapIndexed { index, label ->
+    private fun phases(vararg labels: String): List<TaskPhaseItem> =
+        fromLabels(labels.toList())
+
+    /** 将阶段文案列表转为 UI 阶段（第 1 步 InProgress）。 */
+    fun fromLabels(labels: List<String>): List<TaskPhaseItem> {
+        val cleaned = sanitizePhaseLabels(labels)
+        if (cleaned.isEmpty()) return emptyList()
+        return cleaned.mapIndexed { index, label ->
             TaskPhaseItem(
                 index = index + 1,
-                label = label,
+                label = label.take(24),
                 status = if (index == 0) TaskStepStatus.InProgress else TaskStepStatus.Pending,
             )
         }
+    }
+
+    /** 去掉「结束任务」等收尾措辞，避免排到第一步并误标为进行中。 */
+    fun sanitizePhaseLabels(labels: List<String>): List<String> =
+        labels.map { it.trim() }
+            .filter { it.isNotBlank() }
+            .filterNot { isFinishLikePhase(it) }
+            .distinct()
+
+    fun isFinishLikePhase(label: String): Boolean {
+        val t = label.trim()
+        if (t.isEmpty()) return true
+        val finishHints = listOf(
+            "结束任务", "完成任务", "任务结束", "任务完成", "收尾",
+            "播放后结束", "完成后结束", "结束流程",
+        )
+        if (finishHints.any { t.contains(it) }) return true
+        if (t == "结束" || t == "完成" || t == "finish") return true
+        return false
+    }
+
+    /**
+     * 解析 LLM 返回的粗略阶段 JSON：
+     * `{"phases":["打开微信","找到联系人","发送消息"]}`
+     * 也兼容 `{"plan":[...]}` / 字符串数组顶层。
+     */
+    fun parseFromLlmJson(json: org.json.JSONObject): List<TaskPhaseItem> {
+        val array = json.optJSONArray("phases")
+            ?: json.optJSONArray("plan")
+            ?: json.optJSONArray("stages")
+        if (array == null || array.length() == 0) return emptyList()
+        val labels = buildList {
+            for (i in 0 until array.length()) {
+                val asObj = array.optJSONObject(i)
+                val label = when {
+                    asObj != null -> asObj.optString("label").ifBlank { asObj.optString("title") }
+                    else -> array.optString(i)
+                }
+                if (label.isNotBlank()) add(label)
+            }
+        }
+        return fromLabels(labels.take(6))
     }
 
     private fun inferAppFromCommand(text: String): String {
@@ -273,29 +323,53 @@ object TaskPhaseTracker {
             "open_mobile_data_settings", "open_location_settings",
             -> "打开"
             "find_on_page" -> "搜索"
-            "click" -> phases.firstOrNull { it.label.startsWith("找到") }?.label?.take(2) ?: "点击"
+            "click", "tap" -> phases.firstOrNull { it.label.startsWith("找到") }?.label?.take(2) ?: "找"
             "type" -> "输入"
             "send", "send_sms" -> "发送"
+            AgentActionSet.ACTION_RUN_ACTION_SET -> "动作组"
             "dial_contact" -> "拨打"
-            "navigate_home" -> "导航"
+            "navigate_home", "navigate_to" -> "导航"
             "read_unread_messages" -> "读取"
-            "scroll_down", "swipe_down" -> "滚动"
-            "scroll_up" -> "滚动"
+            "scroll_down", "swipe_down", "scroll_up" -> "滚动"
             "back" -> "返回"
             "home" -> "桌面"
             "ask_family_for_help" -> "家人"
             "emergency_help" -> "呼救"
             "set_alarm" -> "闹钟"
+            "add_calendar_event" -> "日程"
             "finish" -> null
             else -> null
         }
-        if (keyword == null && action != "finish") return phases
         if (action == "finish") return markAllCompleted(phases)
-        return completePhaseMatching(phases, keyword!!)
+        if (keyword != null) {
+            val matched = completePhaseMatching(phases, keyword)
+            if (matched !== phases) return matched
+            // LLM 阶段文案可能不含关键字：推进当前进行中阶段
+            return advanceCurrentPhase(phases)
+        }
+        // tap/type 等与阶段文案对不上时，仍推进进行中项，避免计划卡卡住
+        return when (action) {
+            "click", "tap", "type", "send", "wait" -> advanceCurrentPhase(phases)
+            else -> phases
+        }
     }
 
     fun markAllCompleted(phases: List<TaskPhaseItem>): List<TaskPhaseItem> {
         return phases.map { it.copy(status = TaskStepStatus.Completed) }
+    }
+
+    private fun advanceCurrentPhase(phases: List<TaskPhaseItem>): List<TaskPhaseItem> {
+        val targetIdx = phases.indexOfFirst { it.status == TaskStepStatus.InProgress }
+            .takeIf { it >= 0 } ?: phases.indexOfFirst { it.status == TaskStepStatus.Pending }
+        if (targetIdx < 0) return phases
+        return phases.mapIndexed { index, phase ->
+            when {
+                index == targetIdx -> phase.copy(status = TaskStepStatus.Completed)
+                index == targetIdx + 1 && phase.status == TaskStepStatus.Pending ->
+                    phase.copy(status = TaskStepStatus.InProgress)
+                else -> phase
+            }
+        }
     }
 
     private fun completePhaseMatching(

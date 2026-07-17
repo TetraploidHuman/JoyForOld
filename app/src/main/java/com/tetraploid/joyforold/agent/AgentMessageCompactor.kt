@@ -3,6 +3,9 @@ package com.tetraploid.joyforold.agent
 /**
  * Shrinks agent chat payloads before they are sent to the LLM API.
  * Full snapshots remain in persisted session JSON; only API-bound messages are compacted.
+ *
+ * When the latest page section is COMPACT/DIFF_ONLY, the most recent FULL snapshot is kept
+ * so the model still has clickable/text labels to reference.
  */
 object AgentMessageCompactor {
     private const val PAGE_CONTEXT_MARKER = "【当前页面快览】"
@@ -18,8 +21,19 @@ object AgentMessageCompactor {
     fun compactForApi(messages: List<ChatMessage>): List<ChatMessage> {
         val lastPageIdx = messages.indexOfLast { containsPageSection(it) }
         if (lastPageIdx < 0) return messages
+
+        val keepFullIdx = if (containsFullPageSection(messages[lastPageIdx])) {
+            -1
+        } else {
+            messages.indexOfLast { containsFullPageSection(it) }
+        }
+
         return messages.mapIndexed { index, message ->
-            if (index == lastPageIdx) message else omitPageSection(message)
+            when {
+                index == lastPageIdx -> message
+                index == keepFullIdx -> message
+                else -> omitPageSection(message)
+            }
         }
     }
 
@@ -68,6 +82,11 @@ object AgentMessageCompactor {
         return message.content.contains(PAGE_CONTEXT_MARKER) ||
             message.content.contains(PAGE_MINIMAL_MARKER) ||
             message.content.contains(PAGE_DIFF_MARKER)
+    }
+
+    private fun containsFullPageSection(message: ChatMessage): Boolean {
+        if (message.role != "user") return false
+        return message.content.contains(PAGE_CONTEXT_MARKER)
     }
 
     private fun omitPageSection(message: ChatMessage): ChatMessage {

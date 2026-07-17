@@ -7,6 +7,7 @@ import com.tetraploid.joyforold.agent.ContextConsentStore
 import com.tetraploid.joyforold.agent.ProactiveAssistantEngine
 import com.tetraploid.joyforold.agent.VisionDebugStore
 import com.tetraploid.joyforold.agent.VoiceInteractionConfigStore
+import com.tetraploid.joyforold.accessibility.UiTreeLogcatStore
 import com.tetraploid.joyforold.caregiver.CaregiverSupportStore
 import com.tetraploid.joyforold.collaboration.AssistPairingStore
 import com.tetraploid.joyforold.data.ApiKeyStore
@@ -27,6 +28,7 @@ val dataModule = module {
     single { PresetCommandStore(androidContext()).also { it.ensureSeededDefaults() } }
     single { ContextConsentStore(androidContext()) }
     single { VisionDebugStore(androidContext()) }
+    single { UiTreeLogcatStore(androidContext()) }
     single { AssistPairingStore(androidContext()) }
     single { VoiceInteractionConfigStore(androidContext()) }
     single { AsrSpeakerProfileStore(androidContext()) }

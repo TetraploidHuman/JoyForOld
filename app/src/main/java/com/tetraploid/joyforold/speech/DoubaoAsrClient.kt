@@ -12,18 +12,21 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlin.math.max
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import okio.ByteString
+import com.tetraploid.joyforold.network.JoyHttpClients
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
+import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.header
+import io.ktor.websocket.CloseReason
+import io.ktor.websocket.Frame
+import io.ktor.websocket.close
+import io.ktor.websocket.readBytes
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
@@ -32,11 +35,12 @@ class DoubaoAsrClient(
     private val appId: String,
     private val accessToken: String,
     private val resourceId: String,
-    private val okHttpClient: OkHttpClient = sharedClient,
+    private val httpClient: HttpClient = JoyHttpClients.websocket(),
 ) {
     private val supervisorJob = SupervisorJob()
     private val scope = CoroutineScope(supervisorJob + Dispatchers.IO)
-    private var webSocket: WebSocket? = null
+    private val wsSessionRef = AtomicReference<DefaultClientWebSocketSession?>(null)
+    private var wsJob: Job? = null
     private var audioRecord: AudioRecord? = null
     private var streamingJob: Job? = null
     private var connectId: String = ""
@@ -89,7 +93,7 @@ class DoubaoAsrClient(
             onReady()
             return
         }
-        if (webSocket != null && !opened) {
+        if (webSocketActive() && !opened) {
             onPrepareReady = onReady
             onPrepareError = onError
             shortUtteranceMode = shortUtterance
@@ -109,11 +113,11 @@ class DoubaoAsrClient(
         }
         onPrepareReady = null
         onPrepareError = null
-        if (!connectionPrepared && webSocket == null) return
+        if (!connectionPrepared && !webSocketActive()) return
         cancelSession()
     }
 
-    fun isSessionIdle(): Boolean = streamingJob?.isActive != true && webSocket == null
+    fun isSessionIdle(): Boolean = streamingJob?.isActive != true && !webSocketActive()
 
     fun start(
         onPartialText: (String) -> Unit,
@@ -148,11 +152,13 @@ class DoubaoAsrClient(
         endpointStopTracker = createEndpointStopTracker(shortUtterance).also {
             it.reset(System.currentTimeMillis())
         }
-        val socket = webSocket
-        if (socket != null && !clientRequestSent) {
-            sendFullClientRequest(socket)
-            clientRequestSent = true
-            flushPendingAudioFrames()
+        scope.launch {
+            val session = wsSessionRef.get()
+            if (session != null && !clientRequestSent) {
+                sendFullClientRequest(session)
+                clientRequestSent = true
+                flushPendingAudioFrames()
+            }
         }
         beginRecordingSession()
     }
@@ -187,75 +193,74 @@ class DoubaoAsrClient(
 
     private fun openWebSocket(deferClientRequest: Boolean) {
         closeWebSocket()
-        webSocket = okHttpClient.newWebSocket(buildRequest(), createWebSocketListener(deferClientRequest))
-    }
-
-    private fun closeWebSocket() {
-        webSocket?.cancel()
-        webSocket = null
-    }
-
-    private fun buildRequest(): Request {
-        val requestBuilder = Request.Builder()
-            .url(ASR_URL)
-            .addHeader("X-Api-Resource-Id", resourceId.ifBlank { DEFAULT_RESOURCE_ID })
-            .addHeader("X-Api-Connect-Id", connectId)
-            .addHeader("X-Api-Request-Id", UUID.randomUUID().toString())
-            .addHeader("X-Api-Sequence", "-1")
-        if (apiKey.isNotBlank()) {
-            requestBuilder.addHeader("X-Api-Key", apiKey)
-        } else {
-            requestBuilder
-                .addHeader("X-Api-App-Key", appId)
-                .addHeader("X-Api-Access-Key", accessToken)
-        }
-        return requestBuilder.build()
-    }
-
-    private fun createWebSocketListener(deferClientRequest: Boolean): WebSocketListener {
-        return object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                opened = true
-                if (deferClientRequest) {
-                    connectionPrepared = true
-                    onPrepareReady?.invoke()
-                    onPrepareReady = null
-                    onPrepareError = null
-                    return
+        wsJob = scope.launch {
+            try {
+                httpClient.webSocket(
+                    urlString = ASR_URL,
+                    request = {
+                        header("X-Api-Resource-Id", resourceId.ifBlank { DEFAULT_RESOURCE_ID })
+                        header("X-Api-Connect-Id", connectId)
+                        header("X-Api-Request-Id", UUID.randomUUID().toString())
+                        header("X-Api-Sequence", "-1")
+                        if (apiKey.isNotBlank()) {
+                            header("X-Api-Key", apiKey)
+                        } else {
+                            header("X-Api-App-Key", appId)
+                            header("X-Api-Access-Key", accessToken)
+                        }
+                    },
+                ) {
+                    wsSessionRef.set(this)
+                    opened = true
+                    if (deferClientRequest) {
+                        connectionPrepared = true
+                        onPrepareReady?.invoke()
+                        onPrepareReady = null
+                        onPrepareError = null
+                    } else {
+                        sendFullClientRequest(this)
+                        clientRequestSent = true
+                        flushPendingAudioFrames()
+                    }
+                    try {
+                        for (frame in incoming) {
+                            if (frame is Frame.Binary) {
+                                handleServerBinaryFrame(frame.readBytes())
+                            }
+                        }
+                    } finally {
+                        wsSessionRef.set(null)
+                        opened = false
+                        connectionPrepared = false
+                        clientRequestSent = false
+                    }
                 }
-                sendFullClientRequest(webSocket)
-                clientRequestSent = true
-                flushPendingAudioFrames()
-            }
-
-            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                handleServerBinaryFrame(bytes.toByteArray())
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                val httpStatus = extractHttpStatus(error)
                 if (connectionPrepared && streamingJob == null) {
                     connectionPrepared = false
                     val prepareError = onPrepareError
                     onPrepareError = null
                     onPrepareReady = null
-                    prepareError?.invoke(formatConnectionError(t, response))
-                    return
+                    prepareError?.invoke(formatConnectionError(error, httpStatus))
+                    return@launch
                 }
-                if (sessionDelivered || finalText.isNotBlank() || errorReported) return
+                if (sessionDelivered || finalText.isNotBlank() || errorReported) return@launch
                 errorReported = true
-                onErrorCallback?.invoke(formatConnectionError(t, response))
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                opened = false
-                connectionPrepared = false
-                clientRequestSent = false
-                if (this@DoubaoAsrClient.webSocket === webSocket) {
-                    this@DoubaoAsrClient.webSocket = null
-                }
+                onErrorCallback?.invoke(formatConnectionError(error, httpStatus))
             }
         }
     }
+
+    private fun closeWebSocket() {
+        wsJob?.cancel()
+        wsJob = null
+        wsSessionRef.set(null)
+    }
+
+    private fun webSocketActive(): Boolean = wsJob?.isActive == true || wsSessionRef.get() != null
 
     private fun beginRecordingSession() {
         if (streamingJob?.isActive == true) return
@@ -343,8 +348,8 @@ class DoubaoAsrClient(
                 sendAudioFrame(last, isLast = true)
             }
             delay(FINAL_RESULT_WAIT_MS)
-            webSocket?.close(1000, "auto-stop")
-            webSocket = null
+            wsSessionRef.get()?.close(CloseReason(CloseReason.Codes.NORMAL, "auto-stop"))
+            closeWebSocket()
             opened = false
             connectionPrepared = false
             clientRequestSent = false
@@ -399,8 +404,8 @@ class DoubaoAsrClient(
                 }
                 delay(FINAL_RESULT_WAIT_MS)
             }
-            webSocket?.close(1000, "done")
-            webSocket = null
+            wsSessionRef.get()?.close(CloseReason(CloseReason.Codes.NORMAL, "done"))
+            closeWebSocket()
             opened = false
             lastAudioFrame = null
             sessionDelivered = true
@@ -444,7 +449,7 @@ class DoubaoAsrClient(
         }
     }
 
-    private fun sendFullClientRequest(socket: WebSocket) {
+    private suspend fun sendFullClientRequest(session: DefaultClientWebSocketSession) {
         val endWindowSize = if (shortUtteranceMode) END_WINDOW_SIZE_SHORT_MS else END_WINDOW_SIZE_NORMAL_MS
         val forceToSpeechTime = if (shortUtteranceMode) FORCE_TO_SPEECH_SHORT_MS else FORCE_TO_SPEECH_NORMAL_MS
         val body = JSONObject().apply {
@@ -483,11 +488,11 @@ class DoubaoAsrClient(
             .putInt(compressed.size)
             .put(compressed)
             .array()
-        socket.send(ByteString.of(*frame))
+        session.send(Frame.Binary(true, frame))
     }
 
-    private fun sendAudioFrame(audio: ByteArray, isLast: Boolean) {
-        val socket = webSocket ?: return
+    private suspend fun sendAudioFrame(audio: ByteArray, isLast: Boolean) {
+        val session = wsSessionRef.get() ?: return
         if (audio.isNotEmpty()) {
             // 保存最后一帧音频，stop 时可用作 last package，避免空负载。
             lastAudioFrame = audio
@@ -505,7 +510,7 @@ class DoubaoAsrClient(
             .putInt(compressed.size)
             .put(compressed)
             .array()
-        socket.send(ByteString.of(*frame))
+        session.send(Frame.Binary(true, frame))
     }
 
     @Volatile
@@ -520,7 +525,7 @@ class DoubaoAsrClient(
         }
     }
 
-    private fun injectPreRollAsChunks(pcm: ByteArray) {
+    private suspend fun injectPreRollAsChunks(pcm: ByteArray) {
         if (pcm.isEmpty()) return
         var offset = 0
         while (offset < pcm.size) {
@@ -535,7 +540,7 @@ class DoubaoAsrClient(
         }
     }
 
-    private fun flushPendingAudioFrames() {
+    private suspend fun flushPendingAudioFrames() {
         val frames = synchronized(pendingAudioLock) {
             pendingAudioFrames.toList().also { pendingAudioFrames.clear() }
         }
@@ -651,17 +656,8 @@ class DoubaoAsrClient(
         private val HEADER_AUDIO_ONLY_LAST_GZIP_RAW =
             byteArrayOf(0x11, 0x22, 0x01, 0x00)
 
-        private val sharedClient: OkHttpClient by lazy {
-            OkHttpClient.Builder()
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .writeTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(0, TimeUnit.MILLISECONDS)
-                .retryOnConnectionFailure(true)
-                .build()
-        }
-
-        internal fun formatConnectionError(t: Throwable, response: Response?): String {
-            val code = response?.code
+        internal fun formatConnectionError(t: Throwable, httpStatus: Int? = null): String {
+            val code = httpStatus
             val msg = t.message.orEmpty()
             if (code == 401 || code == 403) {
                 return "豆包 ASR 鉴权失败（HTTP $code），请检查 API Key 与 Resource ID 是否与火山控制台一致"
@@ -678,6 +674,13 @@ class DoubaoAsrClient(
                 return "连接豆包语音服务器超时，请检查网络后重试"
             }
             return "语音识别连接失败：HTTP ${code ?: "?"}，${msg.ifBlank { "unknown" }}"
+        }
+
+        private fun extractHttpStatus(error: Throwable): Int? {
+            val message = error.message.orEmpty()
+            Regex("""HTTP (\d{3})""").find(message)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
+            Regex("""\((\d{3})\)""").find(message)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
+            return null
         }
 
         private fun gzip(bytes: ByteArray): ByteArray {

@@ -100,4 +100,97 @@ class CommandRouteResolverLlmIntegrationTest {
         assertEquals(null, route)
         assertEquals(listOf("joy_preset_low_confidence"), fakeLlm.classifyPresetIntentCalls)
     }
+
+    @Test
+    fun resolve_onlineNavigate_prefersAiOverLocalNearestWords() = runTest {
+        fakeLlm.systemIntentHandler = { _, utterance ->
+            if (utterance.contains("肯德基") || utterance.contains("kfc")) {
+                SystemIntentAiResolver.Classification(
+                    intent = "navigate_to",
+                    confidence = 0.91,
+                    destination = "肯德基",
+                )
+            } else {
+                null
+            }
+        }
+
+        val route = CommandRouteResolver.resolve(
+            command = "带我去最近的肯德基",
+            apiKey = "test-key",
+            llmClient = fakeLlm,
+            appContext = context,
+        )
+
+        assertNotNull(route)
+        assertEquals("system_ai", route!!.source)
+        assertEquals("navigate_to", route.steps.first().action)
+        assertEquals("肯德基", route.steps.first().targetText)
+        assertTrue(fakeLlm.classifySystemIntentCalls.contains("带我去最近的肯德基"))
+    }
+
+    @Test
+    fun resolve_onlineNamedPlace_aiCanChoosePick() = runTest {
+        fakeLlm.systemIntentHandler = { _, _ ->
+            SystemIntentAiResolver.Classification(
+                intent = "navigate_pick",
+                confidence = 0.88,
+                destination = "桂阳一中",
+            )
+        }
+
+        val route = CommandRouteResolver.resolve(
+            command = "带我去桂阳一中",
+            apiKey = "test-key",
+            llmClient = fakeLlm,
+            appContext = context,
+        )
+
+        assertNotNull(route)
+        assertEquals("system_ai", route!!.source)
+        assertEquals("navigate_pick", route.steps.first().action)
+    }
+
+    @Test
+    fun resolve_onlineNearLandmark_usesAiSlotsNotLocalDefer() = runTest {
+        fakeLlm.systemIntentHandler = { _, _ ->
+            SystemIntentAiResolver.Classification(
+                intent = "navigate_to",
+                confidence = 0.7,
+                destination = "肯德基",
+                nearLandmark = "郴州市一中",
+            )
+        }
+
+        val route = CommandRouteResolver.resolve(
+            command = "我要去郴州市一中附近的kfc",
+            apiKey = "test-key",
+            llmClient = fakeLlm,
+            appContext = context,
+        )
+
+        assertNotNull(route)
+        assertEquals("system_ai", route!!.source)
+        assertEquals("navigate_to", route.steps.first().action)
+        assertEquals("肯德基", route.steps.first().targetText)
+        assertEquals("郴州市一中", route.steps.first().inputText)
+        assertTrue(route.confidence >= 0.96)
+    }
+
+    @Test
+    fun resolve_onlineNavigate_fallsBackToLocalWhenAiMisses() = runTest {
+        fakeLlm.systemIntentHandler = { _, _ -> null }
+
+        val route = CommandRouteResolver.resolve(
+            command = "带我去桂阳一中",
+            apiKey = "test-key",
+            llmClient = fakeLlm,
+            appContext = context,
+        )
+
+        assertNotNull(route)
+        assertEquals("system_intent_local", route!!.source)
+        assertEquals("navigate_pick", route.steps.first().action)
+        assertEquals("桂阳一中", route.steps.first().targetText)
+    }
 }

@@ -44,6 +44,43 @@ class AgentMessageCompactorTest {
     }
 
     @Test
+    fun compactForApi_keepsLastFullWhenLatestIsMinimal() {
+        val messages = listOf(
+            ChatMessage("system", "system"),
+            ChatMessage(
+                "user",
+                """
+                【用户指令】打开微信
+                【当前页面快览】
+                full clickables list
+                【页面变化】
+                first
+                请决定第一步操作，只返回 JSON。
+                """.trimIndent(),
+            ),
+            ChatMessage("assistant", """{"action":"wait"}"""),
+            ChatMessage(
+                "user",
+                """
+                【上一步执行结果】
+                成功：等待
+                【当前页面】微信 | 可点击 12 | 可输入 1
+                【页面变化】
+                页面无明显变化，沿用上次观察，请结合近期执行结果决策。
+                请决定下一步，只返回 JSON。
+                """.trimIndent(),
+            ),
+        )
+
+        val compacted = AgentMessageCompactor.compactForApi(messages)
+
+        assertTrue(compacted[1].content.contains("full clickables list"))
+        assertFalse(compacted[1].content.contains("历史页面快照已省略"))
+        assertTrue(compacted[3].content.contains("【当前页面】"))
+        assertTrue(compacted[3].content.contains("页面无明显变化"))
+    }
+
+    @Test
     fun formatPageSection_none_isEmpty() {
         val section = AgentMessageCompactor.formatPageSection(
             pageContext = "full",
