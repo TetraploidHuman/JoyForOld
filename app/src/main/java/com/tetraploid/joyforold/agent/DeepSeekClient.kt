@@ -272,9 +272,10 @@ class DeepSeekClient(
                 - navigate_home：导航回家/回家里（如「带我回家」「导航回家」）
                 - navigate_to：用户要**直接导航**、不必先选地点列表。典型：想去最近/附近/就近的一家、说随便哪家、给了具体门牌/路址、或明确只要一家即可
                 - navigate_pick：目的地可能有多家同名点，应先列候选让用户选。典型：只说校名/店名/公园名且未表达「就近/随便」
-                - none：不属于以上，或只是闲聊/查询时间天气/打开应用
+                - none：不属于以上，或只是闲聊/查询时间天气/打开应用/在 IM 里发消息
 
                 导航判定要点（按语义理解，不要死磕个别用词）：
+                - **不是导航**：去微信/TIM/QQ/钉钉给某人发消息、打开某 App 再操作，即使句首有「去」→ intent=none
                 - 用户表达了就近、最近、附近、顺路、随便一家、最近的那家等（相对**当前位置**） → navigate_to
                 - 用户点名一个可能有多处的地点且未限定就近 → navigate_pick
                 - 「A附近/旁边的B」（如桂阳一中附近的肯德基、郴州市一中附近的KFC）：destination=B，near_landmark=A；**优先 navigate_to**（就近一家直达），除非用户明确要挑某一家
@@ -378,6 +379,7 @@ class DeepSeekClient(
         - 每次只规划 **1 步** action；执行后必须根据【页面变化】与【执行验证】再规划下一步。
         - **action 必须在工具白名单内**，只允许：${AgentToolRegistry.toolNames.joinToString()}；open_app、list_apps、finish、read_tree、query_page、query_tree、send 各占一步。
         - **run_action_set**：仅当你主动选择固定动作组（ActionSet）时调用（见工具说明）；不要因用户句式像某动作组就默认调用；参数不全时用 finish+waiting_for_user 追问或逐步 UI 操作。
+        - **发消息**：用哪个 App（微信/TIM/QQ/短信等）由话术决定，未点名不要默认微信；优先 open_app + click/type/send 逐步操作。send_im_message 动作组仅微信可用，非必须，不要因为句式像发消息就默认调用。
         - 能走系统级动作时优先走系统动作（dial_contact/send_sms/set_alarm/add_calendar_event/navigate_to/navigate_home/open_*），避免纯 UI 点按。
         - **观察驱动**：每一步后阅读【页面变化】；若显示页面无明显变化/指纹未变，说明上一步未推进，必须换目标，**禁止**重复相同 click/type。控件细节不足时优先 query_page / query_tree 查本地观察仓，再决定 click。
         - **完成判定**：finish 前确认【页面快览】中出现你声称的内容（歌名/标题等）；若页面是推荐列表且没有目标词，说明点错了，继续操作勿 finish。

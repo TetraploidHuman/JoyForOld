@@ -10,6 +10,9 @@ import com.tetraploid.joyforold.system.AmapPoiResolver
  *
  * 覆盖通讯、日程、系统设置、打开 App/相机/相册、导航回家等标准 Intent 能力，
  * 无需无障碍点按、无需 Agent 视觉循环。
+ *
+ * 导航目的地（navigate_to / navigate_pick）有网只信 LLM，本地不提供正则路由；
+ * 仅保留 [splitScopedPoiQuery] / [normalizePoiQuery] 供 AI 槽位修复。
  */
 object SystemIntentLocalParser {
     private val dialToPerson = Regex("""(?:给|向)?(.+?)(?:打电话|打个电话|拨号|拨打)(?:一下|吗)?$""")
@@ -20,13 +23,6 @@ object SystemIntentLocalParser {
     private val openAppPattern = Regex("""^(?:打开|启动|运行|进入)\s*(.+)$""")
 
     private val NAVIGATE_HOME_PHRASES = setOf("导航回家", "带我回家", "回家路线", "我要回家", "导航回去")
-    private val navigateToPatterns = listOf(
-        Regex("""(?:带我)?(?:导航到|导航去|带我去|带我到|带我前往)(?:最近的|附近的)?(.+)$"""),
-        Regex("""^(?:我要)?去(?:最近的|附近的)(.+)$"""),
-        Regex("""^(?:我要)?去(.+)$"""),
-        Regex("""^去(.+?)(?:导航一下|导航)$"""),
-    )
-    private val navigateToExclude = Regex("""搜索|打开|播放|打电话|发短信|闹钟|日程|微信|淘宝""")
     private val CAMERA_PHRASES = setOf("打开相机", "拍照", "我要拍照")
     private val GALLERY_PHRASES = setOf("打开相册", "看照片", "我的照片")
 
@@ -122,64 +118,19 @@ object SystemIntentLocalParser {
         )
     }
 
+    /**
+     * 本地仅识别「导航回家」强短语。
+     * `navigate_to` / `navigate_pick` 有网只信 LLM，不再用正则当路由入口；
+     * 目的地拆句见 [splitScopedPoiQuery] / [normalizePoiQuery]（供 AI 槽位修复）。
+     */
     private fun parseNavigate(text: String): List<AgentAction>? {
         val normalized = softNormalizeNavigateUtterance(
             text.trim().trimEnd('。', '.', '！', '!', '？', '?'),
         )
-        if (normalized in NAVIGATE_HOME_PHRASES) {
-            return listOf(
-                AgentAction(action = "navigate_home"),
-                AgentAction(action = "finish", message = "正在为您导航回家。", finished = true),
-            )
-        }
-        if (normalized.contains("回家") || normalized.contains("家里")) return null
-        if (navigateToExclude.containsMatchIn(normalized)) return null
-
-        val destination = navigateToPatterns
-            .asSequence()
-            .mapNotNull { it.find(normalized)?.groupValues?.get(1)?.trim() }
-            .map { dest ->
-                dest
-                    .replace(Regex("""^最[近进]的"""), "")
-                    .replace(Regex("""^附近的"""), "")
-                    .trim()
-            }
-            .firstOrNull { it.length in 2..40 }
-            ?: return null
-
-        val near = splitScopedPoiQuery(destination)
-        val query = normalizePoiQuery(near?.poi ?: destination)
-        val scope = near?.scope?.trim()?.takeIf { it.length in 2..30 }
-
-        // 本地拆句仅服务离线 / AI 未给出导航时的兜底（有网时 CommandRouteResolver 会 defer）。
-        // 「A附近的B」→ 直达；「行政区的B」→ 候选列表。
-        if (scope != null) {
-            val isNearLandmark = splitNearLandmarkQuery(destination) != null
-            return if (isNearLandmark) {
-                listOf(
-                    AgentAction(action = "navigate_to", targetText = query, inputText = scope),
-                    AgentAction(
-                        action = "finish",
-                        message = "正在为您导航前往：${scope}附近的$query",
-                        finished = true,
-                    ),
-                )
-            } else {
-                listOf(
-                    AgentAction(action = "navigate_pick", targetText = query, inputText = scope),
-                )
-            }
-        }
-
-        // 「最近/就近」语义有网交给 AI；本地只认具体长地址直达，其余列候选。
-        if (looksLikeSpecificAddressQuery(query)) {
-            return listOf(
-                AgentAction(action = "navigate_to", targetText = query),
-                AgentAction(action = "finish", message = "正在为您导航前往：$query", finished = true),
-            )
-        }
+        if (normalized !in NAVIGATE_HOME_PHRASES) return null
         return listOf(
-            AgentAction(action = "navigate_pick", targetText = query),
+            AgentAction(action = "navigate_home"),
+            AgentAction(action = "finish", message = "正在为您导航回家。", finished = true),
         )
     }
 

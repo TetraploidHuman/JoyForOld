@@ -178,7 +178,7 @@ class CommandRouteResolverLlmIntegrationTest {
     }
 
     @Test
-    fun resolve_onlineNavigate_fallsBackToLocalWhenAiMisses() = runTest {
+    fun resolve_onlineNavigate_doesNotFallBackToLocalWhenAiMisses() = runTest {
         fakeLlm.systemIntentHandler = { _, _ -> null }
 
         val route = CommandRouteResolver.resolve(
@@ -188,9 +188,7 @@ class CommandRouteResolverLlmIntegrationTest {
             appContext = context,
         )
 
-        assertNotNull(route)
-        assertEquals("system_intent_local", route!!.source)
-        assertEquals("navigate_pick", route.steps.first().action)
-        assertEquals("桂阳一中", route.steps.first().targetText)
+        // 有网导航只信 LLM；AI 未给出导航时不再回退本地规则
+        assertEquals(null, route)
     }
 }

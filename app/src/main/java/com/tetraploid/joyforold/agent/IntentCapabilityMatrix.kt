@@ -391,9 +391,6 @@ object IntentCapabilityMatrix {
         """(淘宝|天猫).{0,16}(搜|找|买|看看)|(在)?淘宝(上)?(搜|找)|搜.{0,12}(淘宝|天猫)""",
     )
 
-    private val wechatMessageGoal = Regex(
-        """微信.{0,16}(发消息|发信息|告诉|通知|说)|(给|跟|和|向).{1,20}(发消息|发微信|发信息)""",
-    )
     private val mapNavigateGoal = Regex(
         """导航到|导航去|带我去|带我到|带我前往|去最近的|去附近的|我要去附近|我要去最近""",
     )
@@ -432,20 +429,12 @@ object IntentCapabilityMatrix {
         return PageContextNeed.NONE
     }
 
-    /** 是否应优先走已注册 ActionSet（入口省树）。 */
+    /** 是否应优先走已注册 ActionSet（入口省树）。发消息类一律不进，交给 LLM 选型与逐步操作。 */
     fun prefersActionSetEntry(command: String): Boolean {
         val text = command.trim()
         if (text.isBlank()) return false
         if (taobaoSearchGoal.containsMatchIn(text)) return true
-        if (wechatMessageGoal.containsMatchIn(text)) return true
         if (mapNavigateGoal.containsMatchIn(text) && !text.contains("回家") && !text.contains("家里")) {
-            return true
-        }
-        // 「给谁发消息」默认微信动作组；短信/QQ 仍走逐步或其它路径
-        if (contactMessageGoal.containsMatchIn(text) &&
-            !text.contains("短信") &&
-            !text.contains("qq", ignoreCase = true)
-        ) {
             return true
         }
         return false

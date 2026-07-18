@@ -25,23 +25,13 @@ object ElderTaskTemplateMatcher {
             ),
         ),
         TemplateIntent(
-            aliases = listOf("给儿子发微信", "给儿子发消息"),
+            aliases = listOf("给儿子发微信"),
             actions = listOf(
                 AgentAction(action = "open_app", targetText = "微信"),
                 AgentAction(action = "finish", message = "已打开微信，接下来我会帮您给儿子发消息。", finished = true),
             ),
         ),
-        TemplateIntent(
-            aliases = listOf("发送消息给家人", "发消息给家人", "给家人发消息"),
-            actions = listOf(
-                AgentAction(action = "open_app", targetText = "微信"),
-                AgentAction(
-                    action = "finish",
-                    message = "已打开微信，请告诉我要发给哪位家人、说什么内容。",
-                    waitingForUser = true,
-                ),
-            ),
-        ),
+        // 「给家人发消息」等未点名 App 的说法不再模板写死微信，交给 LLM 选型。
         TemplateIntent(
             aliases = listOf("接听视频通话", "接视频电话"),
             actions = listOf(

@@ -52,19 +52,13 @@ object CommandRouteResolver {
             }
         }
 
-        // 导航语句结构（A附近的B / 直达 vs 候选）：
-        // 有网 → LLM 主判；本地拆句仅离线或 AI 未给出导航时兜底。
-        var deferredLocalNavigate: List<AgentAction>? = null
+        // 本地系统意图（含导航回家）；navigate_to/pick 由 LLM 判定，不在本地 parse。
         SystemIntentLocalParser.parse(trimmed, appContext)?.let { steps ->
-            if (env.hasNetwork && SystemIntentLocalParser.isAiPreferredNavigateRoute(steps)) {
-                deferredLocalNavigate = steps
-            } else {
-                candidates += Route(
-                    steps = steps,
-                    source = "system_intent_local",
-                    confidence = 0.97,
-                )
-            }
+            candidates += Route(
+                steps = steps,
+                source = "system_intent_local",
+                confidence = 0.97,
+            )
         }
 
         if (env.hasNetwork) {
@@ -73,28 +67,15 @@ object CommandRouteResolver {
                 candidates += Route(
                     steps = resolved.steps,
                     source = "system_ai",
-                    // 导航槽位以 AI 为准，抬高置信度避免被本地拆句兜底抢回
                     confidence = if (navigate) maxOf(resolved.confidence, 0.96) else resolved.confidence,
                     clarifyMessage = resolved.clarifyMessage,
                 )
             }
         }
 
-        deferredLocalNavigate?.let { steps ->
-            val aiChoseNavigate = candidates.any { route ->
-                route.source == "system_ai" && SystemIntentLocalParser.isAiPreferredNavigateRoute(route.steps)
-            }
-            if (!aiChoseNavigate) {
-                candidates += Route(
-                    steps = steps,
-                    source = "system_intent_local",
-                    confidence = 0.90,
-                )
-            }
-        }
-
         LocalCommandParser.parse(trimmed)?.let { steps ->
-            if (!(env.hasNetwork && SystemIntentLocalParser.isAiPreferredNavigateRoute(steps))) {
+            // 防御目的地只信 LLM，避免结构解析误出 navigate_to/pick
+            if (!SystemIntentLocalParser.isAiPreferredNavigateRoute(steps)) {
                 candidates += Route(steps, source = "local", confidence = 0.95)
             }
         }

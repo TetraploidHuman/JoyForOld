@@ -1,63 +1,51 @@
 package com.tetraploid.joyforold.network
 
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
-import java.util.concurrent.TimeUnit
 
 object JoyHttpClients {
-    fun default(): HttpClient = HttpClient(OkHttp) {
+    fun default(): HttpClient = HttpClient(CIO) {
         engine {
-            config {
-                connectTimeout(15, TimeUnit.SECONDS)
-                readTimeout(30, TimeUnit.SECONDS)
-                writeTimeout(30, TimeUnit.SECONDS)
-            }
+            requestTimeout = 30_000
+            endpoint.connectTimeout = 15_000
+            endpoint.socketTimeout = 30_000
         }
     }
 
-    fun llm(): HttpClient = HttpClient(OkHttp) {
+    fun llm(): HttpClient = HttpClient(CIO) {
         engine {
-            config {
-                connectTimeout(8, TimeUnit.SECONDS)
-                readTimeout(25, TimeUnit.SECONDS)
-                writeTimeout(10, TimeUnit.SECONDS)
-                callTimeout(30, TimeUnit.SECONDS)
-            }
+            requestTimeout = 30_000
+            endpoint.connectTimeout = 8_000
+            endpoint.socketTimeout = 25_000
         }
     }
 
-    fun longDownload(): HttpClient = HttpClient(OkHttp) {
+    fun longDownload(): HttpClient = HttpClient(CIO) {
         engine {
-            config {
-                connectTimeout(30, TimeUnit.SECONDS)
-                readTimeout(120, TimeUnit.SECONDS)
-                writeTimeout(120, TimeUnit.SECONDS)
-            }
+            requestTimeout = 120_000
+            endpoint.connectTimeout = 30_000
+            endpoint.socketTimeout = 120_000
         }
     }
 
-    fun websocket(): HttpClient = HttpClient(OkHttp) {
+    fun websocket(): HttpClient = HttpClient(CIO) {
         engine {
-            config {
-                connectTimeout(15, TimeUnit.SECONDS)
-                readTimeout(0, TimeUnit.MILLISECONDS)
-                writeTimeout(30, TimeUnit.SECONDS)
-                retryOnConnectionFailure(true)
-            }
+            requestTimeout = 0
+            endpoint.connectTimeout = 15_000
+            endpoint.socketTimeout = Long.MAX_VALUE
+            endpoint.connectAttempts = 5
         }
         install(WebSockets) {
             pingIntervalMillis = 30_000
         }
     }
 
-    fun quick(): HttpClient = HttpClient(OkHttp) {
+    fun quick(): HttpClient = HttpClient(CIO) {
         engine {
-            config {
-                connectTimeout(8, TimeUnit.SECONDS)
-                readTimeout(8, TimeUnit.SECONDS)
-                writeTimeout(8, TimeUnit.SECONDS)
-            }
+            requestTimeout = 8_000
+            endpoint.connectTimeout = 8_000
+            endpoint.socketTimeout = 8_000
         }
     }
 }

@@ -22,6 +22,8 @@ object InstalledAppResolver {
     private val APP_ALIASES = mapOf(
         "qq" to "com.tencent.mobileqq",
         "腾讯qq" to "com.tencent.mobileqq",
+        "tim" to "com.tencent.tim",
+        "腾讯tim" to "com.tencent.tim",
         "微信" to "com.tencent.mm",
         "wechat" to "com.tencent.mm",
         "电话" to "com.android.dialer",

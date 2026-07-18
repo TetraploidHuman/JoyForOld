@@ -58,8 +58,9 @@ object AgentActionSet {
           动作组内若需选型：本地采可点文案切片 → 窄域 askLlm 选型（非整棵树）。首次规划仍可能带页面摘要。
           **仅当**用户意图明确、参数齐全、且动作组比逐步 tap/click 更合适时调用；否则用 open_app/click/type 逐步规划。
           · target_text: 动作组 ID
-          · $ID_SEND_IM_MESSAGE（微信发消息）：input_text=联系人名，message=消息正文（必填）
+          · $ID_SEND_IM_MESSAGE（**仅微信**发消息）：用户明确要走微信时才用；input_text=联系人名，message=消息正文（必填）
             示例：{"action":"run_action_set","target_text":"$ID_SEND_IM_MESSAGE","input_text":"大女儿","message":"今晚回家吃饭"}
+            TIM/QQ/其它 IM：不要用本动作组，改用 open_app + 逐步 click/type/send。
           · $ID_TAOBAO_SEARCH（淘宝只搜索）：input_text=搜索关键词（必填）；打开淘宝、搜完停在结果页
             示例：{"action":"run_action_set","target_text":"$ID_TAOBAO_SEARCH","input_text":"一加手机"}
           · $ID_TAOBAO_SEARCH_OPEN（淘宝搜并打开商品）：input_text=搜索关键词（必填）；搜完后按结果列表窄域选型并进详情（不加购）

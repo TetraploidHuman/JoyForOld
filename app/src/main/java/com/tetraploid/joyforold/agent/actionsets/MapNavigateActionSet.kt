@@ -52,7 +52,8 @@ object MapNavigateActionSet {
             },
         )
 
-        // 列表项若自带「路线」：直接点（第一项≈最近）；否则点选出的地点卡片
+        // 列表项若自带「路线」：点「路线」；否则点 LLM 从候选里选出的地点卡片
+        // （「最近」由 AmapPoiResolver Web API / sortrule=distance 负责，不靠 UI 越靠上）
         find(ROUTE_BUTTON) {
             ok { click(ROUTE_BUTTON).wait() }
             miss { click(param("poi")).wait() }

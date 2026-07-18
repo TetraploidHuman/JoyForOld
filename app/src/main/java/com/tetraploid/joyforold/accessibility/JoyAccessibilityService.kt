@@ -24,6 +24,7 @@ import com.tetraploid.joyforold.agent.ActionExecutionResult
 import com.tetraploid.joyforold.agent.AgentAction
 import com.tetraploid.joyforold.agent.AgentToolRegistry
 import com.tetraploid.joyforold.agent.ClickTargetNormalizer
+import com.tetraploid.joyforold.agent.ClickTargetScorer
 import com.tetraploid.joyforold.agent.ExternalWindowFilter
 import com.tetraploid.joyforold.agent.PageObservation
 import com.tetraploid.joyforold.agent.PageReadiness
@@ -633,20 +634,22 @@ class JoyAccessibilityService : AccessibilityService(), AccessibilityGateway {
       var best: AccessibilityNodeInfo? = null
       var bestScore = Int.MIN_VALUE
       var matchedLabel = text
+      val metrics = resources.displayMetrics
       for (candidate in ClickTargetNormalizer.clickCandidates(text)) {
         for (root in roots) {
-          val found = NodeFinder.findClickableByText(root, candidate) ?: continue
-          val rect = android.graphics.Rect()
-          found.getBoundsInScreen(rect)
-          var score = 2_000_000 - rect.top
-          if (found.isVisibleToUser) score += 50_000
-          if (score > bestScore) {
+          val hit = NodeFinder.findClickableByTextScored(
+            root,
+            candidate,
+            screenWidth = metrics.widthPixels,
+            screenHeight = metrics.heightPixels,
+          ) ?: continue
+          if (hit.score > bestScore) {
             best?.recycle()
-            best = found
-            bestScore = score
+            best = hit.node
+            bestScore = hit.score
             matchedLabel = candidate
           } else {
-            found.recycle()
+            hit.node.recycle()
           }
         }
       }
@@ -1324,21 +1327,35 @@ private object NodeFinder {
     return results.toList()
   }
 
-  fun findClickableByText(root: AccessibilityNodeInfo, text: String): AccessibilityNodeInfo? {
+  data class ClickableHit(val node: AccessibilityNodeInfo, val score: Int)
+
+  fun findClickableByText(
+    root: AccessibilityNodeInfo,
+    text: String,
+    screenWidth: Int = 0,
+    screenHeight: Int = 0,
+  ): AccessibilityNodeInfo? = findClickableByTextScored(root, text, screenWidth, screenHeight)?.node
+
+  fun findClickableByTextScored(
+    root: AccessibilityNodeInfo,
+    text: String,
+    screenWidth: Int = 0,
+    screenHeight: Int = 0,
+  ): ClickableHit? {
     val queue = ArrayDeque<AccessibilityNodeInfo>()
     queue.add(AccessibilityNodeInfo.obtain(root))
     val lower = text.lowercase()
-    val tokens = lower.split(Regex("\\s+")).filter { it.length >= 1 }
     var best: AccessibilityNodeInfo? = null
     var bestScore = Int.MIN_VALUE
     var walked = 0
+    val resolvedScreenH = if (screenHeight > 0) screenHeight else UiNodeHeuristics.screenHeight(root)
+    val resolvedScreenW = screenWidth
 
     while (queue.isNotEmpty() && walked < AgentContextLimits.SNAPSHOT_WALK_MAX_NODES) {
       walked++
       val node = queue.removeFirst()
-      val nodeText = UiNodeHeuristics.nodeLabel(node).lowercase()
-      val matched = nodeText.contains(lower) ||
-        tokens.any { token -> token.length >= 2 && nodeText.contains(token) } ||
+      val nodeText = UiNodeHeuristics.nodeLabel(node)
+      val matched = ClickTargetScorer.matches(lower, nodeText) ||
         (lower.contains("发送") && UiNodeHeuristics.isSendLike(node))
 
       if (matched) {
@@ -1346,35 +1363,21 @@ private object NodeFinder {
         if (clickable != null) {
           val rect = android.graphics.Rect()
           clickable.getBoundsInScreen(rect)
-          // 越靠上分越高（周边列表第一项=最近）；可见节点加分
-          var score = 2_000_000 - rect.top
-          if (clickable.isVisibleToUser) score += 50_000
-          if (nodeText == lower || nodeText.startsWith("$lower ")) score += 10_000
-          // 「导航」优先底部主按钮（门店详情 CTA），避开语音/设置等
-          if (lower == "导航") {
-            if (nodeText.trim() == "导航") score += 80_000
-            score += rect.bottom
-            if (nodeText.contains("语音") || nodeText.contains("设置")) score -= 80_000
-          }
-          if (lower == "开始导航" && nodeText.contains("开始导航")) score += 60_000
-          // 「路线」：列表项右侧 / 详情底栏
-          if (lower == "路线") {
-            if (nodeText.trim() == "路线" || nodeText.endsWith(" 路线")) score += 60_000
-            score += rect.left / 8
-            score += rect.bottom / 20
-          }
-          // 「公里」易误点「附近3公里」筛选芯片；优先门店距离「28.7公里」
-          if (lower.contains("公里")) {
-            if (nodeText.contains("附近")) score -= 200_000
-            if (Regex("""\d+\.\d+\s*公里""").containsMatchIn(nodeText)) score += 40_000
-          }
-          // 地点卡片常带括号副名（门店/分馆等），优先完整名称而非残片段
-          if ((nodeText.contains('(') || nodeText.contains('（')) &&
-            lower.length >= 2 &&
-            nodeText.contains(lower.take(minOf(lower.length, 8)))
-          ) {
-            score += 30_000
-          }
+          // 用命中文案节点打分（不是整行合并文案），避免点到「名字相近但更靠上」的项
+          val score = ClickTargetScorer.score(
+            ClickTargetScorer.Candidate(
+              query = lower,
+              nodeText = nodeText,
+              displayLabel = UiNodeHeuristics.displayLabel(node),
+              left = rect.left,
+              top = rect.top,
+              right = rect.right,
+              bottom = rect.bottom,
+              visibleToUser = clickable.isVisibleToUser,
+              screenWidth = resolvedScreenW,
+              screenHeight = resolvedScreenH,
+            ),
+          )
           if (score > bestScore) {
             best?.recycle()
             best = clickable
@@ -1391,7 +1394,8 @@ private object NodeFinder {
       node.recycle()
     }
     queue.forEach { it.recycle() }
-    return best
+    val node = best ?: return null
+    return ClickableHit(node, bestScore)
   }
 
   fun findBestEditable(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
