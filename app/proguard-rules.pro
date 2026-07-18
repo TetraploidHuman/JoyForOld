@@ -1,21 +1,31 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Keep line numbers for crash diagnosis.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Kotlin serialization
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.**
+-keep,includedescriptorclasses class com.tetraploid.joyforold.**$$serializer { *; }
+-keepclassmembers class com.tetraploid.joyforold.** {
+    *** Companion;
+}
+-keepclasseswithmembers class com.tetraploid.joyforold.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# ONNX Runtime (JNI + reflection)
+-keep class ai.onnxruntime.** { *; }
+-keepclassmembers class ai.onnxruntime.** { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# sherpa-onnx JNI
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-keepclassmembers class com.k2fsa.sherpa.onnx.** { *; }
+
+# Koin
+-keep class org.koin.** { *; }
+-keep class kotlin.Metadata { *; }
+
+# Accessibility / system services referenced from manifest
+-keep class * extends android.accessibilityservice.AccessibilityService { *; }
+-keep class * extends android.inputmethodservice.InputMethodService { *; }
+-keep class * extends android.app.Service { *; }

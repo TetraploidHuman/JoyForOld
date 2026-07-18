@@ -23,6 +23,7 @@ pinyin4j = "2.5.1"
 robolectric = "4.14.1"
 serialization = "1.8.1"
 sherpa-onnx = "1.13.2-1"
+onnxruntime-android = "1.24.3"
 
 [libraries]
 activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity-compose" }
@@ -73,6 +74,7 @@ material3 = { module = "androidx.compose.material3:material3" }
 pinyin4j = { module = "com.belerweb:pinyin4j", version.ref = "pinyin4j" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 sherpa-onnx = { module = "com.xdcobra.sherpa:sherpa-onnx", version.ref = "sherpa-onnx" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime-android" }
 ui = { module = "androidx.compose.ui:ui" }
 ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }

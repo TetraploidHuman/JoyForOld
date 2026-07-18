@@ -98,8 +98,14 @@ android {
         release {
             // 体验分发：无正式 keystore 时用 debug 签名，便于他人直接安装
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // 分发包去掉模拟器 ABI（x86/x86_64），可砍掉约 60MB 原生库
+            ndk {
+                abiFilters.clear()
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            }
         }
     }
     compileOptions {
@@ -133,7 +139,11 @@ dependencies {
     implementation(libs.material3)
     implementation(libs.material.icons.extended)
     implementation(libs.foundation)
-    implementation(libs.sherpa.onnx)
+    // Exclude QNN-flavored ORT pulled by sherpa; use official Microsoft CPU build instead.
+    implementation(libs.sherpa.onnx) {
+        exclude(group = "com.xdcobra.sherpa", module = "onnxruntime")
+    }
+    implementation(libs.onnxruntime.android)
     implementation(libs.koin.android)
     implementation(libs.koin.androidx.compose)
     testImplementation(libs.junit)
