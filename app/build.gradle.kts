@@ -101,10 +101,10 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // 分发包去掉模拟器 ABI（x86/x86_64），可砍掉约 60MB 原生库
+            // 分发包只保留真机主流 ABI，去掉 x86/x86_64 与 32 位 arm
             ndk {
                 abiFilters.clear()
-                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+                abiFilters += listOf("arm64-v8a")
             }
         }
     }
