@@ -37,11 +37,15 @@ class IntentCapabilityMatrixTest {
       IntentCapabilityMatrix.PageContextNeed.MINIMAL,
       IntentCapabilityMatrix.inferPageContextNeed("淘宝搜一加手机"),
     )
-    // 发消息（含微信）一律 UI_FULL，交给 LLM，不强制动作组
     assertEquals(
-      IntentCapabilityMatrix.PageContextNeed.UI_FULL,
+      IntentCapabilityMatrix.PageContextNeed.MINIMAL,
       IntentCapabilityMatrix.inferPageContextNeed("微信给儿子发消息"),
     )
+    assertEquals(
+      IntentCapabilityMatrix.PageContextNeed.MINIMAL,
+      IntentCapabilityMatrix.inferPageContextNeed("用微信给吴志强发消息说你是个猪"),
+    )
+    // 未点名微信 / 其它 IM：仍 UI_FULL，交给 LLM 选型
     assertEquals(
       IntentCapabilityMatrix.PageContextNeed.UI_FULL,
       IntentCapabilityMatrix.inferPageContextNeed("给大女儿发消息说今晚回家吃饭"),
@@ -56,8 +60,9 @@ class IntentCapabilityMatrixTest {
   fun prefersActionSetEntry_matchesKnownSets() {
     assertTrue(IntentCapabilityMatrix.prefersActionSetEntry("帮我在淘宝找耳机"))
     assertTrue(IntentCapabilityMatrix.prefersActionSetEntry("带我去最近的肯德基"))
-    assertFalse(IntentCapabilityMatrix.prefersActionSetEntry("微信给响发消息"))
-    assertFalse(IntentCapabilityMatrix.prefersActionSetEntry("给响发微信"))
+    assertTrue(IntentCapabilityMatrix.prefersActionSetEntry("微信给响发消息"))
+    assertTrue(IntentCapabilityMatrix.prefersActionSetEntry("给响发微信"))
+    assertTrue(IntentCapabilityMatrix.prefersActionSetEntry("用微信给吴志强发消息说你是个猪"))
     assertFalse(IntentCapabilityMatrix.prefersActionSetEntry("给响发消息"))
     assertFalse(IntentCapabilityMatrix.prefersActionSetEntry("去tim给三八老大发消息"))
     assertFalse(IntentCapabilityMatrix.prefersActionSetEntry("导航回家"))
@@ -71,7 +76,7 @@ class IntentCapabilityMatrixTest {
       IntentCapabilityMatrix.PageContextNeed.MINIMAL,
     )
     assertTrue(prompt.contains("run_action_set"))
-    assertTrue(prompt.contains("taobao_search") || prompt.contains("send_im_message"))
+    assertTrue(prompt.contains("taobao_search") || prompt.contains("wechat_send_im_message"))
   }
 
   @Test

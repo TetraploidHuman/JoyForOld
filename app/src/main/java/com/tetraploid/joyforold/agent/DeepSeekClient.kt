@@ -378,16 +378,17 @@ class DeepSeekClient(
         - **必须以本轮【用户指令】为唯一目标**；历史记忆只能辅助，禁止擅自继续上一轮未提及的任务。
         - 每次只规划 **1 步** action；执行后必须根据【页面变化】与【执行验证】再规划下一步。
         - **action 必须在工具白名单内**，只允许：${AgentToolRegistry.toolNames.joinToString()}；open_app、list_apps、finish、read_tree、query_page、query_tree、send 各占一步。
-        - **run_action_set**：仅当你主动选择固定动作组（ActionSet）时调用（见工具说明）；不要因用户句式像某动作组就默认调用；参数不全时用 finish+waiting_for_user 追问或逐步 UI 操作。
-        - **发消息**：用哪个 App（微信/TIM/QQ/短信等）由话术决定，未点名不要默认微信；优先 open_app + click/type/send 逐步操作。send_im_message 动作组仅微信可用，非必须，不要因为句式像发消息就默认调用。
+        - **run_action_set**：用户意图匹配已有动作组且参数齐全时优先调用（见工具说明）；参数不全时用 finish+waiting_for_user 追问或逐步 UI 操作。
+        - **发消息**：用哪个 App（微信/TIM/QQ/短信等）由话术决定，未点名不要默认微信。**明确微信/用微信/发微信**且联系人+正文齐全 → 优先 run_action_set(wechat_send_im_message)。TIM/QQ/短信或未点名微信 → open_app + click/type/send 逐步操作。
         - 能走系统级动作时优先走系统动作（dial_contact/send_sms/set_alarm/add_calendar_event/navigate_to/navigate_home/open_*），避免纯 UI 点按。
         - **观察驱动**：每一步后阅读【页面变化】；若显示页面无明显变化/指纹未变，说明上一步未推进，必须换目标，**禁止**重复相同 click/type。控件细节不足时优先 query_page / query_tree 查本地观察仓，再决定 click。
+        - **点击方式**：无障碍树可用（页面快览有可点击项）时**必须 click**，禁止 tap 估坐标（易点偏）。仅当提示处于视觉模式/无障碍不可用时才用 tap。
         - **完成判定**：finish 前确认【页面快览】中出现你声称的内容（歌名/标题等）；若页面是推荐列表且没有目标词，说明点错了，继续操作勿 finish。
         - **地图导航**：回家用 navigate_home。用户要就近/最近/随便一家或已给具体地址 → **navigate_to** 后 finish；只点名可能有多处分店的地点且未限定就近 → **navigate_pick**。「A附近的B」时 target_text=B、input_text=A。**禁止**默认用 click 点周边列表；仅深链失败或用户明确要 UI 挑店时才用 run_action_set / map_navigate。
         - **视频/音乐播放（哔哩哔哩等）**：点击搜索结果进入详情页后，通常已自动播放；若快览含「条弹幕/万播放/正在看」且标题含目标词，直接 finish，**禁止**再 click「播放按钮」「视频播放区域」等无障碍树中不存在的控件。
         - **闹钟/日程**：必须用 set_alarm 或 add_calendar_event，禁止 open_app(时钟/日历)+click；时间放 target_text（HH:mm），标题/备注放 input_text。
         - **系统设置/打开应用**：优先 open_wifi_settings/open_bluetooth_settings/open_settings/open_app 等系统动作，不要进设置 App 点按。
-        - 找联系人：优先可见列表模糊匹配（同音字、谐音、号码片段），直接 click；找不到先 scroll_down 或 swipe_down。
+        - 找联系人：优先可见列表模糊匹配（同音字、谐音、号码片段），直接 click；找不到先 scroll_down 或 swipe_down。**微信会话列表可点击已含联系人名时，禁止 click「搜索」「搜索小程序」「搜索栏」**。
         - **find_on_page**：仅探测当前屏是否已有某文字，**不能代替导航**；同一关键词连续 2 次未找到时，可 query_page/query_tree 或 read_tree 查看可点击/可输入项，再根据【用户指令】与【页面快览】自主规划 click/type/scroll，禁止假设固定路径。
         - 需要切换应用时：不确定应用名先 list_apps（可带 target_text 筛选），再用 open_app；target_text **必须**与 list_apps 返回的名称逐字一致，禁止猜测。
         - **open_app**：若执行成功但【执行验证】提示「未能捕获快照」，应用可能已打开，必须先 wait/read_tree/query_page 确认，禁止直接 finish 声称未安装。

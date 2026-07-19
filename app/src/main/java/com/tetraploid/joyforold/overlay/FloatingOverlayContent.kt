@@ -65,8 +65,16 @@ fun FloatingOverlayContent(
 
     if (!visible) return
 
-    // 优先用 publish 结果；若为空则从会话卡现算，避免服务刚起来时状态不同步漏显示
+    // 等待确认时必须画确认卡；视觉闩锁只在执行中藏卡，不能挡住确认
     val overlayCards = when {
+        uiState.waitingForUserConfirm -> {
+            uiState.overlaySessionCards.ifEmpty {
+                ConversationCardFactory.overlaySessionCards(
+                    uiState,
+                    uiState.conversationCards,
+                )
+            }
+        }
         uiState.visionAgentActive -> emptyList()
         uiState.overlaySessionCards.isNotEmpty() -> uiState.overlaySessionCards
         else -> ConversationCardFactory.overlaySessionCards(

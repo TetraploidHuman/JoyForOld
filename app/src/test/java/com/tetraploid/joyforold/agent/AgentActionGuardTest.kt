@@ -118,4 +118,45 @@ class AgentActionGuardTest {
         assertNotNull(override)
         assertEquals("你要在哪里打电话？请说 QQ电话 或 手机电话。", override!!.message)
     }
+
+    @Test
+    fun isSendConfirmPrompt_matchesGuardCopy() {
+        assertTrue(AgentActionGuard.isSendConfirmPrompt(AgentActionGuard.SEND_PROMPT))
+        assertTrue(AgentActionGuard.isSendConfirmPrompt(AgentActionGuard.SEND_CLICK_PROMPT))
+        assertTrue(AgentActionGuard.isSendConfirmPrompt("即将发送消息。请确认：要说「发送」还是「取消」？"))
+    }
+
+    @Test
+    fun sensitiveConfirmOverride_skipsAfterSendTopicResolved() {
+        val session = AgentConversationSession(rootCommand = "给吴志强发消息")
+        session.recordConfirmAnswer(AgentActionGuard.SEND_PROMPT, "发送")
+        assertNull(
+            AgentActionGuard.sensitiveConfirmOverride(
+                session = session,
+                action = AgentAction(action = "send"),
+            ),
+        )
+    }
+
+    @Test
+    fun blockedWrongImSearch_blocksMiniProgramSearchWhenContactVisible() {
+        val session = AgentConversationSession(rootCommand = "去微信给吴志强发消息说你好")
+        val snapshot = StructuredPageSnapshot(
+            packageName = "com.tencent.mm",
+            appHint = "当前为微信",
+            clickables = listOf("搜索小程序 搜索栏md5", "吴志强 [语音] 2\"", "搜索jha"),
+            editables = emptyList(),
+            visibleTexts = listOf("吴志强"),
+            sendButtons = emptyList(),
+            fingerprint = "mm",
+        )
+        val reason = AgentActionGuard.blockedWrongImSearch(
+            session,
+            AgentAction(action = "click", targetText = "搜索小程序 搜索栏"),
+            snapshot,
+        )
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("吴志强"))
+        assertTrue(reason.contains("禁止"))
+    }
 }

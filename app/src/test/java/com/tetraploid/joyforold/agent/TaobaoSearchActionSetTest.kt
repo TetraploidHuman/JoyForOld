@@ -235,7 +235,7 @@ class TaobaoSearchActionSetTest {
         val text = AgentActionSet.descriptionsForPrompt()
         assertTrue(text.contains(AgentActionSet.ID_TAOBAO_SEARCH))
         assertTrue(text.contains(AgentActionSet.ID_TAOBAO_SEARCH_OPEN))
-        assertTrue(text.contains(AgentActionSet.ID_SEND_IM_MESSAGE))
+        assertTrue(text.contains(AgentActionSet.ID_WECHAT_SEND_IM_MESSAGE))
     }
 
     private fun step(

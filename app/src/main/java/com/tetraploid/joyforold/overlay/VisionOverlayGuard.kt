@@ -14,13 +14,15 @@ import com.tetraploid.joyforold.agent.StructuredPageSnapshot
  */
 object VisionOverlayGuard {
     /** 视觉坐标类动作：仅在无障碍树不可用时需要藏窗 */
-    private val visionUiActions = setOf("tap", "type", "send")
+    private val visionUiActions = setOf("tap", "type")
 
     /**
-     * 无障碍 click 等会走 [dispatchGesture] 屏幕坐标；悬浮窗盖住底栏时必须先藏。
-     * 与是否进入视觉兜底无关。
+     * 可能走 [dispatchGesture] 的动作（ACTION_CLICK 失败后的手势兜底、滑动等）。
+     * 悬浮窗盖住目标时须先藏，避免手势点到本应用浮层。
      */
-    private val gestureUiActions = setOf("click", "long_click", "long_press", "swipe", "scroll")
+    private val gestureUiActions = setOf(
+        "click", "long_click", "long_press", "swipe", "scroll", "send",
+    )
 
     fun actionNeedsHiddenOverlay(
         action: AgentAction,

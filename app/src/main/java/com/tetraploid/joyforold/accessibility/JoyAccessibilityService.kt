@@ -601,9 +601,12 @@ class JoyAccessibilityService : AccessibilityService(), AccessibilityGateway {
       for (root in roots) {
         val node = NodeFinder.findSendButton(root)
         if (node != null) {
-          val ok = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-          node.recycle()
-          if (ok) return "已点击发送按钮"
+          try {
+            val result = clickNode(node, "发送")
+            if (!result.contains("失败")) return result
+          } finally {
+            node.recycle()
+          }
         }
       }
 
@@ -665,25 +668,31 @@ class JoyAccessibilityService : AccessibilityService(), AccessibilityGateway {
   }
 
   /**
-   * 优先手势点击节点中心：高德等自定义控件常对 ACTION_CLICK 返回 true 但不真正响应。
+   * 任意应用均优先无障碍 ACTION_CLICK；系统未接受（返回 false）时再手势点节点中心。
+   * 高德等自定义控件偶发 ACTION_CLICK 无效，需手势兜底。
    */
   private fun clickNode(node: AccessibilityNodeInfo, matchedLabel: String): String {
     recordTapFromNode(node)
-    val rect = Rect()
-    node.getBoundsInScreen(rect)
-    if (rect.width() > 0 && rect.height() > 0) {
-      val gesture = tapAt(
-        rect.exactCenterX(),
-        rect.exactCenterY(),
-        "已点击：$matchedLabel",
-      )
-      if (gesture != null) return gesture
-    }
-    val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-    return if (clicked) {
-      "已点击：$matchedLabel"
-    } else {
-      "点击失败：系统未接受点击操作"
+    val clickTarget = NodeFinder.findClickableTarget(node) ?: AccessibilityNodeInfo.obtain(node)
+    try {
+      if (clickTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+        return "已点击：$matchedLabel"
+      }
+      val rect = Rect()
+      clickTarget.getBoundsInScreen(rect)
+      if (rect.width() > 0 && rect.height() > 0) {
+        val gesture = tapAt(
+          rect.exactCenterX(),
+          rect.exactCenterY(),
+          "已点击：$matchedLabel（手势）",
+        )
+        if (gesture != null) return gesture
+      }
+      return "点击失败：系统未接受点击操作"
+    } finally {
+      if (clickTarget !== node) {
+        clickTarget.recycle()
+      }
     }
   }
 
@@ -1532,7 +1541,7 @@ private object NodeFinder {
     return null
   }
 
-  private fun findClickableTarget(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+  fun findClickableTarget(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
     var current: AccessibilityNodeInfo? = AccessibilityNodeInfo.obtain(node)
     while (current != null) {
       if (current.isClickable) {

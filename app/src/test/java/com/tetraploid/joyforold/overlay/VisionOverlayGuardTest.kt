@@ -63,7 +63,26 @@ class VisionOverlayGuardTest {
     }
 
     @Test
-    fun type_and_send_need_hidden_overlay_when_a11y_unavailable() {
+    fun send_always_hides_overlay_even_when_tree_readable() {
+        val readable = StructuredPageSnapshot(
+            packageName = "com.tencent.mm",
+            appHint = "当前为微信",
+            clickables = listOf("发送", "表情"),
+            editables = listOf("EditText text=\"你好\""),
+            visibleTexts = listOf("发送"),
+            sendButtons = listOf("发送"),
+            fingerprint = "mm",
+        )
+        assertTrue(
+            VisionOverlayGuard.actionNeedsHiddenOverlay(
+                AgentAction(action = "send"),
+                readable,
+            ),
+        )
+    }
+
+    @Test
+    fun type_needs_hidden_overlay_when_a11y_unavailable() {
         val snapshot = wechatEmptyTree()
         assertTrue(
             VisionOverlayGuard.actionNeedsHiddenOverlay(

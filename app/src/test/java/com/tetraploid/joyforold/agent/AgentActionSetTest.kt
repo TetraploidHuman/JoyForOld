@@ -20,7 +20,7 @@ class AgentActionSetTest {
         contact: String = "响",
         message: String = "到家了",
     ) = AgentActionSet.Match(
-        id = AgentActionSet.ID_SEND_IM_MESSAGE,
+        id = AgentActionSet.ID_WECHAT_SEND_IM_MESSAGE,
         initialParams = ActionSetParams(
             mapOf(
                 "contact" to contact,
@@ -44,8 +44,8 @@ class AgentActionSetTest {
     @Test
     fun registry_containsSendImMessage() {
         // 触发 object init
-        assertEquals("send_im_message", ImSendMessageActionSet.definition.id)
-        assertNotNull(ActionSetRegistry.get(AgentActionSet.ID_SEND_IM_MESSAGE))
+        assertEquals("wechat_send_im_message", ImSendMessageActionSet.definition.id)
+        assertNotNull(ActionSetRegistry.get(AgentActionSet.ID_WECHAT_SEND_IM_MESSAGE))
     }
 
     @Test
@@ -127,13 +127,13 @@ class AgentActionSetTest {
     fun fromRunActionSetAction_parsesSendImMessage() {
         val action = AgentAction(
             action = AgentActionSet.ACTION_RUN_ACTION_SET,
-            targetText = AgentActionSet.ID_SEND_IM_MESSAGE,
+            targetText = AgentActionSet.ID_WECHAT_SEND_IM_MESSAGE,
             inputText = "响",
             message = "到家了",
         )
         val actionSet = AgentActionSet.fromRunActionSetAction(action)
         assertNotNull(actionSet)
-        assertEquals(AgentActionSet.ID_SEND_IM_MESSAGE, actionSet!!.id)
+        assertEquals(AgentActionSet.ID_WECHAT_SEND_IM_MESSAGE, actionSet!!.id)
         assertEquals("响", actionSet.params["contact"])
         assertEquals("到家了", actionSet.params["message"])
         assertFalse(actionSet.params.values.containsKey("appName"))
@@ -143,7 +143,7 @@ class AgentActionSetTest {
     fun fromRunActionSetAction_nullWhenParamsMissing() {
         val action = AgentAction(
             action = AgentActionSet.ACTION_RUN_ACTION_SET,
-            targetText = AgentActionSet.ID_SEND_IM_MESSAGE,
+            targetText = AgentActionSet.ID_WECHAT_SEND_IM_MESSAGE,
             inputText = "响",
         )
         assertNull(AgentActionSet.fromRunActionSetAction(action))
@@ -164,7 +164,7 @@ class AgentActionSetTest {
     fun expandPlannedActions_activatesActionSetWithoutInliningAllSteps() {
         val runActionSet = AgentAction(
             action = AgentActionSet.ACTION_RUN_ACTION_SET,
-            targetText = AgentActionSet.ID_SEND_IM_MESSAGE,
+            targetText = AgentActionSet.ID_WECHAT_SEND_IM_MESSAGE,
             inputText = "大女儿",
             message = "今晚回家吃饭",
         )
@@ -178,7 +178,7 @@ class AgentActionSetTest {
         val wait = AgentAction(action = "wait")
         val run = AgentAction(
             action = AgentActionSet.ACTION_RUN_ACTION_SET,
-            targetText = AgentActionSet.ID_SEND_IM_MESSAGE,
+            targetText = AgentActionSet.ID_WECHAT_SEND_IM_MESSAGE,
             inputText = "响",
             message = "到家了",
         )
@@ -321,7 +321,7 @@ class AgentActionSetTest {
     fun uiLabel_showsActionGroupChinese() {
         val action = AgentAction(
             action = AgentActionSet.ACTION_RUN_ACTION_SET,
-            targetText = AgentActionSet.ID_SEND_IM_MESSAGE,
+            targetText = AgentActionSet.ID_WECHAT_SEND_IM_MESSAGE,
             inputText = "响",
             message = "到家了",
         )
@@ -332,7 +332,7 @@ class AgentActionSetTest {
     fun uiLabel_fallbackWithoutContact() {
         val action = AgentAction(
             action = AgentActionSet.ACTION_RUN_ACTION_SET,
-            targetText = AgentActionSet.ID_SEND_IM_MESSAGE,
+            targetText = AgentActionSet.ID_WECHAT_SEND_IM_MESSAGE,
             message = "到家了",
         )
         // contact 缺失时 resolveParams 为 null → 空 params → 默认文案

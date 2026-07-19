@@ -395,6 +395,17 @@ object IntentCapabilityMatrix {
         """导航到|导航去|带我去|带我到|带我前往|去最近的|去附近的|我要去附近|我要去最近""",
     )
 
+    /**
+     * 明确走微信发消息（含「发微信」）。未点名微信的「发消息」不进，避免 TIM/QQ 被误绑微信动作组。
+     */
+    private val wechatSendMessageGoal = Regex(
+        """(用)?微信.{0,24}(发消息|发信息|发个消息|说)|""" +
+            """微信给.{1,20}(发|说)|""" +
+            """(给|跟|和|向).{1,20}发微信|""" +
+            """发微信给|""" +
+            """上微信.{0,20}(发|说)""",
+    )
+
     /** 系统 Intent 一步即可完成、无需进 App 内自动化。 */
     private val systemCompleteActions = setOf(
         "dial_contact", "send_sms", "set_alarm", "add_calendar_event",
@@ -429,7 +440,10 @@ object IntentCapabilityMatrix {
         return PageContextNeed.NONE
     }
 
-    /** 是否应优先走已注册 ActionSet（入口省树）。发消息类一律不进，交给 LLM 选型与逐步操作。 */
+    /**
+     * 是否应优先走已注册 ActionSet（入口省树）。
+     * 明确「微信发消息」进 [wechat_send_im_message]；未点名微信的发消息 / TIM / QQ / 短信不进。
+     */
     fun prefersActionSetEntry(command: String): Boolean {
         val text = command.trim()
         if (text.isBlank()) return false
@@ -437,6 +451,7 @@ object IntentCapabilityMatrix {
         if (mapNavigateGoal.containsMatchIn(text) && !text.contains("回家") && !text.contains("家里")) {
             return true
         }
+        if (wechatSendMessageGoal.containsMatchIn(text)) return true
         return false
     }
 

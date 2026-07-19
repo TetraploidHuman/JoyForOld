@@ -17,6 +17,23 @@ class SearchTaskHeuristicsTest {
         fingerprint = "ithome",
     )
 
+    private val wechatListSnapshot = StructuredPageSnapshot(
+        packageName = "com.tencent.mm",
+        appHint = "当前为微信",
+        clickables = listOf(
+            "退出浮窗jxs",
+            "搜索小程序 搜索栏md5",
+            "吴志强 [语音] 2\"",
+            "通讯录",
+            "发现",
+            "搜索jha",
+        ),
+        editables = emptyList(),
+        visibleTexts = listOf("吴志强", "微信(40)"),
+        sendButtons = emptyList(),
+        fingerprint = "mm",
+    )
+
     @Test
     fun extractSearchKeyword_fromWindowsCommand() {
         assertEquals(
@@ -36,6 +53,33 @@ class SearchTaskHeuristicsTest {
         assertTrue(hint.contains("type"))
         assertTrue(hint.contains("Windows"))
         assertTrue(hint.contains("勿盲目 tap"))
+    }
+
+    @Test
+    fun plannerSupplement_wechatSendPrefersContactRowNotMiniProgramSearch() {
+        val hint = SearchTaskHeuristics.plannerSupplement(
+            command = "去微信给吴志强发消息说你是个猪",
+            snapshot = wechatListSnapshot,
+        )
+        assertTrue(hint.contains("吴志强"))
+        assertTrue(hint.contains("直接 click"))
+        assertTrue(hint.contains("禁止"))
+        assertFalse(hint.contains("【搜索提示】"))
+        assertFalse(hint.contains("请 click 该搜索框"))
+    }
+
+    @Test
+    fun findSearchBoxLabel_skipsMiniProgramSearch() {
+        val label = SearchTaskHeuristics.findSearchBoxLabel(wechatListSnapshot)
+        assertEquals("搜索jha", label)
+    }
+
+    @Test
+    fun extractImContact_fromWechatCommand() {
+        assertEquals(
+            "吴志强",
+            SearchTaskHeuristics.extractImContact("去微信给吴志强发消息说你是个猪"),
+        )
     }
 
     @Test

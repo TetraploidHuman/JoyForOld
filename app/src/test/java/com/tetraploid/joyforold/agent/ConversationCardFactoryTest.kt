@@ -24,13 +24,24 @@ class ConversationCardFactoryTest {
     }
 
     @Test
-    fun overlayInteraction_hiddenInVisionMode() {
+    fun overlayInteraction_showsConfirmEvenInVisionLatch() {
         val waiting = AgentUiState(
             waitingForUserConfirm = true,
-            confirmPrompt = "请确认",
+            confirmPrompt = "请确认发送",
+            needsBinaryConfirm = true,
             visionAgentActive = true,
         )
-        assertNull(ConversationCardFactory.overlayInteraction(waiting))
+        val card = ConversationCardFactory.overlayInteraction(waiting)
+        assertNotNull(card)
+        assertEquals(ConversationCardKind.Confirm, card!!.kind)
+        assertTrue(card.showBinaryActions)
+    }
+
+    @Test
+    fun overlayInteraction_undoHiddenInVisionMode() {
+        val undo = ConversationCardFactory.undo("刚才的操作可以撤销，要撤销吗？")
+        val state = AgentUiState(visionAgentActive = true)
+        assertNull(ConversationCardFactory.overlayInteraction(state, listOf(undo)))
     }
 
     @Test
@@ -74,6 +85,39 @@ class ConversationCardFactoryTest {
         assertTrue(
             ConversationCardFactory.overlaySessionCards(state, listOf(plan)).isEmpty(),
         )
+    }
+
+    @Test
+    fun overlaySessionCards_forcesConfirmWhileWaitingEvenIfVisionLatch() {
+        val plan = ConversationCardFactory.plan(
+            listOf(TaskPhaseItem(1, "打开微信", TaskStepStatus.Completed)),
+        )!!
+        val state = AgentUiState(
+            waitingForUserConfirm = true,
+            confirmPrompt = "即将发送消息。请确认：要说「发送」还是「取消」？",
+            needsBinaryConfirm = true,
+            visionAgentActive = true,
+        )
+        val cards = ConversationCardFactory.overlaySessionCards(state, listOf(plan))
+        assertEquals(1, cards.size)
+        assertEquals(ConversationCardKind.Confirm, cards[0].kind)
+        assertTrue(cards[0].showBinaryActions)
+    }
+
+    @Test
+    fun overlaySessionCards_waitingShowsOnlyInteractionCard() {
+        val plan = ConversationCardFactory.plan(
+            listOf(TaskPhaseItem(1, "打开微信", TaskStepStatus.Completed)),
+        )!!
+        val confirm = ConversationCardFactory.confirm("请确认发送", binary = true)
+        val state = AgentUiState(
+            waitingForUserConfirm = true,
+            confirmPrompt = "请确认发送",
+            needsBinaryConfirm = true,
+        )
+        val cards = ConversationCardFactory.overlaySessionCards(state, listOf(plan, confirm))
+        assertEquals(1, cards.size)
+        assertEquals(ConversationCardKind.Confirm, cards[0].kind)
     }
 
     @Test

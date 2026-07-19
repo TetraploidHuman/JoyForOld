@@ -41,11 +41,16 @@ data class AgentAction(
 
         /** 模型偶发把 type 的文案写在 target_text，本地补齐 input_text。 */
         fun normalize(action: AgentAction): AgentAction {
-            if (!action.action.equals("type", ignoreCase = true)) return action
-            if (!action.inputText.isNullOrBlank()) return action
-            val target = action.targetText?.trim().orEmpty()
-            if (target.isBlank()) return action
-            return action.copy(inputText = target, targetText = null)
+            var normalized = action
+            // finished 只对 finish 有终止语义；send/click 带 finished:true 时仍须先执行动作
+            if (!normalized.action.equals("finish", ignoreCase = true) && normalized.finished) {
+                normalized = normalized.copy(finished = false)
+            }
+            if (!normalized.action.equals("type", ignoreCase = true)) return normalized
+            if (!normalized.inputText.isNullOrBlank()) return normalized
+            val target = normalized.targetText?.trim().orEmpty()
+            if (target.isBlank()) return normalized
+            return normalized.copy(inputText = target, targetText = null)
         }
     }
 }

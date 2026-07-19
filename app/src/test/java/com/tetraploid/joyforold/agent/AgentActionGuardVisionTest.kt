@@ -2,6 +2,7 @@ package com.tetraploid.joyforold.agent
 
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AgentActionGuardVisionTest {
@@ -19,5 +20,23 @@ class AgentActionGuardVisionTest {
     @Test
     fun allowsTapInVisionMode() {
         assertNull(AgentActionGuard.blockedInVisionMode(AgentAction(action = "tap", targetText = "500,100")))
+    }
+
+    @Test
+    fun blocksTapWhenA11yAvailable() {
+        val reason = AgentActionGuard.blockedWhenA11yAvailable(
+            AgentAction(action = "tap", targetText = "250,450"),
+        )
+        assertNotNull(reason)
+        assertTrue(reason!!.contains("click"))
+    }
+
+    @Test
+    fun allowsClickWhenA11yAvailable() {
+        assertNull(
+            AgentActionGuard.blockedWhenA11yAvailable(
+                AgentAction(action = "click", targetText = "吴志强"),
+            ),
+        )
     }
 }

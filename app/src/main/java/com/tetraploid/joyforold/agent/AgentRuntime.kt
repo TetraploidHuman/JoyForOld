@@ -599,6 +599,10 @@ class AgentRuntime(
 
 
     private suspend fun handleStandaloneAgentResult(application: Application, result: AgentRunResult) {
+        if (result.waitingForUserConfirm) {
+            visionAgentActive = false
+            visionOverlaySuppressionDepth = 0
+        }
         _state.update {
             it.copy(
                 isRunning = false,
@@ -606,11 +610,16 @@ class AgentRuntime(
                 confirmPrompt = result.confirmPrompt,
                 needsBinaryConfirm = result.needsBinaryConfirm,
                 statusMessage = result.summary,
+                visionAgentActive = if (result.waitingForUserConfirm) false else it.visionAgentActive,
             )
         }
         finalizeSessionCards(result)
         publishConversationCards()
         syncOverlayVisibility()
+        if (result.waitingForUserConfirm) {
+            FloatingOverlayService.ensureStarted(application)
+            FloatingOverlayService.showDialog()
+        }
         val voice = voiceSession()
         val deferPromptToListen = result.waitingForUserConfirm &&
             orchestrator.peekPendingKind() in setOf(
@@ -1081,6 +1090,11 @@ class AgentRuntime(
                 )
                 // 先更新确认 UI，再播 TTS，避免弹窗等播报结束才出现
                 refreshMemories()
+                if (result.waitingForUserConfirm) {
+                    // 确认态必须出卡：清视觉闩锁 + 临时藏窗深度，否则 sync 会继续 hideDialog
+                    visionAgentActive = false
+                    visionOverlaySuppressionDepth = 0
+                }
                 _state.update {
                     it.copy(
                         isRunning = false,
@@ -1090,6 +1104,7 @@ class AgentRuntime(
                         needsBinaryConfirm = result.needsBinaryConfirm,
                         sessionId = result.sessionId,
                         statusMessage = if (result.success) result.summary else result.summary,
+                        visionAgentActive = if (result.waitingForUserConfirm) false else it.visionAgentActive,
                         // 非确认结束时清空输入，右侧按钮回到麦克风
                         command = if (result.waitingForUserConfirm) it.command else "",
                         speechText = if (result.waitingForUserConfirm) it.speechText else "",
@@ -1108,6 +1123,11 @@ class AgentRuntime(
                 finalizeSessionCards(result)
                 publishConversationCards()
                 syncOverlayVisibility()
+                if (result.waitingForUserConfirm) {
+                    // 再强制一次显卡，避免 ensureStarted 竞态导致 pending 未落到可见
+                    FloatingOverlayService.ensureStarted(application)
+                    FloatingOverlayService.showDialog()
+                }
                 refreshVisionDebugFrames()
                 relayRemoteAssistStatus(result.success, result.summary)
                 val deferPromptToListen = result.waitingForUserConfirm &&

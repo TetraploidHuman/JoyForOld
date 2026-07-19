@@ -49,6 +49,14 @@ internal object AgentGuardedActionExecutor {
             AgentActionGuard.blockedInVisionMode(action)?.let { reason ->
                 return Outcome.Blocked(reason)
             }
+        } ?: run {
+            AgentActionGuard.blockedWhenA11yAvailable(action)?.let { reason ->
+                return Outcome.Blocked(reason)
+            }
+        }
+
+        AgentActionGuard.blockedWrongImSearch(session, action, currentSnapshot)?.let {
+            return Outcome.Blocked(it)
         }
 
         if (action.action.equals("open_app", ignoreCase = true) && service != null) {
@@ -57,8 +65,13 @@ internal object AgentGuardedActionExecutor {
                 action.targetText.orEmpty(),
             )
             if (!targetPkg.isNullOrBlank() && currentSnapshot?.packageName == targetPkg) {
+                val nextHint = if (PageReadiness.needsVisionFallback(currentSnapshot)) {
+                    "请根据截图继续 tap/type。"
+                } else {
+                    "请根据页面快览用 click/type 继续操作。"
+                }
                 return Outcome.Blocked(
-                    "目标应用已在当前前台（$targetPkg），请勿重复 open_app；请根据截图继续 tap/type。",
+                    "目标应用已在当前前台（$targetPkg），请勿重复 open_app；$nextHint",
                 )
             }
         }

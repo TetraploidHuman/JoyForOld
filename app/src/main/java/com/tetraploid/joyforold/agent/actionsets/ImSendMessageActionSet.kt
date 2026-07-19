@@ -13,11 +13,12 @@ import com.tetraploid.joyforold.agent.actionsets.dsl.param
  * 塞进主规划 LLM。会话/联系人列表会变化，故只采列表候选交给窄域 askLlm 选型。
  */
 object ImSendMessageActionSet {
+    const val ID = "wechat_send_im_message"
     const val WECHAT_APP = "微信"
     const val SEARCH_FIELD_HINT = "搜索本地或网络结果"
     const val SEARCH_ENTRY_LABEL = "搜索"
 
-    val definition = actionScript("send_im_message") {
+    val definition = actionScript(ID) {
         uiLabel { p ->
             val c = p["contact"]
             if (c.isNotBlank()) "动作组：微信给${c}发消息" else "动作组：微信发消息"

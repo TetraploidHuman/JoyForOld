@@ -41,8 +41,8 @@ object AgentToolRegistry {
 
     fun descriptionsForPrompt(visionMode: Boolean = false): String = """
         可用工具（action 字段）：
-        - click: 点击含 target_text 的可点击元素${if (visionMode) "（当前不可用，请用 tap）" else "（无障碍树可用时优先）"}
-        - tap: 按屏幕坐标点击；target_text 填归一化坐标 "x,y"（0~1000，左上为原点）${if (visionMode) "【当前须用 tap】" else "（无障碍树为空、消息带截图时用）"}
+        - click: 点击含 target_text 的可点击元素${if (visionMode) "（当前不可用，请用 tap）" else "（无障碍树可用时必须用 click，禁止估坐标）"}
+        - tap: 按屏幕坐标点击；target_text 填归一化坐标 "x,y"（0~1000，左上为原点）${if (visionMode) "【当前须用 tap】" else "（仅当无障碍树为空时用；树可用时禁止）"}
         - type: 在输入框输入 input_text；视觉模式下 target_text 可填输入框坐标 "x,y"（将原子点击并注入，优先 Joy IME）
         - send: 点击发送按钮；视觉模式下 target_text 可填发送按钮坐标 "x,y"
         - scroll_down / scroll_up: 在列表内滚动

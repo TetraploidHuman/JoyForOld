@@ -60,7 +60,9 @@ class AgentOrchestrator(
             service: AccessibilityGateway,
             runContext: AgentRunContext,
             onProgress: ((Int, String) -> Unit)?,
-        ): AgentRunResult = resumeUserConfirm(pending, command, apiKey, service, runContext, onProgress)
+        ): AgentRunResult =
+            // 禁止与 override 同名再调 this@…，Kotlin 会递归进本 override → StackOverflow
+            continueAfterUserConfirm(pending, command, apiKey, service, runContext, onProgress)
 
         override suspend fun executeLocalSteps(
             context: Context,
@@ -69,8 +71,7 @@ class AgentOrchestrator(
             originalCommand: String,
             runContext: AgentRunContext,
         ): AgentRunResult {
-            // 必须限定到外层 Orchestrator，否则会递归调用本 override 导致 StackOverflow
-            val result = this@AgentOrchestrator.executeLocalSteps(
+            val result = runLocalSteps(
                 context, service, steps, originalCommand, runContext,
             )
             if (result.success && !result.waitingForUserConfirm && LocalFastPathGuard.isUndoable(steps)) {
@@ -293,7 +294,7 @@ class AgentOrchestrator(
 
                 }
 
-                val routeResult = executeLocalSteps(executionContext, service, route.steps, command, runContext)
+                val routeResult = runLocalSteps(executionContext, service, route.steps, command, runContext)
 
                 if (routeResult.success && !routeResult.waitingForUserConfirm &&
 
@@ -367,7 +368,7 @@ class AgentOrchestrator(
 
 
 
-    private suspend fun resumeUserConfirm(
+    private suspend fun continueAfterUserConfirm(
 
         pending: PendingAgentState,
 
@@ -387,40 +388,52 @@ class AgentOrchestrator(
 
         pending.session.recordConfirmAnswer(pending.aiPrompt, userReply)
 
-        val enriched = ConfirmResumeBuilder.buildEnrichedResume(
-
-            originalCommand = pending.originalCommand,
-
-            aiPrompt = pending.aiPrompt,
-
-            userReply = userReply,
-
-        )
-
         pendingMachine.dropMemoryOnly()
 
+        // 发送确认通过后本地直接 send，避免 LLM 返回 send+finished 空跑「任务已完成」
+        val confirmedSend = pending.needsBinaryConfirm &&
+            AgentActionGuard.isSendConfirmPrompt(pending.aiPrompt) &&
+            VoiceConfirmPhraseMatcher.classify(userReply) == VoiceConfirmPhraseMatcher.Intent.CONFIRM
+        if (confirmedSend) {
+            return runAgentLoop(
+                loopCommand = pending.originalCommand,
+                rootCommand = pending.session.rootCommand,
+                apiKey = apiKey,
+                service = service,
+                runContext = runContext,
+                onProgress = onProgress,
+                existingSession = pending.session,
+                initialSnapshot = pending.previousSnapshot,
+                resumeAfterUserReply = false,
+                resumePending = pending,
+                seedActions = listOf(
+                    AgentAction(action = "send"),
+                    AgentAction(
+                        action = "finish",
+                        message = "消息已发送",
+                        finished = true,
+                    ),
+                ),
+            )
+        }
+
+        val enriched = ConfirmResumeBuilder.buildEnrichedResume(
+            originalCommand = pending.originalCommand,
+            aiPrompt = pending.aiPrompt,
+            userReply = userReply,
+        )
+
         return runAgentLoop(
-
             loopCommand = enriched,
-
             rootCommand = pending.session.rootCommand,
-
             apiKey = apiKey,
-
             service = service,
-
             runContext = runContext,
-
             onProgress = onProgress,
-
             existingSession = pending.session,
-
             initialSnapshot = pending.previousSnapshot,
-
             resumeAfterUserReply = true,
-
             resumePending = pending,
-
         )
 
     }
@@ -852,7 +865,8 @@ class AgentOrchestrator(
                     )
                 }
 
-                if (action.action.equals("finish", ignoreCase = true) || action.finished) {
+                // 仅 action=finish 才终止；send/click 误带 finished:true 时须先真正执行（见 AgentAction.normalize）
+                if (action.action.equals("finish", ignoreCase = true)) {
 
                     val currentSnapshot = service.mergeSnapshots(service.captureStructuredSnapshots())
 
@@ -1375,6 +1389,9 @@ class AgentOrchestrator(
 
         if (shouldWait) {
 
+            // 确认态须展示悬浮确认卡：先退出视觉藏卡模式
+            com.tetraploid.joyforold.overlay.VisionOverlaySuppressors.current.deactivateVisionAgentMode()
+
             session.status = "waiting_user"
 
             session.finalSummary = rawSummary
@@ -1636,7 +1653,7 @@ class AgentOrchestrator(
 
             }
 
-            return executeLocalSteps(context, service = null, route.steps, command, runContext)
+            return runLocalSteps(context, service = null, route.steps, command, runContext)
 
         }
 
@@ -1654,7 +1671,7 @@ class AgentOrchestrator(
 
 
 
-    private suspend fun executeLocalSteps(
+    private suspend fun runLocalSteps(
 
         context: Context,
 
@@ -1706,7 +1723,7 @@ class AgentOrchestrator(
                 continue
             }
 
-            if (action.action.equals("finish", ignoreCase = true) || action.finished) {
+            if (action.action.equals("finish", ignoreCase = true)) {
 
                 val rawSummary = lastInfoSummary ?: action.message ?: "任务已完成"
 
@@ -1948,7 +1965,7 @@ class AgentOrchestrator(
         val steps = IntentDisambiguationHelper.stepsForIntent(command, intentId, appContext)
             ?: return AgentRunResult(false, "无法执行所选意图", emptyList())
         pendingMachine.clear()
-        val result = executeLocalSteps(appContext, service, steps, command, runContext)
+        val result = runLocalSteps(appContext, service, steps, command, runContext)
         if (result.success && !result.waitingForUserConfirm && LocalFastPathGuard.isUndoable(steps)) {
             LocalUndoRegistry.register(steps)
         }

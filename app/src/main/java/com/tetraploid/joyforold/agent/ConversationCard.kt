@@ -114,26 +114,32 @@ object ConversationCardFactory {
         state: AgentUiState,
         sessionCards: List<ConversationCard> = emptyList(),
     ): ConversationCard? {
-        if (state.visionAgentActive) return null
         val interactionKinds = OVERLAY_INTERACTION_KINDS
+        // 等待用户确认时必须出卡（含确认按钮），不受视觉闩锁影响
         if (state.waitingForUserConfirm && !state.confirmPrompt.isNullOrBlank()) {
             return sessionCards.lastOrNull { it.kind in interactionKinds }
                 ?: confirm(state.confirmPrompt, state.needsBinaryConfirm)
         }
+        if (state.visionAgentActive) return null
         return sessionCards.lastOrNull { it.kind == ConversationCardKind.Undo }
     }
 
     /**
-     * 悬浮层展示的会话卡片：无障碍模式显示计划/进度/确认等；视觉模式返回空。
+     * 悬浮层展示的会话卡片：无障碍模式显示计划/进度/确认等；视觉执行中隐藏。
+     * 等待用户确认时只突出确认/消歧卡，避免视觉闩锁或计划卡挤掉「请确认」。
      */
     fun overlaySessionCards(
         state: AgentUiState,
         sessionCards: List<ConversationCard> = emptyList(),
     ): List<ConversationCard> {
+        if (state.waitingForUserConfirm && !state.confirmPrompt.isNullOrBlank()) {
+            val interaction = sessionCards.lastOrNull { it.kind in OVERLAY_INTERACTION_KINDS }
+                ?: confirm(state.confirmPrompt, state.needsBinaryConfirm)
+            return listOf(interaction)
+        }
         if (state.visionAgentActive) return emptyList()
         val filtered = sessionCards.filter { it.kind in OVERLAY_SESSION_KINDS }
         if (filtered.isNotEmpty()) return filtered.takeLast(4)
-        // 会话列表尚未写入时，仍用确认态兜底一张卡
         return listOfNotNull(overlayInteraction(state, sessionCards))
     }
 

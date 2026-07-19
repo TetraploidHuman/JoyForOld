@@ -42,6 +42,18 @@ class AgentActionJsonTest {
     }
 
     @Test
+    fun fromJson_stripsFinishedOnSendSoItStillExecutes() {
+        val action = AgentAction.fromJson(
+            JSONObject(
+                """{"action":"send","finished":true,"message":"任务已完成"}""",
+            ),
+        )
+        assertEquals("send", action.action)
+        assertFalse(action.finished)
+        assertEquals("任务已完成", action.message)
+    }
+
+    @Test
     fun fromJson_normalizesTypeTargetToInput() {
         val action = AgentAction.fromJson(
             JSONObject("""{"action":"type","target_text":"赵雷 小雨中"}"""),

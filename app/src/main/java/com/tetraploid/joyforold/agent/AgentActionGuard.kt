@@ -10,8 +10,15 @@ object AgentActionGuard {
     private val sendKeywords = listOf("发送", "send", "发表", "送出")
 
     private const val CALL_ROUTE_PROMPT = "你要在哪里打电话？请说 QQ电话 或 手机电话。"
-    private const val SEND_PROMPT = "即将发送消息。请确认：要说「发送」还是「取消」？"
-    private const val SEND_CLICK_PROMPT = "即将点击发送。请确认：要说「发送」还是「取消」？"
+    const val SEND_PROMPT = "即将发送消息。请确认：要说「发送」还是「取消」？"
+    const val SEND_CLICK_PROMPT = "即将点击发送。请确认：要说「发送」还是「取消」？"
+
+    fun isSendConfirmPrompt(prompt: String): Boolean {
+        val text = prompt.trim()
+        return text == SEND_PROMPT ||
+            text == SEND_CLICK_PROMPT ||
+            (text.contains("发送") && (text.contains("确认") || text.contains("取消")))
+    }
 
     fun actionKey(action: AgentAction): String {
         return buildString {
@@ -202,6 +209,33 @@ object AgentActionGuard {
         ->
             "当前应用无障碍树不可用，观察仓查询无效；请根据截图用 tap。"
         else -> null
+    }
+
+    /**
+     * 无障碍树可用时禁止视觉坐标点击。
+     * tap 坐标由模型估测，易点偏；有可点击标签时应 click。
+     */
+    fun blockedWhenA11yAvailable(action: AgentAction): String? = when (action.action.lowercase()) {
+        "tap" ->
+            "当前无障碍树可用，禁止 tap 坐标点击。请用 click，target_text 填页面快览中的可点击文案（如联系人名）。"
+        else -> null
+    }
+
+    /**
+     * 给某人发消息时：会话列表已有联系人行，禁止点「搜索 / 搜索小程序」。
+     */
+    fun blockedWrongImSearch(
+        session: AgentConversationSession,
+        action: AgentAction,
+        snapshot: StructuredPageSnapshot?,
+    ): String? {
+        if (!action.action.equals("click", ignoreCase = true)) return null
+        val target = action.targetText?.trim().orEmpty()
+        if (target.isEmpty() || !SearchTaskHeuristics.isSearchLikeLabel(target)) return null
+        val contact = SearchTaskHeuristics.extractImContact(session.rootCommand) ?: return null
+        val snap = snapshot ?: return null
+        val hit = SearchTaskHeuristics.findVisibleContactClickable(snap, contact) ?: return null
+        return "发消息给「$contact」时，列表已有「$hit」，禁止点搜索。请直接 click「$hit」。"
     }
 
     private fun replanHint(a11yUnavailable: Boolean, action: AgentAction): String =
