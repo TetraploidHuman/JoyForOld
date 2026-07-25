@@ -1,0 +1,9 @@
+# Word / Office lock files
+~$*
+*.tmp
+
+# Third-party sample clones (see README links; do not vendor .git trees)
+reference-samples/GB8567-templates/
+reference-samples/se-doc-examples/
+reference-samples/_style_extract/
+范文参考/
