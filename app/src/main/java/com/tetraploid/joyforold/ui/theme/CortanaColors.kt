@@ -6,6 +6,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 data class CortanaColorPalette(
+    val isDark: Boolean,
     val background: Color,
     val surface: Color,
     val surfaceElevated: Color,
@@ -29,6 +30,7 @@ data class CortanaColorPalette(
 
 object CortanaPalettes {
     val Dark = CortanaColorPalette(
+        isDark = true,
         background = Color(0xFF000000),
         surface = Color(0xFF1F1F1F),
         surfaceElevated = Color(0xFF2D2D30),
@@ -44,13 +46,14 @@ object CortanaPalettes {
         divider = Color(0xFF3F3F46),
         success = Color(0xFF6FCF97),
         error = Color(0xFFFF6B6B),
-        overlayBackground = Color(0xF0000000),
+        overlayBackground = Color(0xFF000000),
         stepCompleted = Color(0xFF6B6B6B),
         stepActive = Color(0xFFE0E0E0),
         stepPending = Color(0xFF5A5A5A),
     )
 
     val Light = CortanaColorPalette(
+        isDark = false,
         background = Color(0xFFF3F3F3),
         surface = Color(0xFFFFFFFF),
         surfaceElevated = Color(0xFFECECEC),
@@ -66,7 +69,7 @@ object CortanaPalettes {
         divider = Color(0xFFD6D6D6),
         success = Color(0xFF2E8B57),
         error = Color(0xFFD13438),
-        overlayBackground = Color(0x99000000),
+        overlayBackground = Color(0xFFF3F3F3),
         stepCompleted = Color(0xFF9E9E9E),
         stepActive = Color(0xFF0078D4),
         stepPending = Color(0xFFC4C4C4),

@@ -79,9 +79,16 @@ fun CortanaHomePage(
         else -> "嗨，在想什么呢？"
     }
 
-    val orbActive = uiState.isRunning || uiState.isListening || uiState.waitingForUserConfirm
     val voiceListening = uiState.isListening ||
         uiState.voiceInteractionState == VoiceInteractionState.Listening
+    val orbMood = when {
+        uiState.isRunning -> CortanaOrbMood.Loading
+        uiState.voiceInteractionState == VoiceInteractionState.Processing -> CortanaOrbMood.Processing
+        voiceListening -> CortanaOrbMood.Listening
+        uiState.waitingForUserConfirm -> CortanaOrbMood.Confirm
+        uiState.voiceInteractionState == VoiceInteractionState.SpeakingPrompt -> CortanaOrbMood.Speaking
+        else -> CortanaOrbMood.Idle
+    }
     val hasContentPanel = uiState.isRunning ||
         voiceListening ||
         uiState.waitingForUserConfirm ||
@@ -107,8 +114,9 @@ fun CortanaHomePage(
                 Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                     CortanaHeroHeader(
                         greeting = greeting,
-                        orbActive = orbActive,
+                        orbMood = orbMood,
                         compact = hasContentPanel,
+                        playEntryAnimation = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
 

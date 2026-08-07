@@ -30,9 +30,10 @@ private fun lerpDp(start: Dp, end: Dp, fraction: Float): Dp = start + (end - sta
 @Composable
 fun CortanaHeroHeader(
     greeting: String,
-    orbActive: Boolean,
+    orbMood: CortanaOrbMood,
     compact: Boolean,
     modifier: Modifier = Modifier,
+    playEntryAnimation: Boolean = false,
 ) {
     val progress by animateFloatAsState(
         targetValue = if (compact) 1f else 0f,
@@ -53,7 +54,8 @@ fun CortanaHeroHeader(
         CortanaOrb(
             modifier = Modifier.offset(x = orbX, y = topPadding),
             size = orbSize,
-            active = orbActive,
+            mood = orbMood,
+            playEntryAnimation = playEntryAnimation,
         )
 
         Text(

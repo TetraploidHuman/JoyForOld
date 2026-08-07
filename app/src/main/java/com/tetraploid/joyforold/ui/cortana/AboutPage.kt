@@ -52,7 +52,7 @@ fun AboutPage(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        CortanaOrb(size = 64.dp, active = false)
+        CortanaOrb(size = 64.dp, mood = CortanaOrbMood.Idle)
         Text(
             text = "JoyForOld",
             color = CortanaColors.OnBackground,

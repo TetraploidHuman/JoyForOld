@@ -22,6 +22,7 @@ import com.tetraploid.joyforold.agent.ConversationCardFactory
 import com.tetraploid.joyforold.speech.api.VoiceInteractionState
 import com.tetraploid.joyforold.ui.cortana.ConversationCardList
 import com.tetraploid.joyforold.ui.cortana.CortanaHeroHeader
+import com.tetraploid.joyforold.ui.cortana.CortanaOrbMood
 import com.tetraploid.joyforold.ui.cortana.CortanaSearchBar
 import com.tetraploid.joyforold.ui.theme.CortanaColors
 import kotlinx.coroutines.delay
@@ -140,7 +141,18 @@ fun FloatingOverlayContent(
             ) {
                 CortanaHeroHeader(
                     greeting = interactionText,
-                    orbActive = uiState.isRunning || uiState.isListening || uiState.waitingForUserConfirm,
+                    orbMood = when {
+                        uiState.isRunning -> CortanaOrbMood.Loading
+                        uiState.voiceInteractionState == VoiceInteractionState.Processing ->
+                            CortanaOrbMood.Processing
+                        uiState.isListening ||
+                            uiState.voiceInteractionState == VoiceInteractionState.Listening ->
+                            CortanaOrbMood.Listening
+                        uiState.waitingForUserConfirm -> CortanaOrbMood.Confirm
+                        uiState.voiceInteractionState == VoiceInteractionState.SpeakingPrompt ->
+                            CortanaOrbMood.Speaking
+                        else -> CortanaOrbMood.Idle
+                    },
                     compact = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
