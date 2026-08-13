@@ -1,6 +1,5 @@
 package com.tetraploid.joyforold.ui.cortana
 
-import android.Manifest
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.background
@@ -19,7 +18,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +32,7 @@ import com.tetraploid.joyforold.overlay.FloatingOverlayService
 import com.tetraploid.joyforold.overlay.OverlayPermission
 import com.tetraploid.joyforold.system.NotificationAccessPermission
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 import com.tetraploid.joyforold.wakeword.WakeWordSensitivityPreset
 
 @Composable
@@ -45,33 +44,15 @@ fun SettingsPage(
     onRequestAudioPermission: () -> Unit,
     onRequestContactsPermission: () -> Unit,
     onToggleOverlay: (Boolean) -> Unit,
-    onUpdateApiKey: (String) -> Unit,
-    onSaveApiKey: () -> Unit,
-    onUpdateAsrApiKey: (String) -> Unit,
-    onUpdateAsrAppId: (String) -> Unit,
-    onUpdateAsrAccessToken: (String) -> Unit,
-    onUpdateAsrResourceId: (String) -> Unit,
-    onSaveAsrConfig: () -> Unit,
     onUpdateWakeWordPhrase: (String) -> Unit,
-    onUpdateWakeWordScore: (String) -> Unit,
-    onUpdateWakeWordThreshold: (String) -> Unit,
     onApplyWakeWordPreset: (WakeWordSensitivityPreset) -> Unit,
     onSetWakeWordEnabled: (Boolean) -> Unit,
-    onSetWakeWordSileroVad: (Boolean) -> Unit,
-    onSetWakeWordSecondStage: (Boolean) -> Unit,
     onSaveWakeWordConfig: () -> Unit,
     onSetCloudContextConsent: (Boolean) -> Unit,
     onSetVoiceBargeIn: (Boolean) -> Unit,
     onTestWakeWord: () -> Unit,
     onStartCalibration: () -> Unit,
     onRecordCalibrationStep: () -> Unit,
-    onUpdateCommand: (String) -> Unit,
-    onRunAgent: () -> Unit,
-    onPreviewPage: () -> Unit,
-    onSetUiTreeLogcatEnabled: (Boolean) -> Unit,
-    onSetVisionDebugEnabled: (Boolean) -> Unit,
-    onRefreshVisionDebug: () -> Unit,
-    onClearVisionDebug: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -103,7 +84,7 @@ fun SettingsPage(
             Text(
                 text = "深色模式",
                 color = CortanaColors.OnBackground,
-                fontSize = 15.sp,
+                fontSize = JoyTextSizes.Body,
             )
             Switch(
                 checked = darkTheme,
@@ -117,7 +98,7 @@ fun SettingsPage(
         Text(
             text = if (darkTheme) "当前为深色界面" else "当前为亮色界面",
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
             modifier = Modifier.padding(start = 4.dp),
         )
         SectionDivider()
@@ -127,14 +108,15 @@ fun SettingsPage(
             Text(
                 text = "已开启，服务连接中…",
                 color = CortanaColors.OnBackgroundSecondary,
-                fontSize = 12.sp,
+                fontSize = JoyTextSizes.Caption,
                 modifier = Modifier.padding(start = 4.dp),
             )
         }
         Text(
-            text = "提示：在系统设置里「强制停止」本应用后，无障碍会被自动关闭，需重新开启。",
+            text = "提示：如果在系统设置里「强制停止」过本应用，无障碍会自动关闭，需要再打开一次。",
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
+            lineHeight = JoyTextSizes.CaptionLineHeight,
             modifier = Modifier.padding(vertical = 4.dp),
         )
 
@@ -159,14 +141,14 @@ fun SettingsPage(
             Text(
                 text = "已启用但未设默认：助手会用粘贴输入；设为默认可提高微信等自动输入成功率。",
                 color = CortanaColors.OnBackgroundSecondary,
-                fontSize = 12.sp,
+                fontSize = JoyTextSizes.Caption,
                 modifier = Modifier.padding(start = 4.dp),
             )
         }
         Text(
             text = stringResource(com.tetraploid.joyforold.R.string.joy_ime_settings_hint),
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
             modifier = Modifier.padding(vertical = 4.dp),
         )
 
@@ -232,7 +214,7 @@ fun SettingsPage(
         Text(
             text = "开启后，助手可将当前屏幕结构发送到云端，用于微信发消息、点按钮等 UI 自动化。仅在使用相关功能时上传，不会持续上传。",
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
             modifier = Modifier.padding(vertical = 4.dp),
         )
         Row(
@@ -243,7 +225,7 @@ fun SettingsPage(
             Text(
                 text = "允许云端理解屏幕内容",
                 color = CortanaColors.OnBackground,
-                fontSize = 14.sp,
+                fontSize = JoyTextSizes.BodySecondary,
                 modifier = Modifier.weight(1f),
             )
             Switch(
@@ -261,7 +243,7 @@ fun SettingsPage(
         Text(
             text = "开启后，助手播报时可直接说话打断，无需等播完。本地检测人声后停播并开麦；若仍有回声，会自动过滤已播报内容。",
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
             modifier = Modifier.padding(vertical = 4.dp),
         )
         Row(
@@ -272,7 +254,7 @@ fun SettingsPage(
             Text(
                 text = "播报时可语音打断",
                 color = CortanaColors.OnBackground,
-                fontSize = 14.sp,
+                fontSize = JoyTextSizes.BodySecondary,
                 modifier = Modifier.weight(1f),
             )
             Switch(
@@ -286,60 +268,11 @@ fun SettingsPage(
         }
 
         SectionDivider()
-        SectionTitle("API 配置")
-        Text("模型：${uiState.modelName}", color = CortanaColors.OnBackgroundMuted, fontSize = 12.sp)
-        OutlinedTextField(
-            value = uiState.apiKey,
-            onValueChange = onUpdateApiKey,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("LLM API Key（火山方舟）") },
-            singleLine = true,
-            colors = fieldColors,
-        )
-        TextButton(onClick = onSaveApiKey) { Text("保存 LLM Key", color = CortanaColors.Accent) }
-
-        SectionDivider()
-        SectionTitle("豆包语音识别")
-        OutlinedTextField(
-            value = uiState.asrApiKey,
-            onValueChange = onUpdateAsrApiKey,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("ASR API Key（新版）") },
-            singleLine = true,
-            colors = fieldColors,
-        )
-        OutlinedTextField(
-            value = uiState.asrAppId,
-            onValueChange = onUpdateAsrAppId,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("ASR App ID（旧版）") },
-            singleLine = true,
-            colors = fieldColors,
-        )
-        OutlinedTextField(
-            value = uiState.asrAccessToken,
-            onValueChange = onUpdateAsrAccessToken,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("ASR Access Token（旧版）") },
-            singleLine = true,
-            colors = fieldColors,
-        )
-        OutlinedTextField(
-            value = uiState.asrResourceId,
-            onValueChange = onUpdateAsrResourceId,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("ASR Resource ID") },
-            singleLine = true,
-            colors = fieldColors,
-        )
-        TextButton(onClick = onSaveAsrConfig) { Text("保存语音识别配置", color = CortanaColors.Accent) }
-
-        SectionDivider()
         SectionTitle("本地语音唤醒")
         Text(
             "模型：${uiState.wakeWordModelVersion}",
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Switch(
@@ -353,11 +286,11 @@ fun SettingsPage(
             Text(
                 if (uiState.wakeWordRunning) "唤醒服务已运行" else "唤醒服务未运行",
                 color = if (uiState.wakeWordRunning) CortanaColors.Success else CortanaColors.OnBackgroundMuted,
-                fontSize = 13.sp,
+                fontSize = JoyTextSizes.Caption,
             )
         }
         uiState.wakeWordTestHint?.let {
-            Text(it, color = CortanaColors.AccentMuted, fontSize = 12.sp)
+            Text(it, color = CortanaColors.AccentMuted, fontSize = JoyTextSizes.Caption)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             WakeWordSensitivityPreset.entries.forEach { preset ->
@@ -369,33 +302,11 @@ fun SettingsPage(
                 ) { Text(if (selected) "${preset.label}✓" else preset.label) }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Switch(checked = uiState.wakeWordSileroVadEnabled, onCheckedChange = onSetWakeWordSileroVad)
-            Text("VAD", color = CortanaColors.OnBackgroundSecondary, fontSize = 13.sp)
-            Switch(checked = uiState.wakeWordSecondStageEnabled, onCheckedChange = onSetWakeWordSecondStage)
-            Text("二阶段", color = CortanaColors.OnBackgroundSecondary, fontSize = 13.sp)
-        }
         OutlinedTextField(
             value = uiState.wakeWordPhrase,
             onValueChange = onUpdateWakeWordPhrase,
             modifier = Modifier.fillMaxWidth(),
             label = { Text("唤醒词") },
-            singleLine = true,
-            colors = fieldColors,
-        )
-        OutlinedTextField(
-            value = uiState.wakeWordKeywordScore.toString(),
-            onValueChange = onUpdateWakeWordScore,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("命中分数") },
-            singleLine = true,
-            colors = fieldColors,
-        )
-        OutlinedTextField(
-            value = uiState.wakeWordKeywordThreshold.toString(),
-            onValueChange = onUpdateWakeWordThreshold,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("命中阈值") },
             singleLine = true,
             colors = fieldColors,
         )
@@ -428,74 +339,10 @@ fun SettingsPage(
             }
         }
         uiState.wakeWordCalibrationHint?.let {
-            Text(it, color = CortanaColors.AccentMuted, fontSize = 12.sp)
-        }
-
-        SectionDivider()
-        SectionTitle("指令测试")
-        OutlinedTextField(
-            value = uiState.command,
-            onValueChange = onUpdateCommand,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("测试指令") },
-            colors = fieldColors,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = onRunAgent,
-                enabled = !uiState.isRunning && uiState.accessibilityEnabled,
-                modifier = Modifier.weight(1f),
-            ) { Text("让 AI 执行") }
-            OutlinedButton(
-                onClick = onPreviewPage,
-                enabled = uiState.accessibilityEnabled,
-                modifier = Modifier.weight(1f),
-            ) { Text("读取页面") }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "持续输出 UI 树到 Logcat",
-                    color = CortanaColors.OnBackground,
-                    fontSize = 15.sp,
-                )
-                Text(
-                    text = "与「读取页面」相同内容；过滤 tag=JoyForOld/UiTree",
-                    color = CortanaColors.OnBackgroundMuted,
-                    fontSize = 12.sp,
-                )
-            }
-            Switch(
-                checked = uiState.uiTreeLogcatEnabled,
-                onCheckedChange = onSetUiTreeLogcatEnabled,
-                enabled = uiState.accessibilityEnabled,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = CortanaColors.Accent,
-                    checkedTrackColor = CortanaColors.SurfaceElevated,
-                ),
-            )
-        }
-
-        SectionDivider()
-        SectionTitle("视觉调试")
-        VisionDebugGallery(
-            enabled = uiState.visionDebugEnabled,
-            frames = uiState.visionDebugFrames,
-            onEnabledChange = onSetVisionDebugEnabled,
-            onClear = onClearVisionDebug,
-            onRefresh = onRefreshVisionDebug,
-        )
-
-        SectionDivider()
-        SectionTitle("运行日志")
-        uiState.logs.takeLast(20).forEach { line ->
-            Text(line, color = CortanaColors.OnBackgroundMuted, fontSize = 11.sp)
+            Text(it, color = CortanaColors.AccentMuted, fontSize = JoyTextSizes.Caption)
         }
     }
+
 }
 
 @Composable
@@ -520,23 +367,23 @@ private fun WeChatSupportComponentCard(
             Text(
                 text = WeChatA11yComponent.DISPLAY_NAME,
                 color = CortanaColors.OnBackground,
-                fontSize = 15.sp,
+                fontSize = JoyTextSizes.Body,
             )
             Text(
                 text = WeChatA11yComponent.statusLabel(status),
                 color = statusColor,
-                fontSize = 13.sp,
+                fontSize = JoyTextSizes.Caption,
             )
         }
         Text(
             text = "内置组件 · 随主应用一起安装",
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
         )
         Text(
             text = WeChatA11yComponent.statusHint(status),
             color = CortanaColors.OnBackgroundSecondary,
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
         )
         OutlinedButton(
             onClick = onOpenSettings,
@@ -556,11 +403,11 @@ private fun WeChatSupportComponentCard(
 @Composable
 private fun SectionTitle(text: String) {
     Text(
-        text = text.uppercase(),
+        text = text,
         color = CortanaColors.Accent,
-        fontSize = 13.sp,
-        letterSpacing = 1.sp,
-        modifier = Modifier.padding(top = 4.dp),
+        fontSize = JoyTextSizes.Label,
+        letterSpacing = 0.6.sp,
+        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
     )
 }
 
@@ -578,7 +425,7 @@ private fun JoyImeStatusLine(enabled: Boolean, selectedAsDefault: Boolean) {
             "Joy 输入助手：已启用（可选设为默认）" to CortanaColors.OnBackgroundSecondary
         else -> "Joy 输入助手：未启用（可选）" to CortanaColors.OnBackgroundMuted
     }
-    Text(text = text, color = color, fontSize = 13.sp)
+    Text(text = text, color = color, fontSize = JoyTextSizes.Caption)
 }
 
 @Composable
@@ -586,6 +433,7 @@ private fun StatusLine(label: String, ok: Boolean) {
     Text(
         text = "$label：${if (ok) "已就绪" else "未就绪"}",
         color = if (ok) CortanaColors.Success else CortanaColors.OnBackgroundMuted,
-        fontSize = 13.sp,
+        fontSize = JoyTextSizes.BodySecondary,
+        lineHeight = JoyTextSizes.BodyLineHeight,
     )
 }

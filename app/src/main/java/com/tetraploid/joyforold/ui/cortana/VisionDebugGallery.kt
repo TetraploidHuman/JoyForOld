@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.tetraploid.joyforold.agent.VisionDebugFrame
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
 @Composable
 fun VisionDebugGallery(
@@ -51,7 +52,7 @@ fun VisionDebugGallery(
             text = "开启后，每次 Agent 视觉规划会保存「发给 AI 的截图」；" +
                 "若 AI 规划 tap/send 坐标，会在同一张图上用红圈标出点击位置。",
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
         )
         RowWithSwitch(
             label = "保存视觉调试截图",
@@ -70,7 +71,7 @@ fun VisionDebugGallery(
             Text(
                 text = if (enabled) "暂无截图。运行一次 Agent 任务后点「刷新列表」。" else "请先开启上方开关。",
                 color = CortanaColors.OnBackgroundMuted,
-                fontSize = 12.sp,
+                fontSize = JoyTextSizes.Caption,
             )
         } else {
             LazyColumn(
@@ -101,11 +102,11 @@ fun VisionDebugGallery(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(frame.label, color = CortanaColors.OnBackground, fontSize = 14.sp)
+                    Text(frame.label, color = CortanaColors.OnBackground, fontSize = JoyTextSizes.BodySecondary)
                     Text(
                         frame.filePath,
                         color = CortanaColors.OnBackgroundMuted,
-                        fontSize = 10.sp,
+                        fontSize = JoyTextSizes.Hint,
                     )
                     val bitmap = remember(frame.filePath) {
                         BitmapFactory.decodeFile(frame.filePath)?.asImageBitmap()
@@ -150,7 +151,7 @@ private fun VisionDebugThumb(
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(frame.label, color = CortanaColors.OnBackground, fontSize = 13.sp)
+        Text(frame.label, color = CortanaColors.OnBackground, fontSize = JoyTextSizes.Caption)
         if (bitmap != null) {
             Image(
                 bitmap = bitmap,
@@ -175,7 +176,7 @@ private fun RowWithSwitch(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = CortanaColors.OnBackground, fontSize = 14.sp)
+        Text(label, color = CortanaColors.OnBackground, fontSize = JoyTextSizes.BodySecondary)
         androidx.compose.material3.Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,

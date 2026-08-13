@@ -15,5 +15,9 @@
     <mapping directory="$PROJECT_DIR$/_reference/mobileClaw" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/_reference/opengui-android" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/_reference/sannabotapp" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/docs/reference-samples/GB8567-templates" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/docs/reference-samples/se-doc-examples" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/docs/范文参考/GB8567-软件文档模板" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/docs/范文参考/软工文档模板与示例" vcs="Git" />
   </component>
 </project>

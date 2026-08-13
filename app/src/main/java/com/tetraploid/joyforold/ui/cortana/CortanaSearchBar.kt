@@ -24,8 +24,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
 internal enum class InputActionMode {
     Mic,
@@ -59,7 +59,7 @@ fun CortanaSearchBar(
     onSendClick: () -> Unit,
     onCancelClick: () -> Unit,
     modifier: Modifier = Modifier,
-    placeholder: String = "在此输入或说话…",
+    placeholder: String = "点这里输入，或按麦克风说话",
     isListening: Boolean = false,
     isRunning: Boolean = false,
     /** 播报提示 / 识别处理中等：尚未开麦或刚结束聆听，应显示取消而非麦克风 */
@@ -99,7 +99,7 @@ fun CortanaSearchBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .height(56.dp)
             .background(CortanaColors.SearchBarBackground),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -108,12 +108,13 @@ fun CortanaSearchBar(
             onValueChange = onValueChange,
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 14.dp),
             enabled = enabled && !isListening && !isRunning && !voiceBusy,
             singleLine = true,
             textStyle = androidx.compose.ui.text.TextStyle(
                 color = CortanaColors.SearchBarText,
-                fontSize = 16.sp,
+                fontSize = JoyTextSizes.Body,
+                lineHeight = JoyTextSizes.BodyLineHeight,
             ),
             cursorBrush = SolidColor(CortanaColors.Accent),
             decorationBox = { inner ->
@@ -122,7 +123,8 @@ fun CortanaSearchBar(
                         Text(
                             text = placeholder,
                             color = CortanaColors.OnBackgroundMuted,
-                            fontSize = 16.sp,
+                            fontSize = JoyTextSizes.Body,
+                            lineHeight = JoyTextSizes.BodyLineHeight,
                         )
                     }
                     inner()
@@ -132,7 +134,7 @@ fun CortanaSearchBar(
 
         Box(
             modifier = Modifier
-                .width(48.dp)
+                .width(56.dp)
                 .fillMaxHeight()
                 .background(
                     if (actionEnabled) CortanaColors.Accent else CortanaColors.Accent.copy(alpha = 0.45f),
@@ -151,7 +153,7 @@ fun CortanaSearchBar(
                 contentDescription = actionDescription,
                 // 动作键始终蓝底，固定用白图标，避免随主题 OnBackground 反色后「看起来没切换」
                 tint = Color.White,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(26.dp),
             )
         }
     }

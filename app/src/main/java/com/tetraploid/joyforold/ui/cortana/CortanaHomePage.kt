@@ -29,17 +29,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.agent.AgentUiState
 import com.tetraploid.joyforold.speech.api.VoiceInteractionState
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
-private val CortanaBottomDockReservedHeight = 180.dp
+private val CortanaBottomDockReservedHeight = 220.dp
 
 private val fallbackSuggestions = listOf(
     "我要回家",
     "帮我读一下未读消息",
-    "几点了",
+    "现在几点了",
     "今天天气怎么样",
     "打电话给女儿",
 )
@@ -67,16 +67,16 @@ fun CortanaHomePage(
     var selectedCategory by rememberSaveable { mutableStateOf<CortanaSearchCategory?>(null) }
     var expandedHints by rememberSaveable { mutableStateOf(false) }
     val suggestionChips = uiState.suggestionChips.ifEmpty { fallbackSuggestions }
-    val primarySuggestion = suggestionChips.firstOrNull() ?: "发送消息给家人"
+    val primarySuggestion = suggestionChips.firstOrNull() ?: "给家人发消息"
     val dockSuggestions = suggestionChips.drop(1).ifEmpty { fallbackSuggestions.drop(1) }
 
     val greeting = when {
-        uiState.isRunning -> "正在为您处理…"
+        uiState.isRunning -> "正在帮您处理，请稍候"
         uiState.isListening ||
-            uiState.voiceInteractionState == VoiceInteractionState.Listening -> "我在听，请说…"
-        uiState.waitingForUserConfirm -> "请说出或点选您的选择"
-        uiState.voiceInteractionState == VoiceInteractionState.SpeakingPrompt -> "请听我说…"
-        else -> "嗨，在想什么呢？"
+            uiState.voiceInteractionState == VoiceInteractionState.Listening -> "我在听，请慢慢说"
+        uiState.waitingForUserConfirm -> "请说出您的选择，或点下面的按钮"
+        uiState.voiceInteractionState == VoiceInteractionState.SpeakingPrompt -> "请听我说"
+        else -> "您好，需要我帮什么忙？"
     }
 
     val voiceListening = uiState.isListening ||
@@ -123,16 +123,18 @@ fun CortanaHomePage(
                     if (!uiState.accessibilityEnabled) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "请先在「设置」页开启无障碍服务（若曾强制停止本应用，需重新开启）",
+                            text = "还差一步：请到「设置」页打开无障碍服务。\n如果刚才强制停止过本应用，需要重新打开一次。",
                             color = CortanaColors.Error,
-                            fontSize = 13.sp,
+                            fontSize = JoyTextSizes.Caption,
+                            lineHeight = JoyTextSizes.CaptionLineHeight,
                         )
                     } else if (!uiState.accessibilityServiceConnected) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "无障碍已开启，正在连接服务…",
+                            text = "无障碍已打开，正在连接，请稍候…",
                             color = CortanaColors.OnBackgroundSecondary,
-                            fontSize = 13.sp,
+                            fontSize = JoyTextSizes.Caption,
+                            lineHeight = JoyTextSizes.CaptionLineHeight,
                         )
                     }
                 }
@@ -175,12 +177,13 @@ fun CortanaHomePage(
                         if (!expandedHints) {
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "查看所有提示",
+                                text = "查看更多常用说法",
                                 color = CortanaColors.OnBackgroundSecondary,
-                                fontSize = 14.sp,
+                                fontSize = JoyTextSizes.BodySecondary,
+                                lineHeight = JoyTextSizes.BodyLineHeight,
                                 modifier = Modifier
                                     .clickable { expandedHints = true }
-                                    .padding(vertical = 4.dp),
+                                    .padding(vertical = 8.dp),
                             )
                         }
                     }
@@ -189,9 +192,10 @@ fun CortanaHomePage(
                 if (uiState.speechText.isNotBlank() && !uiState.waitingForUserConfirm) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "「${uiState.speechText}」",
+                        text = "您说的是：「${uiState.speechText}」",
                         color = CortanaColors.OnBackgroundSecondary,
-                        fontSize = 14.sp,
+                        fontSize = JoyTextSizes.BodySecondary,
+                        lineHeight = JoyTextSizes.BodyLineHeight,
                         modifier = Modifier.padding(horizontal = 20.dp),
                     )
                 }
@@ -241,20 +245,21 @@ private fun SuggestionQuote(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Icon(
             imageVector = Icons.Outlined.Email,
             contentDescription = null,
             tint = CortanaColors.OnBackground,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(22.dp),
         )
         Text(
-            text = "「$text」",
+            text = "试试说：「$text」",
             color = CortanaColors.OnBackground,
-            fontSize = 15.sp,
+            fontSize = JoyTextSizes.Body,
+            lineHeight = JoyTextSizes.BodyLineHeight,
         )
     }
 }
@@ -271,10 +276,14 @@ private fun RowActions(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         TextButton(onClick = { if (isPaused) onResume() else onPause() }) {
-            Text(if (isPaused) "继续" else "暂停", color = CortanaColors.AccentMuted)
+            Text(
+                if (isPaused) "继续" else "暂停",
+                color = CortanaColors.AccentMuted,
+                fontSize = JoyTextSizes.Label,
+            )
         }
         TextButton(onClick = onCancel) {
-            Text("停止", color = CortanaColors.Error)
+            Text("停止", color = CortanaColors.Error, fontSize = JoyTextSizes.Label)
         }
     }
 }

@@ -6,29 +6,32 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// Set of Material typography styles to start with
+/** Material3 字阶整体放大，默认跟随长辈可读性约定。 */
 val Typography = Typography(
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
-    )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
+    displayLarge = JoyTextStyles.Display,
+    displayMedium = JoyTextStyles.Title,
+    displaySmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
+        fontSize = JoyTextSizes.TitleCompact,
+        lineHeight = JoyTextSizes.TitleLineHeight,
+        letterSpacing = 0.1.sp,
+    ),
+    headlineLarge = JoyTextStyles.Title,
+    headlineMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = JoyTextSizes.TitleCompact,
+        lineHeight = JoyTextSizes.TitleLineHeight,
+    ),
+    headlineSmall = JoyTextStyles.Label,
+    titleLarge = JoyTextStyles.Title,
+    titleMedium = JoyTextStyles.Label,
+    titleSmall = JoyTextStyles.Caption,
+    bodyLarge = JoyTextStyles.Body,
+    bodyMedium = JoyTextStyles.BodySecondary,
+    bodySmall = JoyTextStyles.Caption,
+    labelLarge = JoyTextStyles.Label,
+    labelMedium = JoyTextStyles.Caption,
+    labelSmall = JoyTextStyles.Hint,
 )

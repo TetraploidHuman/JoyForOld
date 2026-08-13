@@ -25,6 +25,7 @@ import com.tetraploid.joyforold.ui.cortana.CortanaHeroHeader
 import com.tetraploid.joyforold.ui.cortana.CortanaOrbMood
 import com.tetraploid.joyforold.ui.cortana.CortanaSearchBar
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 import kotlinx.coroutines.delay
 
 fun shouldShowOverlayDialog(
@@ -90,15 +91,15 @@ fun FloatingOverlayContent(
         uiState.isListening && uiState.speechText.isNotBlank() ->
             uiState.speechText
         uiState.voiceInteractionState == VoiceInteractionState.SpeakingPrompt ->
-            "请听我说…"
+            "请听我说"
         uiState.isListening ->
-            "我在听，请说…"
+            "我在听，请慢慢说"
         uiState.voiceInteractionState == VoiceInteractionState.Processing ->
-            "正在处理…"
+            "正在处理，请稍候"
         uiState.isRunning ->
-            "正在为您处理…"
+            "正在帮您处理，请稍候"
         else ->
-            "有什么可以帮您？"
+            "您好，需要我帮什么忙？"
     }
 
     Column(
@@ -164,7 +165,8 @@ fun FloatingOverlayContent(
                     Text(
                         text = "「${uiState.speechText}」",
                         color = CortanaColors.OnBackgroundSecondary,
-                        fontSize = 13.sp,
+                        fontSize = JoyTextSizes.BodySecondary,
+                        lineHeight = JoyTextSizes.BodyLineHeight,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

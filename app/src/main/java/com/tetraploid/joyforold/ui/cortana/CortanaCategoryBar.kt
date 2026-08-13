@@ -20,8 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
 enum class CortanaSearchCategory(val label: String, val prefix: String) {
     Apps("应用", "打开应用 "),
@@ -37,9 +37,10 @@ fun CortanaCategoryBar(
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = "搜索",
+            text = "快捷搜索",
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
+            lineHeight = JoyTextSizes.CaptionLineHeight,
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
         )
         Row(
@@ -69,25 +70,25 @@ private fun CategoryTile(
 ) {
     Column(
         modifier = modifier
-            .height(72.dp)
+            .height(84.dp)
             .background(
                 if (selected) CortanaColors.SurfaceElevated else CortanaColors.Surface,
             )
             .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
+            .padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
             tint = if (selected) CortanaColors.Accent else CortanaColors.OnBackground,
-            modifier = Modifier.size(28.dp),
+            modifier = Modifier.size(32.dp),
         )
         Text(
             text = label,
             color = if (selected) CortanaColors.AccentMuted else CortanaColors.OnBackgroundSecondary,
-            fontSize = 13.sp,
+            fontSize = JoyTextSizes.Caption,
         )
     }
 }
@@ -107,17 +108,18 @@ fun CortanaExpandHintBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(40.dp)
+            .height(48.dp)
             .background(CortanaColors.SurfaceElevated)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "Cortana 还可以帮你做这些…",
+            text = "还可以帮您做这些",
             color = CortanaColors.OnBackgroundSecondary,
-            fontSize = 13.sp,
+            fontSize = JoyTextSizes.Caption,
+            lineHeight = JoyTextSizes.CaptionLineHeight,
         )
         ExpandChevronIcon(
             expanded = expanded,
@@ -162,11 +164,12 @@ fun CortanaBottomDock(
                     Text(
                         text = suggestion,
                         color = CortanaColors.OnBackgroundSecondary,
-                        fontSize = 14.sp,
+                        fontSize = JoyTextSizes.BodySecondary,
+                        lineHeight = JoyTextSizes.BodyLineHeight,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onSuggestionClick(suggestion) }
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 8.dp),
                     )
                 }
             }
@@ -198,7 +201,7 @@ fun CortanaBottomDock(
                 CortanaSearchCategory.Apps -> "搜索应用…"
                 CortanaSearchCategory.Documents -> "搜索文档…"
                 CortanaSearchCategory.Web -> "搜索网页…"
-                null -> "在此输入或说话…"
+                null -> "点这里输入，或按麦克风说话"
             },
         )
     }

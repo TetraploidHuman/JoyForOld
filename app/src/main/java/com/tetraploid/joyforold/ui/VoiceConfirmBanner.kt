@@ -14,6 +14,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
 @Composable
 fun VoiceConfirmBanner(
@@ -34,26 +35,32 @@ fun VoiceConfirmBanner(
         Text(
             text = prompt,
             color = CortanaColors.OnBackground,
-            fontSize = 16.sp,
+            fontSize = JoyTextSizes.Body,
         )
         Text(
             text = if (isListening) {
-                "正在听您回答，说完停顿即可自动继续"
+                "我在听您说话。说完后稍停一下，就会继续。"
             } else {
-                "正在准备麦克风..."
+                "正在打开麦克风，请稍候…"
             },
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 13.sp,
+            fontSize = JoyTextSizes.Caption,
+            lineHeight = JoyTextSizes.CaptionLineHeight,
         )
         if (speechText.isNotBlank()) {
             Text(
-                text = "识别：$speechText",
+                text = "听到了：$speechText",
                 color = CortanaColors.AccentMuted,
-                fontSize = 13.sp,
+                fontSize = JoyTextSizes.Caption,
+                lineHeight = JoyTextSizes.CaptionLineHeight,
             )
         }
         TextButton(onClick = onCancel) {
-            Text("取消本次确认", color = CortanaColors.OnBackgroundSecondary)
+            Text(
+                "先取消",
+                color = CortanaColors.OnBackgroundSecondary,
+                fontSize = JoyTextSizes.Label,
+            )
         }
     }
 }

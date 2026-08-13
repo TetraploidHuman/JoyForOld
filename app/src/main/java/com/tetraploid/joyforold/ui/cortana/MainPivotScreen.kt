@@ -133,8 +133,8 @@ fun MainPivotScreen(
     fun showAccessibilityDialog() {
         permissionDialog = PermissionDialogRequest(
             kind = PermissionDialogKind.Accessibility,
-            title = "需要无障碍权限",
-            message = "执行语音或文字指令需要开启「JoyForOld」无障碍服务。若要操作微信，请再到设置 → 组件里启用「微信支持」（系统无障碍中打开「JoyForOld · 微信支持组件」）。",
+            title = "需要打开无障碍",
+            message = "助手帮您点屏幕、发微信时，需要打开「JoyForOld」无障碍服务。\n\n若要操作微信，请再到「设置 → 组件」里打开「微信支持」。",
         )
     }
 
@@ -156,9 +156,9 @@ fun MainPivotScreen(
         } else {
             showRecordAudioDialog(
                 if (uiState.waitingForUserConfirm) {
-                    "语音回答需要麦克风权限，用于聆听您的选择。"
+                    "要用语音回答，需要允许使用麦克风。"
                 } else {
-                    "语音输入需要麦克风权限，用于聆听您的指令。"
+                    "要用语音下指令，需要允许使用麦克风。"
                 },
             ) {
                 pendingVoiceInputAfterPermission = true
@@ -187,7 +187,7 @@ fun MainPivotScreen(
 
     fun handleWakeWordToggle(enabled: Boolean) {
         if (enabled && !uiState.recordAudioGranted) {
-            showRecordAudioDialog("开启语音唤醒需要麦克风权限，用于聆听唤醒词和您的指令。") {
+            showRecordAudioDialog("要用语音唤醒，需要允许使用麦克风。") {
                 pendingEnableWakeWordAfterPermission = true
             }
             return
@@ -309,30 +309,19 @@ fun MainPivotScreen(
                         onDarkThemeChange = onDarkThemeChange,
                         overlayRunning = overlayRunning.value,
                         onRequestAudioPermission = {
-                            showRecordAudioDialog("语音识别与本地唤醒需要麦克风权限。") {}
+                            showRecordAudioDialog("语音识别和语音唤醒需要麦克风。") {}
                         },
                         onRequestContactsPermission = {
                             permissionDialog = PermissionDialogRequest(
                                 kind = PermissionDialogKind.ReadContacts,
-                                title = "需要联系人权限",
-                                message = "读取联系人可帮助助手按姓名拨打电话或发消息。",
+                                title = "需要读取联系人",
+                                message = "允许后，助手才能按姓名帮您打电话或发消息。",
                             )
                         },
                         onToggleOverlay = { running -> overlayRunning.value = running },
-                        onUpdateApiKey = viewModel::updateApiKey,
-                        onSaveApiKey = viewModel::saveApiKey,
-                        onUpdateAsrApiKey = viewModel::updateAsrApiKey,
-                        onUpdateAsrAppId = viewModel::updateAsrAppId,
-                        onUpdateAsrAccessToken = viewModel::updateAsrAccessToken,
-                        onUpdateAsrResourceId = viewModel::updateAsrResourceId,
-                        onSaveAsrConfig = viewModel::saveAsrConfig,
                         onUpdateWakeWordPhrase = viewModel::updateWakeWordPhrase,
-                        onUpdateWakeWordScore = viewModel::updateWakeWordKeywordScore,
-                        onUpdateWakeWordThreshold = viewModel::updateWakeWordKeywordThreshold,
                         onApplyWakeWordPreset = viewModel::applyWakeWordPreset,
                         onSetWakeWordEnabled = { enabled -> handleWakeWordToggle(enabled) },
-                        onSetWakeWordSileroVad = viewModel::setWakeWordSileroVadEnabled,
-                        onSetWakeWordSecondStage = viewModel::setWakeWordSecondStageEnabled,
                         onSaveWakeWordConfig = viewModel::saveWakeWordConfig,
                         onSetCloudContextConsent = { granted ->
                             viewModel.setCloudContextConsent(granted)
@@ -343,15 +332,6 @@ fun MainPivotScreen(
                         onTestWakeWord = viewModel::testWakeWord,
                         onStartCalibration = viewModel::startWakeWordCalibration,
                         onRecordCalibrationStep = viewModel::recordCalibrationStep,
-                        onUpdateCommand = viewModel::updateCommand,
-                        onRunAgent = viewModel::runAgent,
-                        onPreviewPage = viewModel::previewPageTree,
-                        onSetUiTreeLogcatEnabled = viewModel::setUiTreeLogcatEnabled,
-                        onSetVisionDebugEnabled = { enabled ->
-                            viewModel.setVisionDebugEnabled(enabled)
-                        },
-                        onRefreshVisionDebug = viewModel::refreshVisionDebugFrames,
-                        onClearVisionDebug = viewModel::clearVisionDebugFrames,
                     )
                     2 -> CollaborationPage(
                         uiState = uiState,

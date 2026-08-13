@@ -27,6 +27,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
 /**
  * Windows 10 Mobile TextBox: flat field with accent underline on focus.
@@ -89,7 +90,7 @@ fun W10mTextField(
                 color = if (enabled) CortanaColors.OnBackground else CortanaColors.OnBackgroundMuted,
                 fontSize = W10mTokens.BodySize,
                 fontWeight = FontWeight.Normal,
-                lineHeight = 22.sp,
+                lineHeight = JoyTextSizes.BodyLineHeight,
             ),
             cursorBrush = SolidColor(CortanaColors.Accent),
             visualTransformation = visualTransformation,

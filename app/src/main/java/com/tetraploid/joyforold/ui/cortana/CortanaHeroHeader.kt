@@ -21,9 +21,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
-private val IdleOrbSize = 96.dp
-private val CompactOrbSize = 64.dp
+private val IdleOrbSize = 104.dp
+private val CompactOrbSize = 72.dp
 
 private fun lerpDp(start: Dp, end: Dp, fraction: Float): Dp = start + (end - start) * fraction
 
@@ -41,11 +42,13 @@ fun CortanaHeroHeader(
         label = "heroProgress",
     )
     val topPadding = lerpDp(28.dp, 16.dp, progress)
+    val idleGreetingSp = JoyTextSizes.Title.value
+    val compactGreetingSp = JoyTextSizes.TitleCompact.value
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .height(lerpDp(IdleOrbSize + 52.dp, CompactOrbSize + 40.dp, progress)),
+            .height(lerpDp(IdleOrbSize + 64.dp, CompactOrbSize + 48.dp, progress)),
     ) {
         val orbSize = lerpDp(IdleOrbSize, CompactOrbSize, progress)
         val centeredOrbX = (maxWidth - orbSize) / 2
@@ -61,7 +64,8 @@ fun CortanaHeroHeader(
         Text(
             text = greeting,
             color = CortanaColors.AccentMuted,
-            fontSize = (18f + (17f - 18f) * progress).sp,
+            fontSize = (idleGreetingSp + (compactGreetingSp - idleGreetingSp) * progress).sp,
+            lineHeight = JoyTextSizes.TitleLineHeight,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
@@ -72,7 +76,7 @@ fun CortanaHeroHeader(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset(y = topPadding + (orbSize - 18.dp) / 2)
+                .offset(y = topPadding + (orbSize - 22.dp) / 2)
                 .alpha(progress),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -80,7 +84,8 @@ fun CortanaHeroHeader(
             Text(
                 text = greeting,
                 color = CortanaColors.AccentMuted,
-                fontSize = 17.sp,
+                fontSize = JoyTextSizes.TitleCompact,
+                lineHeight = JoyTextSizes.TitleLineHeight,
                 modifier = Modifier.weight(1f),
             )
         }

@@ -31,6 +31,7 @@ import com.tetraploid.joyforold.assist.protocol.AssistRole
 import com.tetraploid.joyforold.assist.protocol.BindingDto
 import com.tetraploid.joyforold.collaboration.AssistSessionPhase
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
 @Composable
 fun CollaborationPage(
@@ -91,7 +92,7 @@ fun CollaborationPage(
         Text(
             text = "家人远程协助",
             color = CortanaColors.Accent,
-            fontSize = 13.sp,
+            fontSize = JoyTextSizes.Caption,
             letterSpacing = 1.sp,
         )
         Text(
@@ -111,7 +112,7 @@ fun CollaborationPage(
                     }
             },
             color = CortanaColors.OnBackgroundMuted,
-            fontSize = 13.sp,
+            fontSize = JoyTextSizes.Caption,
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -158,7 +159,7 @@ fun CollaborationPage(
             Text(
                 text = uiState.assistStatusMessage,
                 color = CortanaColors.AccentMuted,
-                fontSize = 13.sp,
+                fontSize = JoyTextSizes.Caption,
             )
         }
 
@@ -196,7 +197,7 @@ fun CollaborationPage(
         Text(
             text = "家人联系人 / 预设指令",
             color = CortanaColors.Accent,
-            fontSize = 13.sp,
+            fontSize = JoyTextSizes.Caption,
             letterSpacing = 1.sp,
             modifier = Modifier.padding(top = 8.dp),
         )
@@ -274,13 +275,13 @@ private fun ElderAssistSection(
                 Text(
                     text = uiState.assistPairCode.chunked(1).joinToString(" "),
                     color = CortanaColors.OnBackground,
-                    fontSize = 36.sp,
+                    fontSize = 40.sp,
                 )
             } else if (uiState.assistPhase == AssistSessionPhase.ACTIVE) {
                 Text(
                     text = "家人已连接",
                     color = CortanaColors.OnBackground,
-                    fontSize = 18.sp,
+                    fontSize = JoyTextSizes.Body,
                 )
             }
             OutlinedButton(onClick = onEndAssist, modifier = Modifier.fillMaxWidth()) {
@@ -309,7 +310,7 @@ private fun CaregiverAssistSection(
     onEndAssist: () -> Unit,
 ) {
     if (uiState.assistBindings.isNotEmpty()) {
-        Text("已绑定家人", color = CortanaColors.OnBackgroundMuted, fontSize = 13.sp)
+        Text("已绑定家人", color = CortanaColors.OnBackgroundMuted, fontSize = JoyTextSizes.Caption)
         uiState.assistBindings.forEach { binding ->
             val label = binding.elderDisplayName.ifBlank { "老人" }
             Row(
@@ -353,7 +354,7 @@ private fun CaregiverAssistSection(
             Text(
                 text = formatAssistStreamStats(uiState.assistStreamFps, uiState.assistStreamLatencyMs),
                 color = CortanaColors.AccentMuted,
-                fontSize = 12.sp,
+                fontSize = JoyTextSizes.Caption,
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -430,6 +431,6 @@ private fun AssistModeBanner(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = CortanaColors.Accent, fontSize = 14.sp)
+        Text(label, color = CortanaColors.Accent, fontSize = JoyTextSizes.BodySecondary)
     }
 }

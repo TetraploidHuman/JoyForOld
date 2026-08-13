@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.agent.AgentUiState
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 import kotlin.math.roundToInt
 
 @Composable
@@ -56,16 +57,16 @@ fun AssistRemoteScreenPage(
                 Text(
                     text = "远程协助",
                     color = CortanaColors.Accent,
-                    fontSize = 14.sp,
+                    fontSize = JoyTextSizes.BodySecondary,
                 )
                 Text(
                     text = uiState.assistPeerDisplayName.ifBlank { "老人手机" },
                     color = CortanaColors.OnBackgroundMuted,
-                    fontSize = 12.sp,
+                    fontSize = JoyTextSizes.Caption,
                 )
             }
             TextButton(onClick = onEndAssist) {
-                Text("结束", color = CortanaColors.AccentMuted, fontSize = 13.sp)
+                Text("结束", color = CortanaColors.AccentMuted, fontSize = JoyTextSizes.Caption)
             }
         }
 
@@ -124,7 +125,7 @@ fun AssistRemoteScreenPage(
             Text(
                 text = uiState.assistStatusMessage,
                 color = CortanaColors.AccentMuted,
-                fontSize = 12.sp,
+                fontSize = JoyTextSizes.Caption,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -142,7 +143,7 @@ fun AssistStreamStatsOverlay(
     Text(
         text = formatAssistStreamStats(fps, latencyMs),
         color = Color.White,
-        fontSize = 11.sp,
+        fontSize = JoyTextSizes.Hint,
         modifier = modifier
             .background(Color(0x99000000), RoundedCornerShape(6.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp),

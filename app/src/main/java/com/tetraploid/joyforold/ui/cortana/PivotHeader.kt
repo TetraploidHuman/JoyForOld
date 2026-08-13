@@ -16,13 +16,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 data class PivotTab(val title: String)
 
 val MainPivotTabs = listOf(
-    PivotTab("Cortana"),
+    PivotTab("助手"),
     PivotTab("设置"),
     PivotTab("协作"),
     PivotTab("关于"),
@@ -39,14 +40,14 @@ fun PivotHeader(
         modifier = modifier
             .fillMaxWidth()
             .background(CortanaColors.Background)
-            .padding(vertical = 14.dp),
+            .padding(vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
             modifier = Modifier
                 .weight(3f)
                 .padding(start = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             tabs.forEachIndexed { index, tab ->
@@ -56,15 +57,15 @@ fun PivotHeader(
                         .clickable {
                             scope.launch { pagerState.animateScrollToPage(index) }
                         }
-                        .padding(vertical = 6.dp),
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = tab.title,
                         color = if (selected) CortanaColors.Accent else CortanaColors.OnBackgroundMuted,
-                        fontSize = 16.sp,
+                        fontSize = JoyTextSizes.Label,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        letterSpacing = 0.4.sp,
+                        letterSpacing = 0.3.sp,
                     )
                 }
             }

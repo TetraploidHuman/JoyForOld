@@ -17,11 +17,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.agent.ConversationCard
 import com.tetraploid.joyforold.agent.ConversationCardKind
 import com.tetraploid.joyforold.ui.theme.CortanaColorPalette
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 import com.tetraploid.joyforold.ui.theme.LocalCortanaColors
 
 @Composable
@@ -40,7 +40,7 @@ fun ConversationCardList(
     if (cards.isEmpty()) return
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         cards.forEach { card ->
             ConversationCardItem(
@@ -114,19 +114,21 @@ private fun ConversationCardItem(
         modifier = modifier
             .fillMaxWidth()
             .background(background)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = card.title,
             color = kindTitleColor(card.kind, palette),
-            fontSize = 12.sp,
+            fontSize = JoyTextSizes.Caption,
+            lineHeight = JoyTextSizes.CaptionLineHeight,
         )
         if (card.body.isNotBlank()) {
             Text(
                 text = card.body,
                 color = CortanaColors.OnBackground,
-                fontSize = 15.sp,
+                fontSize = JoyTextSizes.Body,
+                lineHeight = JoyTextSizes.BodyLineHeight,
             )
         }
 
@@ -137,23 +139,29 @@ private fun ConversationCardItem(
                     onClick = { if (intentId.isNotBlank()) onDisambiguationSelect(intentId) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(label, color = CortanaColors.AccentMuted)
+                    Text(
+                        label,
+                        color = CortanaColors.AccentMuted,
+                        fontSize = JoyTextSizes.Label,
+                    )
                 }
             }
             Text(
                 text = if (isListening) {
-                    "正在听您说话，可说「第一个」或学校/店名"
+                    "我在听。您可以说「第一个」，或直接说名字。"
                 } else {
-                    "请直接说话或点选上面一项"
+                    "请说话，或点上面的一项。"
                 },
                 color = CortanaColors.OnBackgroundMuted,
-                fontSize = 13.sp,
+                fontSize = JoyTextSizes.Caption,
+                lineHeight = JoyTextSizes.CaptionLineHeight,
             )
             if (speechText.isNotBlank()) {
                 Text(
-                    text = "识别：$speechText",
+                    text = "听到了：$speechText",
                     color = CortanaColors.AccentMuted,
-                    fontSize = 13.sp,
+                    fontSize = JoyTextSizes.Caption,
+                    lineHeight = JoyTextSizes.CaptionLineHeight,
                 )
             }
         } else {
@@ -161,7 +169,8 @@ private fun ConversationCardItem(
                 Text(
                     text = line,
                     color = CortanaColors.OnBackgroundSecondary,
-                    fontSize = 14.sp,
+                    fontSize = JoyTextSizes.BodySecondary,
+                    lineHeight = JoyTextSizes.BodyLineHeight,
                 )
             }
         }
@@ -174,13 +183,14 @@ private fun ConversationCardItem(
             if (expandedDetails) {
                 Column(
                     modifier = Modifier.padding(start = 8.dp, top = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     card.detailBullets.forEach { line ->
                         Text(
                             text = line,
                             color = CortanaColors.OnBackgroundMuted,
-                            fontSize = 12.sp,
+                            fontSize = JoyTextSizes.Hint,
+                            lineHeight = JoyTextSizes.CaptionLineHeight,
                         )
                     }
                 }
@@ -189,19 +199,25 @@ private fun ConversationCardItem(
 
         if (card.kind == ConversationCardKind.Confirm && !card.showBinaryActions) {
             Text(
-                text = if (isListening) "正在听您说话，说完停顿即可继续" else "请直接说话或输入回复",
+                text = if (isListening) {
+                    "我在听。说完后稍停一下，就会继续。"
+                } else {
+                    "请说话回复，或直接输入文字。"
+                },
                 color = CortanaColors.OnBackgroundMuted,
-                fontSize = 13.sp,
+                fontSize = JoyTextSizes.Caption,
+                lineHeight = JoyTextSizes.CaptionLineHeight,
             )
             if (speechText.isNotBlank()) {
                 Text(
-                    text = "识别：$speechText",
+                    text = "听到了：$speechText",
                     color = CortanaColors.AccentMuted,
-                    fontSize = 13.sp,
+                    fontSize = JoyTextSizes.Caption,
+                    lineHeight = JoyTextSizes.CaptionLineHeight,
                 )
             }
             TextButton(onClick = onDismissConfirm) {
-                Text("取消", color = CortanaColors.OnBackgroundSecondary)
+                Text("取消", color = CortanaColors.OnBackgroundSecondary, fontSize = JoyTextSizes.Label)
             }
         }
 
@@ -213,24 +229,28 @@ private fun ConversationCardItem(
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 OutlinedButton(
                     onClick = if (card.kind == ConversationCardKind.Undo) onUndo else onBinaryConfirm,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(confirmLabel, color = CortanaColors.AccentMuted)
+                    Text(confirmLabel, color = CortanaColors.AccentMuted, fontSize = JoyTextSizes.Label)
                 }
                 OutlinedButton(
                     onClick = if (card.kind == ConversationCardKind.Undo) onDismissUndo else onBinaryCancel,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text(cancelLabel, color = CortanaColors.Error)
+                    Text(cancelLabel, color = CortanaColors.Error, fontSize = JoyTextSizes.Label)
                 }
             }
             if (card.kind != ConversationCardKind.Undo) {
                 TextButton(onClick = onDismissConfirm) {
-                    Text("取消本次确认", color = CortanaColors.OnBackgroundSecondary)
+                    Text(
+                        "先不确认了",
+                        color = CortanaColors.OnBackgroundSecondary,
+                        fontSize = JoyTextSizes.Caption,
+                    )
                 }
             }
         }

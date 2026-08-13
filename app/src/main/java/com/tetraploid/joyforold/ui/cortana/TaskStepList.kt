@@ -26,6 +26,7 @@ import com.tetraploid.joyforold.agent.TaskStepItem
 import com.tetraploid.joyforold.agent.TaskStepStatus
 import com.tetraploid.joyforold.agent.TaskStepTracker
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
 @Composable
 fun TaskModePanel(
@@ -59,12 +60,12 @@ fun TaskModePanel(
             Text(
                 text = header?.takeIf { it.isNotBlank() } ?: "任务进度",
                 color = CortanaColors.OnBackgroundSecondary,
-                fontSize = 13.sp,
+                fontSize = JoyTextSizes.Caption,
             )
             Text(
                 text = "$completed/${displayPhases.size}",
                 color = CortanaColors.OnBackgroundMuted,
-                fontSize = 12.sp,
+                fontSize = JoyTextSizes.Caption,
             )
         }
 
@@ -91,7 +92,7 @@ fun TaskModePanel(
                         TaskStepRow(
                             label = step.label,
                             status = step.status,
-                            fontSize = 12.sp,
+                            fontSize = JoyTextSizes.Caption,
                             iconSize = 14.dp,
                             muted = true,
                         )
@@ -134,7 +135,7 @@ fun TaskStepList(
                     Text(
                         text = header,
                         color = CortanaColors.OnBackgroundSecondary,
-                        fontSize = 13.sp,
+                        fontSize = JoyTextSizes.Caption,
                     )
                 } else {
                     Box(modifier = Modifier.weight(1f))
@@ -142,7 +143,7 @@ fun TaskStepList(
                 Text(
                     text = "$completed/${steps.size}",
                     color = CortanaColors.OnBackgroundMuted,
-                    fontSize = 12.sp,
+                    fontSize = JoyTextSizes.Caption,
                 )
             }
         }
@@ -157,7 +158,7 @@ fun TaskStepList(
 private fun TaskStepRow(
     label: String,
     status: TaskStepStatus,
-    fontSize: androidx.compose.ui.unit.TextUnit = 14.sp,
+    fontSize: androidx.compose.ui.unit.TextUnit = JoyTextSizes.BodySecondary,
     iconSize: androidx.compose.ui.unit.Dp = 16.dp,
     muted: Boolean = false,
 ) {

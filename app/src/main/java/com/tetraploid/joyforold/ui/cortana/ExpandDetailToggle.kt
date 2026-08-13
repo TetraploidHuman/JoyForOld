@@ -14,8 +14,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tetraploid.joyforold.ui.theme.CortanaColors
+import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
 @Composable
 fun ExpandDetailToggle(
@@ -35,13 +35,14 @@ fun ExpandDetailToggle(
         Text(
             text = if (expanded) expandedLabel else collapsedLabel,
             color = CortanaColors.AccentMuted,
-            fontSize = 13.sp,
+            fontSize = JoyTextSizes.Caption,
+            lineHeight = JoyTextSizes.CaptionLineHeight,
         )
         Icon(
             imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
             contentDescription = if (expanded) expandedLabel else collapsedLabel,
             tint = CortanaColors.AccentMuted,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(22.dp),
         )
     }
 }
