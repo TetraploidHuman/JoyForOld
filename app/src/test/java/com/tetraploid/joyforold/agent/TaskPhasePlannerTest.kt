@@ -57,10 +57,12 @@ class TaskPhasePlannerTest {
 
     @Test
     fun plan_fromTemplate_sendToFamily() {
+        // 未点名 App 的「发消息给家人」不再模板写死微信，交给后续 LLM 选型
         val phases = TaskPhasePlanner.planFromCommand("发送消息给家人")
 
         assertEquals(1, phases.size)
-        assertEquals("打开微信", phases[0].label)
+        assertEquals("发送消息给家人", phases[0].label)
+        assertFalse(phases.any { it.label.contains("打开微信") })
     }
 
     @Test

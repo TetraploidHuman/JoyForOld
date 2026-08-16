@@ -153,7 +153,8 @@ object UiNodeHeuristics {
             }.trim()
         }
 
-        val aggregated = joinDescendantLabels(descendantHumanLabels)
+        // 可点击标签优先取首个有效人名/短标题，避免会话行把「最后一条消息」拼进来
+        val aggregated = joinDescendantLabels(descendantHumanLabels, maxParts = 1)
         if (aggregated.isNotBlank()) return aggregated
 
         return when {
