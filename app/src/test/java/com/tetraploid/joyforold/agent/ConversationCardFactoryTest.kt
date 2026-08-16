@@ -64,16 +64,19 @@ class ConversationCardFactoryTest {
     }
 
     @Test
-    fun overlaySessionCards_includePlanProgress_inA11yMode() {
+    fun overlaySessionCards_excludePlanAndProgress() {
         val plan = ConversationCardFactory.plan(
             listOf(TaskPhaseItem(1, "打开设置", TaskStepStatus.InProgress)),
         )!!
         val progress = ConversationCardFactory.progress("执行：click WLAN")
+        val info = ConversationCardFactory.info("提示", "已打开设置")
         val state = AgentUiState(isRunning = true, visionAgentActive = false)
-        val cards = ConversationCardFactory.overlaySessionCards(state, listOf(plan, progress))
-        assertEquals(2, cards.size)
-        assertEquals(ConversationCardKind.Plan, cards[0].kind)
-        assertEquals(ConversationCardKind.Progress, cards[1].kind)
+        val cards = ConversationCardFactory.overlaySessionCards(
+            state,
+            listOf(plan, progress, info),
+        )
+        assertEquals(1, cards.size)
+        assertEquals(ConversationCardKind.Info, cards[0].kind)
     }
 
     @Test

@@ -18,7 +18,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tetraploid.joyforold.agent.AgentRuntime
+import com.tetraploid.joyforold.agent.ConversationCard
 import com.tetraploid.joyforold.agent.ConversationCardFactory
+import com.tetraploid.joyforold.agent.ConversationCardKind
 import com.tetraploid.joyforold.speech.api.VoiceInteractionState
 import com.tetraploid.joyforold.ui.cortana.ConversationCardList
 import com.tetraploid.joyforold.ui.cortana.CortanaHeroHeader
@@ -27,6 +29,10 @@ import com.tetraploid.joyforold.ui.cortana.CortanaSearchBar
 import com.tetraploid.joyforold.ui.theme.CortanaColors
 import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 import kotlinx.coroutines.delay
+
+/** 悬浮窗上方不展示「计划」「执行中」卡片，只保留确认等交互卡。 */
+private fun List<ConversationCard>.withoutPlanAndProgress(): List<ConversationCard> =
+    filter { it.kind != ConversationCardKind.Plan && it.kind != ConversationCardKind.Progress }
 
 fun shouldShowOverlayDialog(
     isRunning: Boolean,
@@ -83,7 +89,7 @@ fun FloatingOverlayContent(
             uiState,
             uiState.conversationCards,
         )
-    }
+    }.withoutPlanAndProgress()
 
     val interactionText = when {
         uiState.isRunning && uiState.statusMessage.isNotBlank() ->
@@ -105,7 +111,7 @@ fun FloatingOverlayContent(
     Column(
         modifier = Modifier.fillMaxWidth(),
     ) {
-        // 无障碍模式：展示计划/进度/确认等交互卡片；视觉模式不渲染，避免挡截图与误触
+        // 仅确认/消歧等交互卡；计划与「执行中」不在悬浮窗展示
         if (overlayCards.isNotEmpty()) {
             Column(
                 modifier = Modifier

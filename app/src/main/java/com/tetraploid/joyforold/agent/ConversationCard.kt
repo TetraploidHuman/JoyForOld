@@ -125,8 +125,9 @@ object ConversationCardFactory {
     }
 
     /**
-     * 悬浮层展示的会话卡片：无障碍模式显示计划/进度/确认等；视觉执行中隐藏。
-     * 等待用户确认时只突出确认/消歧卡，避免视觉闩锁或计划卡挤掉「请确认」。
+     * 悬浮层展示的会话卡片：只保留确认/消歧/预览/撤销/信息等交互卡；
+     * 不展示计划（Plan）与执行中（Progress），避免挡操作区。
+     * 视觉执行中隐藏；等待用户确认时只突出确认类卡片。
      */
     fun overlaySessionCards(
         state: AgentUiState,
@@ -151,8 +152,6 @@ object ConversationCardFactory {
     )
 
     private val OVERLAY_SESSION_KINDS = setOf(
-        ConversationCardKind.Plan,
-        ConversationCardKind.Progress,
         ConversationCardKind.Info,
         ConversationCardKind.Confirm,
         ConversationCardKind.Disambiguation,
