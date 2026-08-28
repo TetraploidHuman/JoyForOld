@@ -46,7 +46,7 @@ object CortanaPalettes {
         divider = Color(0xFF3F3F46),
         success = Color(0xFF6FCF97),
         error = Color(0xFFFF6B6B),
-        overlayBackground = Color(0xFF000000),
+        overlayBackground = Color(0xFF1F1F1F),
         stepCompleted = Color(0xFF6B6B6B),
         stepActive = Color(0xFFE0E0E0),
         stepPending = Color(0xFF5A5A5A),

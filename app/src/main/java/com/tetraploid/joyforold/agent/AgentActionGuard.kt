@@ -124,6 +124,15 @@ object AgentActionGuard {
             }
         }
 
+        if (action.action.equals("tap", ignoreCase = true) &&
+            SendIntentDetector.isSendCommand(root) &&
+            recentTypedMessageInSendFlow(session)
+        ) {
+            return maybeConfirm(session, SEND_PROMPT, needsBinaryConfirm = true) {
+                !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND)
+            }
+        }
+
         if (action.action.equals("click", ignoreCase = true)) {
             val target = action.targetText?.trim().orEmpty()
             if (sendKeywords.any { target.contains(it, ignoreCase = true) } &&
@@ -257,5 +266,14 @@ object AgentActionGuard {
             lower.contains("呼叫") || lower.contains("拨号") || lower.contains("拨打")
         val hasAction = lower.contains("打") || lower.contains("拨") || lower.contains("呼叫")
         return (hasCallCore && hasAction) || lower.contains("call")
+    }
+
+    /** 发消息流程中刚输入正文后，视觉 tap 多半是在点发送。 */
+    private fun recentTypedMessageInSendFlow(session: AgentConversationSession): Boolean {
+        return session.stepRecords.takeLast(4).any { record ->
+            record.action.action.equals("type", ignoreCase = true) &&
+                record.result.success &&
+                !record.action.inputText.isNullOrBlank()
+        }
     }
 }

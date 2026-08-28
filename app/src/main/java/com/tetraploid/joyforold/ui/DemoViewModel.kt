@@ -80,7 +80,8 @@ class DemoViewModel(
         runtime.runAgent(getApplication())
     }
 
-    fun runAgent() = runtime.runAgent(getApplication())
+    fun runAgent(resumePendingConfirm: Boolean = false) =
+        runtime.runAgent(getApplication(), resumePendingConfirm = resumePendingConfirm)
 
     fun previewPageTree() = runtime.previewPageTree()
 

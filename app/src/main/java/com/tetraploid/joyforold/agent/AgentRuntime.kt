@@ -343,6 +343,11 @@ class AgentRuntime(
 
     private fun restorePendingUiIfNeeded() {
         orchestrator.restorePendingFromDisk()
+        // 进程重启后不再弹出过期的发送确认；用户可重新下指令
+        if (orchestrator.peekPendingKind() == PendingKind.USER_CONFIRM) {
+            orchestrator.clearPendingUserReply()
+            return
+        }
         val prompt = orchestrator.peekPendingPrompt() ?: return
         _state.update {
             it.copy(
@@ -627,10 +632,11 @@ class AgentRuntime(
                 PendingKind.INTENT_DISAMBIGUATION,
             )
         when {
-            result.waitingForUserConfirm && voice?.sessionActive == true &&
-                !result.confirmPrompt.isNullOrBlank() && !deferPromptToListen -> {
-                voice.recordVoicePrompt(result.confirmPrompt)
-                voice.applyBargeInPreRoll(voice.speakPromptWithOptionalBargeIn(result.confirmPrompt))
+            result.waitingForUserConfirm && !result.confirmPrompt.isNullOrBlank() &&
+                !deferPromptToListen -> {
+                voice?.sessionActive = true
+                voice?.recordVoicePrompt(result.confirmPrompt)
+                voice?.applyBargeInPreRoll(voice.speakPromptWithOptionalBargeIn(result.confirmPrompt))
             }
             result.summary.isNotBlank() && !result.waitingForUserConfirm -> voice?.speakStatus(result.summary)
         }
@@ -1136,10 +1142,10 @@ class AgentRuntime(
                         PendingKind.INTENT_DISAMBIGUATION,
                     )
                 when {
-                    result.waitingForUserConfirm && voice?.sessionActive == true &&
-                        !result.confirmPrompt.isNullOrBlank() && !deferPromptToListen -> {
-                        voice.recordVoicePrompt(result.confirmPrompt)
-                        voice.applyBargeInPreRoll(voice.speakPromptWithOptionalBargeIn(result.confirmPrompt))
+                    result.waitingForUserConfirm && !result.confirmPrompt.isNullOrBlank() && !deferPromptToListen -> {
+                        voice?.sessionActive = true
+                        voice?.recordVoicePrompt(result.confirmPrompt)
+                        voice?.applyBargeInPreRoll(voice.speakPromptWithOptionalBargeIn(result.confirmPrompt))
                     }
                     result.waitingForUserConfirm -> Unit
                     voice?.sessionActive == true && result.summary.isNotBlank() -> {

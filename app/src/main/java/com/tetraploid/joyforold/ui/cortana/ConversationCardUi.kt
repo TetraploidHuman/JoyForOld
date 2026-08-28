@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tetraploid.joyforold.agent.ConversationCard
 import com.tetraploid.joyforold.agent.ConversationCardKind
@@ -35,12 +36,13 @@ fun ConversationCardList(
     onDisambiguationSelect: (String) -> Unit = {},
     onUndo: () -> Unit = {},
     onDismissUndo: () -> Unit = {},
+    cardSpacing: Dp = 10.dp,
     modifier: Modifier = Modifier,
 ) {
     if (cards.isEmpty()) return
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(cardSpacing),
     ) {
         cards.forEach { card ->
             ConversationCardItem(

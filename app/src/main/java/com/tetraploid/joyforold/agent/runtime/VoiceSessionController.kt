@@ -264,6 +264,21 @@ internal class VoiceSessionController(
     }
 
     fun continueConversationAfterAgentResult(application: Application, result: AgentRunResult) {
+        if (result.waitingForUserConfirm) {
+            sessionActive = true
+            mainScope.launch {
+                androidTtsOutputProvider()?.awaitIdle()
+                val kind = orchestratorBridge.peekPendingKind()
+                val isPickList = kind == PendingKind.NAV_POI_PICK ||
+                    kind == PendingKind.INTENT_DISAMBIGUATION
+                startVoiceInputInternal(
+                    confirmReplyMode = true,
+                    application = application,
+                    skipPrompt = !isPickList,
+                )
+            }
+            return
+        }
         if (!sessionActive) {
             scheduleWakeWordRestoreIfIdle()
             return
@@ -271,18 +286,6 @@ internal class VoiceSessionController(
         mainScope.launch {
             androidTtsOutputProvider()?.awaitIdle()
             when {
-                result.waitingForUserConfirm -> {
-                    sessionActive = true
-                    val kind = orchestratorBridge.peekPendingKind()
-                    val isPickList = kind == PendingKind.NAV_POI_PICK ||
-                        kind == PendingKind.INTENT_DISAMBIGUATION
-                    startVoiceInputInternal(
-                        confirmReplyMode = true,
-                        application = application,
-                        // 地点/意图候选：在这里播报并开麦，避免与 AgentRuntime 重复 TTS
-                        skipPrompt = !isPickList,
-                    )
-                }
                 result.success && shouldContinueConversation(result.summary) -> {
                     startVoiceInputInternal(
                         confirmReplyMode = false,

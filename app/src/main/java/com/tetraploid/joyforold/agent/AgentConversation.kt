@@ -60,8 +60,25 @@ class AgentConversationSession(
         val prompt = aiPrompt.trim()
         val reply = userReply.trim()
         if (prompt.isNotBlank()) {
-            answeredConfirmPrompts += prompt
-            inferConfirmTopic(prompt)?.let { resolvedConfirmTopics += it }
+            val intent = VoiceConfirmPhraseMatcher.classify(reply)
+            inferConfirmTopic(prompt)?.let { topic ->
+                when (topic) {
+                    CONFIRM_TOPIC_SEND -> {
+                        if (intent == VoiceConfirmPhraseMatcher.Intent.CONFIRM) {
+                            answeredConfirmPrompts += prompt
+                            resolvedConfirmTopics += topic
+                        }
+                    }
+                    else -> {
+                        answeredConfirmPrompts += prompt
+                        resolvedConfirmTopics += topic
+                    }
+                }
+            } ?: run {
+                if (intent != VoiceConfirmPhraseMatcher.Intent.CANCEL) {
+                    answeredConfirmPrompts += prompt
+                }
+            }
         }
         if (reply.isNotBlank()) {
             addUser(

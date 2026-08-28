@@ -181,7 +181,11 @@ fun MainPivotScreen(
                 showAccessibilityDialog()
                 return
             }
-            viewModel.runAgent()
+            if (uiState.waitingForUserConfirm) {
+                viewModel.runAgent(resumePendingConfirm = true)
+            } else {
+                viewModel.runAgent()
+            }
         }
     }
 

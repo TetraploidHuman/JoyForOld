@@ -4,9 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -109,44 +107,37 @@ fun FloatingOverlayContent(
     }
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(CortanaColors.OverlayBackground),
     ) {
         // 仅确认/消歧等交互卡；计划与「执行中」不在悬浮窗展示
         if (overlayCards.isNotEmpty()) {
-            Column(
+            ConversationCardList(
+                cards = overlayCards,
+                isListening = uiState.isListening,
+                speechText = uiState.speechText,
+                onBinaryConfirm = { agentRuntime.submitBinaryConfirm(approved = true) },
+                onBinaryCancel = { agentRuntime.submitBinaryConfirm(approved = false) },
+                onDismissConfirm = { agentRuntime.clearPendingConfirmUI() },
+                onDisambiguationSelect = agentRuntime::selectDisambiguationOption,
+                onUndo = agentRuntime::undoLastLocalAction,
+                onDismissUndo = agentRuntime::dismissUndoOffer,
+                cardSpacing = 0.dp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(CortanaColors.OverlayBackground)
                     .padding(horizontal = 8.dp, vertical = 8.dp),
-            ) {
-                ConversationCardList(
-                    cards = overlayCards,
-                    isListening = uiState.isListening,
-                    speechText = uiState.speechText,
-                    onBinaryConfirm = { agentRuntime.submitBinaryConfirm(approved = true) },
-                    onBinaryCancel = { agentRuntime.submitBinaryConfirm(approved = false) },
-                    onDismissConfirm = { agentRuntime.clearPendingConfirmUI() },
-                    onDisambiguationSelect = agentRuntime::selectDisambiguationOption,
-                    onUndo = agentRuntime::undoLastLocalAction,
-                    onDismissUndo = agentRuntime::dismissUndoOffer,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
+            )
         }
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(CortanaColors.OverlayBackground),
+                .padding(horizontal = 20.dp, vertical = if (overlayCards.isNotEmpty()) 0.dp else 16.dp)
+                .padding(bottom = if (overlayCards.isNotEmpty()) 12.dp else 0.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                CortanaHeroHeader(
+            CortanaHeroHeader(
                     greeting = interactionText,
                     orbMood = when {
                         uiState.isRunning -> CortanaOrbMood.Loading
@@ -177,26 +168,26 @@ fun FloatingOverlayContent(
                     )
                 }
 
-                if (uiState.isRunning) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            if (uiState.isRunning) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TextButton(
+                        onClick = {
+                            if (uiState.isPaused) agentRuntime.resumeAgent() else agentRuntime.pauseAgent()
+                        },
                     ) {
-                        TextButton(
-                            onClick = {
-                                if (uiState.isPaused) agentRuntime.resumeAgent() else agentRuntime.pauseAgent()
-                            },
-                        ) {
-                            Text(
-                                if (uiState.isPaused) "继续" else "暂停",
-                                color = CortanaColors.AccentMuted,
-                            )
-                        }
+                        Text(
+                            if (uiState.isPaused) "继续" else "暂停",
+                            color = CortanaColors.AccentMuted,
+                        )
                     }
                 }
             }
+        }
 
-            CortanaSearchBar(
+        CortanaSearchBar(
                 value = uiState.command,
                 onValueChange = agentRuntime::updateCommand,
                 onMicClick = onStartVoice,
@@ -220,7 +211,6 @@ fun FloatingOverlayContent(
                     !uiState.isListening,
                 enabled = !uiState.isRunning,
                 canExecute = uiState.accessibilityServiceConnected,
-            )
-        }
+        )
     }
 }

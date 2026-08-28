@@ -139,6 +139,35 @@ class AgentActionGuardTest {
     }
 
     @Test
+    fun sensitiveConfirmOverride_stillRequiresConfirmAfterCancelReply() {
+        val session = AgentConversationSession(rootCommand = "给吴志强发消息")
+        session.recordConfirmAnswer(AgentActionGuard.SEND_PROMPT, "取消")
+        assertNotNull(
+            AgentActionGuard.sensitiveConfirmOverride(
+                session = session,
+                action = AgentAction(action = "send"),
+            ),
+        )
+    }
+
+    @Test
+    fun sensitiveConfirmOverride_tapAfterTypeInSendFlowRequiresConfirm() {
+        val session = AgentConversationSession(rootCommand = "给张三发消息：你好")
+        session.recordStep(
+            step = 1,
+            action = AgentAction(action = "type", inputText = "你好"),
+            result = ActionExecutionResult(true, "已输入"),
+            pageDiff = "",
+        )
+        val override = AgentActionGuard.sensitiveConfirmOverride(
+            session = session,
+            action = AgentAction(action = "tap", targetText = "0.92,0.95"),
+        )
+        assertNotNull(override)
+        assertTrue(override!!.waitingForUser)
+    }
+
+    @Test
     fun blockedWrongImSearch_blocksMiniProgramSearchWhenContactVisible() {
         val session = AgentConversationSession(rootCommand = "去微信给吴志强发消息说你好")
         val snapshot = StructuredPageSnapshot(

@@ -79,8 +79,22 @@ class FloatingOverlayService : Service(), LifecycleOwner, SavedStateRegistryOwne
                 JoyForOldTheme(darkTheme = darkTheme) {
                     FloatingOverlayContent(
                         agentRuntime = runtime,
-                        onRun = { runtime.runAgent(applicationContext as Application) },
-                        onStartVoice = { runtime.startVoiceInput() },
+                        onRun = {
+                            val app = applicationContext as Application
+                            if (runtime.state.value.waitingForUserConfirm) {
+                                runtime.runAgent(app, resumePendingConfirm = true)
+                            } else {
+                                runtime.runAgent(app)
+                            }
+                        },
+                        onStartVoice = {
+                            val app = applicationContext as Application
+                            if (runtime.state.value.waitingForUserConfirm) {
+                                runtime.startVoiceReplyToConfirm(app)
+                            } else {
+                                runtime.startVoiceInput()
+                            }
+                        },
                         onStopVoiceAndRun = {
                             runtime.stopVoiceInputAndRunAgent(applicationContext as Application)
                         },
