@@ -139,7 +139,8 @@ dependencies {
     implementation(libs.material3)
     implementation(libs.material.icons.extended)
     implementation(libs.foundation)
-    // Exclude QNN-flavored ORT pulled by sherpa; use official Microsoft CPU build instead.
+    // Exclude QNN-flavored ORT pulled by sherpa; use reduced-ops Microsoft CPU AAR
+    // from tools/ort-custom/maven (see settings.gradle.kts exclusiveContent).
     implementation(libs.sherpa.onnx) {
         exclude(group = "com.xdcobra.sherpa", module = "onnxruntime")
     }
