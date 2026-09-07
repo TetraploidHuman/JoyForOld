@@ -69,4 +69,25 @@ class AgentSessionStoreTest {
         store.clearPending()
         assertNull(store.loadPending())
     }
+
+    @Test
+    fun saveAndLoadPending_persistsSuspendedNeedsBinaryConfirm() {
+        val state = PendingAgentState(
+            originalCommand = "新指令",
+            aiPrompt = "放弃旧任务？",
+            session = AgentConversationSession(rootCommand = "新指令"),
+            previousSnapshot = null,
+            kind = PendingKind.TASK_ABANDON,
+            deferredCommand = "现在几点",
+            suspendedOriginalCommand = "给张三发消息",
+            suspendedAiPrompt = AgentActionGuard.SEND_PROMPT,
+            suspendedSession = AgentConversationSession(rootCommand = "给张三发消息"),
+            suspendedNeedsBinaryConfirm = true,
+        )
+        store.savePending(state)
+        val loaded = store.loadPending()
+        assertNotNull(loaded)
+        assertEquals(true, loaded!!.suspendedNeedsBinaryConfirm)
+        assertEquals(AgentActionGuard.SEND_PROMPT, loaded.suspendedAiPrompt)
+    }
 }

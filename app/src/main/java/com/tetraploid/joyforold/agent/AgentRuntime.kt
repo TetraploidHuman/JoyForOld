@@ -384,6 +384,8 @@ class AgentRuntime(
 
     private fun shouldShowOverlay(state: AgentUiState): Boolean {
         if (appInForeground) return false
+        // 视觉闩锁时整窗隐藏（不只藏卡片），避免挡住 click/tap 与污染截图
+        if (state.visionAgentActive && !state.waitingForUserConfirm) return false
         return state.isRunning ||
             state.isListening ||
             state.waitingForUserConfirm ||
@@ -421,6 +423,11 @@ class AgentRuntime(
 
     fun clearInteraction() {
         val snapshot = _state.value
+        // 确认听麦时按 ✕：必须清掉确认，不能只停麦留下幽灵确认卡
+        if (snapshot.waitingForUserConfirm) {
+            clearPendingConfirmUI()
+            return
+        }
         when {
             snapshot.isListening ||
                 snapshot.voiceInteractionState != VoiceInteractionState.Idle -> {
@@ -438,7 +445,6 @@ class AgentRuntime(
                 wakeWordController?.ensureRunning()
                 syncOverlayVisibility()
             }
-            snapshot.waitingForUserConfirm -> clearPendingConfirmUI()
             else -> {
                 _state.update { it.copy(command = "", speechText = "") }
                 voiceSession()?.sessionActive = false
@@ -556,6 +562,10 @@ class AgentRuntime(
     private fun finalizeSessionCards(result: AgentRunResult) {
         removeSessionCardsByKind(ConversationCardKind.Progress)
         if (result.waitingForUserConfirm && !result.confirmPrompt.isNullOrBlank()) {
+            // 进入新等待态时清掉其它交互卡，避免消歧+确认叠层可点
+            removeSessionCardsByKind(ConversationCardKind.Confirm)
+            removeSessionCardsByKind(ConversationCardKind.Disambiguation)
+            removeSessionCardsByKind(ConversationCardKind.Preview)
             when (orchestrator.peekPendingKind()) {
                 PendingKind.INTENT_DISAMBIGUATION, PendingKind.NAV_POI_PICK -> {
                     val options = orchestrator.peekDisambiguationOptions()
@@ -665,8 +675,24 @@ class AgentRuntime(
 
     fun submitBinaryConfirm(approved: Boolean) {
         val app = application ?: return
-        val text = if (approved) "确认" else "取消"
+        if (!orchestrator.hasPendingConfirm()) {
+            // 幽灵确认卡：pending 已清仍点按钮 → 勿当新指令执行
+            removeInteractionConfirmCards()
+            publishConversationCards()
+            syncOverlayVisibility()
+            return
+        }
+        // 发送类确认点「取消」：硬清除，与语音「取消」一致，避免走 LLM 误发
+        if (!approved &&
+            AgentActionGuard.isSendConfirmPrompt(orchestrator.peekPendingPrompt().orEmpty())
+        ) {
+            clearPendingConfirmUI()
+            voiceSession()?.speakStatus("好的，已取消")
+            return
+        }
+        voiceSession()?.abortInput()
         voiceSession()?.sessionActive = true
+        val text = if (approved) "确认" else "取消"
         _state.update { it.copy(command = text, speechText = text) }
         runAgent(app, resumePendingConfirm = true)
     }
@@ -674,6 +700,10 @@ class AgentRuntime(
     fun selectDisambiguationOption(intentId: String) {
         val app = application ?: return
         recordUserInteraction()
+        removeSessionCardsByKind(ConversationCardKind.Disambiguation)
+        removeSessionCardsByKind(ConversationCardKind.Confirm)
+        removeSessionCardsByKind(ConversationCardKind.Preview)
+        publishConversationCards()
         agentJob?.cancel()
         agentScope.launch {
             val result = when {
@@ -877,6 +907,7 @@ class AgentRuntime(
         voiceSession()?.abortInput()
         voiceSession()?.resetConfirmReplyMode()
         voiceSession()?.sessionActive = false
+        val wasWaiting = _state.value.waitingForUserConfirm
         _state.update {
             it.copy(
                 isRunning = false,
@@ -888,9 +919,15 @@ class AgentRuntime(
                 speechText = "",
             )
         }
+        // 停止时若还在确认态，一并清掉，避免残留确认卡/pending
+        if (wasWaiting) {
+            clearPendingConfirmUI()
+        } else {
+            deactivateVisionAgentMode()
+            syncOverlayVisibility()
+        }
         appendLog("Agent 已停止")
         wakeWordController?.ensureRunning()
-        syncOverlayVisibility()
     }
 
     fun pauseAgent() {
@@ -971,17 +1008,25 @@ class AgentRuntime(
         }
         recordUserInteraction()
         val current = _state.value
-        if (current.isRunning) {
+        // 在 launch 前占位，避免语音+按钮并发双开
+        if (current.isRunning || agentJob?.isActive == true) {
             if (assistBridge?.remoteCommandRun == true) {
                 relayRemoteAssistStatus(success = false, summary = "已有任务在执行")
             }
             return
         }
         val shouldResumePending = resumePendingConfirm == true
+        if (shouldResumePending && !orchestrator.hasPendingConfirm()) {
+            removeInteractionConfirmCards()
+            publishConversationCards()
+            syncOverlayVisibility()
+            return
+        }
         val effectiveCommand = resolvePresetCommand(current.command)
 
         val context = AgentRunContext()
         runContext = context
+        _state.update { it.copy(isRunning = true, isPaused = false) }
 
         agentJob = agentScope.launch {
             if (!shouldResumePending) {
@@ -1175,10 +1220,28 @@ class AgentRuntime(
         voiceSession()?.resetConfirmReplyMode()
         orchestrator.clearPendingUserReply()
         voiceSession()?.abortInput()
-        _state.update { it.copy(waitingForUserConfirm = false, confirmPrompt = null, needsBinaryConfirm = false) }
+        voiceSession()?.sessionActive = false
+        removeInteractionConfirmCards()
+        _state.update {
+            it.copy(
+                waitingForUserConfirm = false,
+                confirmPrompt = null,
+                needsBinaryConfirm = false,
+                command = "",
+                speechText = "",
+                isListening = false,
+                voiceInteractionState = VoiceInteractionState.Idle,
+            )
+        }
         publishConversationCards()
         syncOverlayVisibility()
         voiceSession()?.scheduleWakeWordRestoreIfIdle()
+    }
+
+    private fun removeInteractionConfirmCards() {
+        removeSessionCardsByKind(ConversationCardKind.Confirm)
+        removeSessionCardsByKind(ConversationCardKind.Disambiguation)
+        removeSessionCardsByKind(ConversationCardKind.Preview)
     }
 
     fun onWakeWordDetected() {

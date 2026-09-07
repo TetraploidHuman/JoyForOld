@@ -52,6 +52,10 @@ class AgentSessionStore(context: Context) {
                 KEY_PENDING_SUSPENDED_SNAPSHOT,
                 state.suspendedSnapshot?.toJson()?.toString(),
             )
+            .putBoolean(
+                KEY_PENDING_SUSPENDED_NEEDS_BINARY,
+                state.suspendedNeedsBinaryConfirm ?: false,
+            )
             .apply()
     }
 
@@ -89,6 +93,11 @@ class AgentSessionStore(context: Context) {
                 suspendedAiPrompt = prefs.getString(KEY_PENDING_SUSPENDED_PROMPT, null),
                 suspendedSession = suspendedSession,
                 suspendedSnapshot = suspendedSnapshot,
+                suspendedNeedsBinaryConfirm = if (prefs.contains(KEY_PENDING_SUSPENDED_NEEDS_BINARY)) {
+                    prefs.getBoolean(KEY_PENDING_SUSPENDED_NEEDS_BINARY, false)
+                } else {
+                    null
+                },
             )
         } catch (_: Exception) {
             clearPending()
@@ -110,6 +119,7 @@ class AgentSessionStore(context: Context) {
             .remove(KEY_PENDING_SUSPENDED_ORIGINAL)
             .remove(KEY_PENDING_SUSPENDED_PROMPT)
             .remove(KEY_PENDING_SUSPENDED_SNAPSHOT)
+            .remove(KEY_PENDING_SUSPENDED_NEEDS_BINARY)
             .apply()
     }
 
@@ -146,5 +156,6 @@ class AgentSessionStore(context: Context) {
         private const val KEY_PENDING_SUSPENDED_ORIGINAL = "agent_pending_suspended_original"
         private const val KEY_PENDING_SUSPENDED_PROMPT = "agent_pending_suspended_prompt"
         private const val KEY_PENDING_SUSPENDED_SNAPSHOT = "agent_pending_suspended_snapshot"
+        private const val KEY_PENDING_SUSPENDED_NEEDS_BINARY = "agent_pending_suspended_needs_binary"
     }
 }

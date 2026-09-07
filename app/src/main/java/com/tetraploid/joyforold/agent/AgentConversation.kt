@@ -55,6 +55,16 @@ class AgentConversationSession(
         return topic in resolvedConfirmTopics
     }
 
+    fun clearResolvedConfirmTopic(topic: String) {
+        resolvedConfirmTopics.remove(topic)
+        // 同步清掉该 topic 对应的已答 prompt，否则 maybeConfirm 仍会因 hasAnsweredConfirmPrompt 跳过
+        if (topic == CONFIRM_TOPIC_SEND) {
+            answeredConfirmPrompts.removeAll { prompt ->
+                inferConfirmTopic(prompt) == CONFIRM_TOPIC_SEND
+            }
+        }
+    }
+
     /** 记录用户对确认问题的完整原话，供 AI 与守卫续跑使用 */
     fun recordConfirmAnswer(aiPrompt: String, userReply: String) {
         val prompt = aiPrompt.trim()

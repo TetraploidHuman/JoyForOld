@@ -131,7 +131,7 @@ class AgentOrchestrator(
 
 
 
-    fun peekPendingKind(): PendingKind = pendingMachine.peekPendingKind()
+    fun peekPendingKind(): PendingKind? = pendingMachine.peekPendingKind()
 
     fun peekPendingOriginalCommand(): String? = pendingMachine.peekPendingOriginalCommand()
 
@@ -385,6 +385,20 @@ class AgentOrchestrator(
     ): AgentRunResult {
 
         val userReply = command.trim()
+
+        // 发送确认说「取消」：硬清除，不走 LLM（避免误发）
+        if (pending.needsBinaryConfirm &&
+            AgentActionGuard.isSendConfirmPrompt(pending.aiPrompt) &&
+            VoiceConfirmPhraseMatcher.classify(userReply) == VoiceConfirmPhraseMatcher.Intent.CANCEL
+        ) {
+            pendingMachine.clear()
+            return AgentRunResult(
+                success = true,
+                summary = "好的，已取消",
+                logs = emptyList(),
+                sessionId = pending.session.sessionId,
+            )
+        }
 
         pending.session.recordConfirmAnswer(pending.aiPrompt, userReply)
 

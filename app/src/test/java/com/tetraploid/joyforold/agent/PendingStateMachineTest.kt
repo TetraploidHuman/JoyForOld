@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -129,6 +130,59 @@ class PendingStateMachineTest {
         assertFalse(machine.hasPending())
         assertEquals(1, executor.newCommandCalls)
         assertEquals("现在几点", executor.lastNewCommand)
+    }
+
+    @Test
+    fun handleTaskAbandonReply_continue_restoresSuspendedNeedsBinary() = runTest {
+        machine.save(
+            PendingAgentState(
+                originalCommand = "新指令",
+                aiPrompt = "放弃旧任务？",
+                session = AgentConversationSession(rootCommand = "新指令"),
+                previousSnapshot = null,
+                kind = PendingKind.TASK_ABANDON,
+                deferredCommand = "新指令",
+                suspendedOriginalCommand = "给张三发消息",
+                suspendedAiPrompt = AgentActionGuard.SEND_PROMPT,
+                suspendedSession = AgentConversationSession(rootCommand = "给张三发消息"),
+                suspendedNeedsBinaryConfirm = true,
+            ),
+        )
+
+        val result = machine.handleTaskAbandonReply(
+            command = "继续",
+            apiKey = "unused",
+            service = fakeGateway,
+            runContext = AgentRunContext(),
+            onProgress = null,
+            executor = RecordingPendingExecutor(),
+        )
+
+        assertTrue(result.waitingForUserConfirm)
+        assertTrue(result.needsBinaryConfirm)
+        assertTrue(machine.peekPendingNeedsBinaryConfirm())
+        assertEquals(PendingKind.USER_CONFIRM, machine.peekPendingKind())
+    }
+
+    @Test
+    fun restoreAfterFailedResume_clearsResolvedSendTopic() {
+        val session = AgentConversationSession(rootCommand = "给张三发消息")
+        session.recordConfirmAnswer(AgentActionGuard.SEND_PROMPT, "发送")
+        val original = PendingAgentState(
+            originalCommand = "给张三发消息",
+            aiPrompt = AgentActionGuard.SEND_PROMPT,
+            session = session,
+            previousSnapshot = null,
+            needsBinaryConfirm = true,
+        )
+        machine.restoreAfterFailedResume(original, session, null)
+        assertFalse(session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND))
+        assertNotNull(
+            AgentActionGuard.sensitiveConfirmOverride(
+                session,
+                AgentAction(action = "send"),
+            ),
+        )
     }
 
     private class FakeAccessibilityGateway : AccessibilityGateway {

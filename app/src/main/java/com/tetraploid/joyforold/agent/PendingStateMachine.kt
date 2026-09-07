@@ -30,7 +30,7 @@ internal class PendingStateMachine(
 
     fun peekPendingPrompt(): String? = pendingState?.aiPrompt
 
-    fun peekPendingKind(): PendingKind = pendingState?.kind ?: PendingKind.USER_CONFIRM
+    fun peekPendingKind(): PendingKind? = pendingState?.kind
 
     fun peekPendingOriginalCommand(): String? = pendingState?.originalCommand
 
@@ -58,6 +58,10 @@ internal class PendingStateMachine(
         session: AgentConversationSession,
         previousSnapshot: StructuredPageSnapshot?,
     ) {
+        // 确认后中断：清掉已解决的发送 topic，否则守卫会跳过二次确认导致误发
+        if (AgentActionGuard.isSendConfirmPrompt(original.aiPrompt)) {
+            session.clearResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND)
+        }
         save(
             original.copy(
                 session = session,

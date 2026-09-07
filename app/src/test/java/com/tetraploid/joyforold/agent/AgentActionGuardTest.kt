@@ -168,6 +168,36 @@ class AgentActionGuardTest {
     }
 
     @Test
+    fun sensitiveConfirmOverride_clickSendLabelAlwaysRequiresConfirm() {
+        val session = AgentConversationSession(rootCommand = "打开微信看看")
+        val override = AgentActionGuard.sensitiveConfirmOverride(
+            session = session,
+            action = AgentAction(action = "click", targetText = "发送"),
+        )
+        assertNotNull(override)
+        assertTrue(override!!.waitingForUser)
+    }
+
+    @Test
+    fun clearResolvedConfirmTopic_allowsConfirmAgainAfterInterrupt() {
+        val session = AgentConversationSession(rootCommand = "给张三发消息")
+        session.recordConfirmAnswer(AgentActionGuard.SEND_PROMPT, "发送")
+        assertNull(
+            AgentActionGuard.sensitiveConfirmOverride(
+                session = session,
+                action = AgentAction(action = "send"),
+            ),
+        )
+        session.clearResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND)
+        assertNotNull(
+            AgentActionGuard.sensitiveConfirmOverride(
+                session = session,
+                action = AgentAction(action = "send"),
+            ),
+        )
+    }
+
+    @Test
     fun blockedWrongImSearch_blocksMiniProgramSearchWhenContactVisible() {
         val session = AgentConversationSession(rootCommand = "去微信给吴志强发消息说你好")
         val snapshot = StructuredPageSnapshot(

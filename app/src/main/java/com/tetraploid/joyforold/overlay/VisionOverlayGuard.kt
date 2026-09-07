@@ -36,10 +36,7 @@ object VisionOverlayGuard {
 
     suspend fun <T> withHidden(block: suspend () -> T): T {
         val suppressor = VisionOverlaySuppressors.current
-        if (suppressor.isVisionAgentActive()) {
-            return block()
-        }
-        // 等一帧合成：避免 GONE 尚未生效时手势仍点到悬浮层
+        // 视觉闩锁时仍须压窗：闩锁只藏卡片，窗体仍可能挡手势
         suppressor.pushSuppressionAwait(waitFrame = true)
         return try {
             block()
@@ -51,9 +48,6 @@ object VisionOverlayGuard {
     suspend fun <T> withHiddenForCapture(block: suspend () -> T): T {
         PageScreenshotCapture.invalidateCache()
         val suppressor = VisionOverlaySuppressors.current
-        if (suppressor.isVisionAgentActive()) {
-            return block()
-        }
         suppressor.pushSuppressionAwait(waitFrame = true)
         return try {
             block()

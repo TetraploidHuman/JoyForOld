@@ -124,20 +124,10 @@ object AgentActionGuard {
             }
         }
 
-        if (action.action.equals("tap", ignoreCase = true) &&
-            SendIntentDetector.isSendCommand(root) &&
-            recentTypedMessageInSendFlow(session)
-        ) {
-            return maybeConfirm(session, SEND_PROMPT, needsBinaryConfirm = true) {
-                !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND)
-            }
-        }
-
+        // click/tap 点「发送」类控件：不依赖根指令是否像发消息，一律先确认
         if (action.action.equals("click", ignoreCase = true)) {
             val target = action.targetText?.trim().orEmpty()
-            if (sendKeywords.any { target.contains(it, ignoreCase = true) } &&
-                SendIntentDetector.isSendCommand(root)
-            ) {
+            if (sendKeywords.any { target.contains(it, ignoreCase = true) }) {
                 return maybeConfirm(session, SEND_CLICK_PROMPT, needsBinaryConfirm = true) {
                     !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND)
                 }
@@ -147,6 +137,18 @@ object AgentActionGuard {
             ) {
                 return maybeConfirm(session, CALL_ROUTE_PROMPT, needsBinaryConfirm = false) {
                     !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_CALL_ROUTE)
+                }
+            }
+        }
+
+        if (action.action.equals("tap", ignoreCase = true)) {
+            val target = action.targetText?.trim().orEmpty()
+            val looksLikeSendTap =
+                sendKeywords.any { target.contains(it, ignoreCase = true) } ||
+                    (SendIntentDetector.isSendCommand(root) && recentTypedMessageInSendFlow(session))
+            if (looksLikeSendTap) {
+                return maybeConfirm(session, SEND_PROMPT, needsBinaryConfirm = true) {
+                    !session.hasResolvedConfirmTopic(AgentConversationSession.CONFIRM_TOPIC_SEND)
                 }
             }
         }

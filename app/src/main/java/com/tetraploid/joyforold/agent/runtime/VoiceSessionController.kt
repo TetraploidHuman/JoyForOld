@@ -464,6 +464,11 @@ internal class VoiceSessionController(
 
         if (isConfirmReply && state.read().waitingForUserConfirm) {
             val pendingKind = orchestratorBridge.peekPendingKind()
+            if (pendingKind == null) {
+                onClearPendingConfirmUI()
+                wakeWordControllerProvider()?.ensureRunning()
+                return
+            }
             when (pendingKind) {
                 PendingKind.TASK_ABANDON -> when (PendingAbandonPhraseMatcher.classify(merged)) {
                     PendingAbandonPhraseMatcher.Intent.ABANDON -> appendLog("用户选择放弃：$merged")
@@ -489,14 +494,7 @@ internal class VoiceSessionController(
                     VoiceConfirmPhraseMatcher.Intent.UNCLEAR -> {
                         if (VoiceFollowUpDetector.looksLikeNewCommand(merged)) {
                             appendLog("识别为新指令，结束路由确认：$merged")
-                            orchestratorBridge.clearPendingUserReply()
-                            state.update {
-                                it.copy(
-                                    waitingForUserConfirm = false,
-                                    confirmPrompt = null,
-                                    needsBinaryConfirm = false,
-                                )
-                            }
+                            onClearPendingConfirmUI()
                         } else {
                             appendLog("确认回答含糊：$merged")
                             mainScope.launch {
@@ -556,7 +554,6 @@ internal class VoiceSessionController(
                     return
                 }
                 PendingKind.CONTEXT_CONSENT -> {
-                    orchestratorBridge.clearPendingUserReply()
                     onClearPendingConfirmUI()
                     speakStatus(ContextConsentStore.SETTINGS_HINT)
                     return
@@ -576,14 +573,7 @@ internal class VoiceSessionController(
                     if (!needsBinary) {
                         if (VoiceFollowUpDetector.looksLikeNewCommand(merged)) {
                             appendLog("识别为新指令，结束等待：$merged")
-                            orchestratorBridge.clearPendingUserReply()
-                            state.update {
-                                it.copy(
-                                    waitingForUserConfirm = false,
-                                    confirmPrompt = null,
-                                    needsBinaryConfirm = false,
-                                )
-                            }
+                            onClearPendingConfirmUI()
                         } else {
                             appendLog("用户回答：$merged")
                         }
@@ -593,14 +583,7 @@ internal class VoiceSessionController(
                             VoiceConfirmPhraseMatcher.Intent.UNCLEAR -> {
                                 if (VoiceFollowUpDetector.looksLikeNewCommand(merged)) {
                                     appendLog("识别为新指令，放弃待确认操作：$merged")
-                                    orchestratorBridge.clearPendingUserReply()
-                                    state.update {
-                                        it.copy(
-                                            waitingForUserConfirm = false,
-                                            confirmPrompt = null,
-                                            needsBinaryConfirm = false,
-                                        )
-                                    }
+                                    onClearPendingConfirmUI()
                                 } else {
                                     appendLog("确认回答含糊：$merged")
                                     mainScope.launch {
@@ -743,7 +726,7 @@ internal class VoiceSessionController(
 }
 
 internal interface VoiceOrchestratorBridge {
-    fun peekPendingKind(): PendingKind
+    fun peekPendingKind(): PendingKind?
     fun peekPendingNeedsBinaryConfirm(): Boolean
     fun peekDisambiguationOptions(): List<com.tetraploid.joyforold.agent.DisambiguationOption>
     fun peekPendingOriginalCommand(): String?
