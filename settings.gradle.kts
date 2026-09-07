@@ -17,6 +17,15 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        // Prefer locally built reduced-ops ORT AAR over Maven Central.
+        exclusiveContent {
+            forRepository {
+                maven(url = uri("${rootDir}/tools/ort-custom/maven"))
+            }
+            filter {
+                includeGroup("com.microsoft.onnxruntime")
+            }
+        }
         google()
         mavenCentral()
         maven("https://jitpack.io")
