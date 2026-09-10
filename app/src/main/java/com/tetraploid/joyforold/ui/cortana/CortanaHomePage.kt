@@ -36,14 +36,6 @@ import com.tetraploid.joyforold.ui.theme.JoyTextSizes
 
 private val CortanaBottomDockReservedHeight = 220.dp
 
-private val fallbackSuggestions = listOf(
-    "我要回家",
-    "帮我读一下未读消息",
-    "现在几点了",
-    "今天天气怎么样",
-    "打电话给女儿",
-)
-
 @Composable
 fun CortanaHomePage(
     uiState: AgentUiState,
@@ -59,6 +51,7 @@ fun CortanaHomePage(
     onDisambiguationSelect: (String) -> Unit = {},
     onUndo: () -> Unit = {},
     onDismissUndo: () -> Unit = {},
+    onRetryCommand: (String) -> Unit = {},
     onSendClick: () -> Unit,
     onCancelClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -66,9 +59,9 @@ fun CortanaHomePage(
     val scrollState = rememberScrollState()
     var selectedCategory by rememberSaveable { mutableStateOf<CortanaSearchCategory?>(null) }
     var expandedHints by rememberSaveable { mutableStateOf(false) }
-    val suggestionChips = uiState.suggestionChips.ifEmpty { fallbackSuggestions }
-    val primarySuggestion = suggestionChips.firstOrNull() ?: "给家人发消息"
-    val dockSuggestions = suggestionChips.drop(1).ifEmpty { fallbackSuggestions.drop(1) }
+    val suggestionChips = uiState.suggestionChips
+    val primarySuggestion = suggestionChips.firstOrNull()
+    val dockSuggestions = suggestionChips.drop(1)
 
     val greeting = when {
         uiState.isRunning -> "正在帮您处理，请稍候"
@@ -151,6 +144,7 @@ fun CortanaHomePage(
                         onDisambiguationSelect = onDisambiguationSelect,
                         onUndo = onUndo,
                         onDismissUndo = onDismissUndo,
+                        onRetry = onRetryCommand,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (uiState.isRunning) {
@@ -167,14 +161,14 @@ fun CortanaHomePage(
                             )
                         }
                     }
-                } else if (!uiState.isRunning && !hasContentPanel) {
+                } else if (!uiState.isRunning && !hasContentPanel && primarySuggestion != null) {
                     Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                         Spacer(modifier = Modifier.height(28.dp))
                         SuggestionQuote(
                             text = primarySuggestion,
                             onClick = { onSuggestionClick(primarySuggestion) },
                         )
-                        if (!expandedHints) {
+                        if (!expandedHints && dockSuggestions.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
                                 text = "查看更多常用说法",

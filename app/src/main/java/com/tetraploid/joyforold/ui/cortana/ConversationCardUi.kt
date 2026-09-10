@@ -7,6 +7,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -15,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -36,6 +42,7 @@ fun ConversationCardList(
     onDisambiguationSelect: (String) -> Unit = {},
     onUndo: () -> Unit = {},
     onDismissUndo: () -> Unit = {},
+    onRetry: (String) -> Unit = {},
     cardSpacing: Dp = 10.dp,
     modifier: Modifier = Modifier,
 ) {
@@ -55,6 +62,7 @@ fun ConversationCardList(
                 onDisambiguationSelect = onDisambiguationSelect,
                 onUndo = onUndo,
                 onDismissUndo = onDismissUndo,
+                onRetry = onRetry,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -72,6 +80,7 @@ fun OverlayInteractionCard(
     onDisambiguationSelect: (String) -> Unit = {},
     onUndo: () -> Unit = {},
     onDismissUndo: () -> Unit = {},
+    onRetry: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     ConversationCardItem(
@@ -84,6 +93,7 @@ fun OverlayInteractionCard(
         onDisambiguationSelect = onDisambiguationSelect,
         onUndo = onUndo,
         onDismissUndo = onDismissUndo,
+        onRetry = onRetry,
         modifier = modifier.fillMaxWidth(),
     )
 }
@@ -99,6 +109,7 @@ private fun ConversationCardItem(
     onDisambiguationSelect: (String) -> Unit,
     onUndo: () -> Unit,
     onDismissUndo: () -> Unit,
+    onRetry: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expandedDetails by rememberSaveable(card.id) { mutableStateOf(false) }
@@ -132,6 +143,35 @@ private fun ConversationCardItem(
                 fontSize = JoyTextSizes.Body,
                 lineHeight = JoyTextSizes.BodyLineHeight,
             )
+        }
+
+        if (card.showRetry) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "点右侧图标可重试",
+                    color = CortanaColors.OnBackgroundMuted,
+                    fontSize = JoyTextSizes.Caption,
+                    lineHeight = JoyTextSizes.CaptionLineHeight,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(
+                    onClick = {
+                        val command = card.retryCommand.trim()
+                        if (command.isNotBlank()) onRetry(command)
+                    },
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Refresh,
+                        contentDescription = "重试",
+                        tint = CortanaColors.Accent,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
+            }
         }
 
         if (card.kind == ConversationCardKind.Disambiguation) {

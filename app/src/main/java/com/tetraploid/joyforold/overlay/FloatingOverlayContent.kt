@@ -12,9 +12,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.app.Application
 import com.tetraploid.joyforold.agent.AgentRuntime
 import com.tetraploid.joyforold.agent.ConversationCard
 import com.tetraploid.joyforold.agent.ConversationCardFactory
@@ -54,6 +56,7 @@ fun FloatingOverlayContent(
     onCancel: () -> Unit,
 ) {
     val uiState by agentRuntime.state.collectAsStateWithLifecycle()
+    val appContext = LocalContext.current.applicationContext as Application
     val visible = shouldShowOverlayDialog(
         isRunning = uiState.isRunning,
         isListening = uiState.isListening,
@@ -113,21 +116,25 @@ fun FloatingOverlayContent(
     ) {
         // 仅确认/消歧等交互卡；计划与「执行中」不在悬浮窗展示
         if (overlayCards.isNotEmpty()) {
-            ConversationCardList(
-                cards = overlayCards,
-                isListening = uiState.isListening,
-                speechText = uiState.speechText,
-                onBinaryConfirm = { agentRuntime.submitBinaryConfirm(approved = true) },
-                onBinaryCancel = { agentRuntime.submitBinaryConfirm(approved = false) },
-                onDismissConfirm = { agentRuntime.clearPendingConfirmUI() },
-                onDisambiguationSelect = agentRuntime::selectDisambiguationOption,
-                onUndo = agentRuntime::undoLastLocalAction,
-                onDismissUndo = agentRuntime::dismissUndoOffer,
-                cardSpacing = 0.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-            )
+                ConversationCardList(
+                    cards = overlayCards,
+                    isListening = uiState.isListening,
+                    speechText = uiState.speechText,
+                    onBinaryConfirm = { agentRuntime.submitBinaryConfirm(approved = true) },
+                    onBinaryCancel = { agentRuntime.submitBinaryConfirm(approved = false) },
+                    onDismissConfirm = { agentRuntime.clearPendingConfirmUI() },
+                    onDisambiguationSelect = agentRuntime::selectDisambiguationOption,
+                    onUndo = agentRuntime::undoLastLocalAction,
+                    onDismissUndo = agentRuntime::dismissUndoOffer,
+                    onRetry = { command ->
+                        agentRuntime.updateCommand(command)
+                        agentRuntime.runAgent(appContext)
+                    },
+                    cardSpacing = 0.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                )
         }
 
         Column(

@@ -285,7 +285,11 @@ fun MainPivotScreen(
                     0 -> CortanaHomePage(
                         uiState = uiState,
                         onSuggestionClick = { suggestion ->
-                            viewModel.submitCommand(suggestion)
+                            if (!uiState.accessibilityServiceConnected) {
+                                showAccessibilityDialog()
+                            } else {
+                                viewModel.submitCommand(suggestion)
+                            }
                         },
                         onCommandChange = viewModel::updateCommand,
                         onMicClick = { handleMicClick() },
@@ -298,6 +302,13 @@ fun MainPivotScreen(
                         onDisambiguationSelect = viewModel::selectDisambiguationOption,
                         onUndo = viewModel::undoLastLocalAction,
                         onDismissUndo = viewModel::dismissUndoOffer,
+                        onRetryCommand = { command ->
+                            if (!uiState.accessibilityServiceConnected) {
+                                showAccessibilityDialog()
+                            } else {
+                                viewModel.submitCommand(command)
+                            }
+                        },
                         onSendClick = { handleSendClick() },
                         onCancelClick = {
                             if (uiState.isRunning) {
@@ -336,6 +347,13 @@ fun MainPivotScreen(
                         onTestWakeWord = viewModel::testWakeWord,
                         onStartCalibration = viewModel::startWakeWordCalibration,
                         onRecordCalibrationStep = viewModel::recordCalibrationStep,
+                        onUpdateApiKey = viewModel::updateApiKey,
+                        onSaveApiKey = viewModel::saveApiKey,
+                        onUpdateAsrApiKey = viewModel::updateAsrApiKey,
+                        onUpdateAsrAppId = viewModel::updateAsrAppId,
+                        onUpdateAsrAccessToken = viewModel::updateAsrAccessToken,
+                        onUpdateAsrResourceId = viewModel::updateAsrResourceId,
+                        onSaveAsrConfig = viewModel::saveAsrConfig,
                     )
                     2 -> CollaborationPage(
                         uiState = uiState,

@@ -559,7 +559,7 @@ class AgentRuntime(
         conversationCards.removeByKind(kind)
     }
 
-    private fun finalizeSessionCards(result: AgentRunResult) {
+    private fun finalizeSessionCards(result: AgentRunResult, failedCommand: String = "") {
         removeSessionCardsByKind(ConversationCardKind.Progress)
         if (result.waitingForUserConfirm && !result.confirmPrompt.isNullOrBlank()) {
             // 进入新等待态时清掉其它交互卡，避免消歧+确认叠层可点
@@ -595,6 +595,16 @@ class AgentRuntime(
             if (result.success && result.summary.isNotBlank()) {
                 appendSessionCard(ConversationCardFactory.assistantMessage(result.summary))
                 maybeAppendInfoCard(result.summary)
+            } else if (!result.success && result.summary.isNotBlank()) {
+                val command = failedCommand.trim().ifBlank {
+                    conversationCards.list()
+                        .lastOrNull { it.kind == ConversationCardKind.User }
+                        ?.body
+                        .orEmpty()
+                }
+                appendSessionCard(
+                    ConversationCardFactory.errorWithRetry(result.summary, command),
+                )
             }
             LocalUndoRegistry.peek()?.let {
                 upsertSessionCard(ConversationCardFactory.undo("刚才的操作可以撤销，要撤销吗？"))
@@ -1156,8 +1166,12 @@ class AgentRuntime(
                         sessionId = result.sessionId,
                         statusMessage = if (result.success) result.summary else result.summary,
                         visionAgentActive = if (result.waitingForUserConfirm) false else it.visionAgentActive,
-                        // 非确认结束时清空输入，右侧按钮回到麦克风
-                        command = if (result.waitingForUserConfirm) it.command else "",
+                        // 确认态保留输入；失败时也保留指令便于重试；成功则清空
+                        command = when {
+                            result.waitingForUserConfirm -> it.command
+                            !result.success -> effectiveCommand
+                            else -> ""
+                        },
                         speechText = if (result.waitingForUserConfirm) it.speechText else "",
                         taskSteps = if (result.success && !result.waitingForUserConfirm) {
                             TaskStepTracker.markAllCompleted(it.taskSteps)
@@ -1171,7 +1185,7 @@ class AgentRuntime(
                         },
                     )
                 }
-                finalizeSessionCards(result)
+                finalizeSessionCards(result, failedCommand = effectiveCommand)
                 publishConversationCards()
                 syncOverlayVisibility()
                 if (result.waitingForUserConfirm) {

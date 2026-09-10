@@ -70,25 +70,26 @@ private fun CategoryTile(
 ) {
     Column(
         modifier = modifier
-            .height(84.dp)
+            .height(80.dp)
             .background(
                 if (selected) CortanaColors.SurfaceElevated else CortanaColors.Surface,
             )
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
+            .padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
             tint = if (selected) CortanaColors.Accent else CortanaColors.OnBackground,
-            modifier = Modifier.size(32.dp),
+            modifier = Modifier.size(28.dp),
         )
         Text(
             text = label,
             color = if (selected) CortanaColors.AccentMuted else CortanaColors.OnBackgroundSecondary,
             fontSize = JoyTextSizes.Caption,
+            maxLines = 1,
         )
     }
 }
@@ -175,10 +176,13 @@ fun CortanaBottomDock(
             }
         }
 
-        CortanaExpandHintBar(
-            expanded = expandedHints,
-            onClick = onExpandHints,
-        )
+        // 没有可点建议时不显示「还可以帮您做这些」
+        if (extraSuggestions.isNotEmpty()) {
+            CortanaExpandHintBar(
+                expanded = expandedHints,
+                onClick = onExpandHints,
+            )
+        }
 
         CortanaCategoryBar(
             selected = selectedCategory,

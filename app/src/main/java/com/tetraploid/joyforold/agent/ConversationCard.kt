@@ -24,6 +24,10 @@ data class ConversationCard(
     val showBinaryActions: Boolean = false,
     /** Disambiguation: intent id per bullet label */
     val optionIds: List<String> = emptyList(),
+    /** 发送/执行失败后显示重试按钮 */
+    val showRetry: Boolean = false,
+    /** 重试时重新提交的指令 */
+    val retryCommand: String = "",
 )
 
 object ConversationCardFactory {
@@ -37,6 +41,14 @@ object ConversationCardFactory {
         kind = ConversationCardKind.Assistant,
         title = "助手",
         body = text,
+    )
+
+    fun errorWithRetry(message: String, retryCommand: String): ConversationCard = ConversationCard(
+        kind = ConversationCardKind.Assistant,
+        title = "未完成",
+        body = message,
+        showRetry = true,
+        retryCommand = retryCommand.trim(),
     )
 
     fun plan(
@@ -139,7 +151,10 @@ object ConversationCardFactory {
             return listOf(interaction)
         }
         if (state.visionAgentActive) return emptyList()
-        val filtered = sessionCards.filter { it.kind in OVERLAY_SESSION_KINDS }
+        val filtered = sessionCards.filter {
+            it.kind in OVERLAY_SESSION_KINDS ||
+                (it.kind == ConversationCardKind.Assistant && it.showRetry)
+        }
         if (filtered.isNotEmpty()) return filtered.takeLast(4)
         return listOfNotNull(overlayInteraction(state, sessionCards))
     }

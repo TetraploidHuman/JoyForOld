@@ -63,7 +63,7 @@ fun PivotHeader(
                     Text(
                         text = tab.title,
                         color = if (selected) CortanaColors.Accent else CortanaColors.OnBackgroundMuted,
-                        fontSize = JoyTextSizes.Label,
+                        fontSize = JoyTextSizes.TitleCompact,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                         letterSpacing = 0.3.sp,
                     )

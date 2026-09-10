@@ -19,6 +19,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -53,8 +57,32 @@ fun SettingsPage(
     onTestWakeWord: () -> Unit,
     onStartCalibration: () -> Unit,
     onRecordCalibrationStep: () -> Unit,
+    onUpdateApiKey: (String) -> Unit,
+    onSaveApiKey: () -> Unit,
+    onUpdateAsrApiKey: (String) -> Unit,
+    onUpdateAsrAppId: (String) -> Unit,
+    onUpdateAsrAccessToken: (String) -> Unit,
+    onUpdateAsrResourceId: (String) -> Unit,
+    onSaveAsrConfig: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showApiConfig by rememberSaveable { mutableStateOf(false) }
+    if (showApiConfig) {
+        ApiConfigPage(
+            uiState = uiState,
+            onBack = { showApiConfig = false },
+            onUpdateApiKey = onUpdateApiKey,
+            onSaveApiKey = onSaveApiKey,
+            onUpdateAsrApiKey = onUpdateAsrApiKey,
+            onUpdateAsrAppId = onUpdateAsrAppId,
+            onUpdateAsrAccessToken = onUpdateAsrAccessToken,
+            onUpdateAsrResourceId = onUpdateAsrResourceId,
+            onSaveAsrConfig = onSaveAsrConfig,
+            modifier = modifier,
+        )
+        return
+    }
+
     val context = LocalContext.current
     val scroll = rememberScrollState()
     val fieldColors = OutlinedTextFieldDefaults.colors(
@@ -72,53 +100,76 @@ fun SettingsPage(
             .fillMaxSize()
             .background(CortanaColors.Background)
             .verticalScroll(scroll)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         SectionTitle("外观")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "深色模式",
-                color = CortanaColors.OnBackground,
-                fontSize = JoyTextSizes.Body,
-            )
-            Switch(
-                checked = darkTheme,
-                onCheckedChange = onDarkThemeChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = CortanaColors.Accent,
-                    checkedTrackColor = CortanaColors.SurfaceElevated,
-                ),
-            )
-        }
-        Text(
-            text = if (darkTheme) "当前为深色界面" else "当前为亮色界面",
-            color = CortanaColors.OnBackgroundMuted,
-            fontSize = JoyTextSizes.Caption,
-            modifier = Modifier.padding(start = 4.dp),
+        SettingsSwitchRow(
+            title = "深色模式",
+            checked = darkTheme,
+            onCheckedChange = onDarkThemeChange,
+            hint = if (darkTheme) "当前为深色界面" else "当前为亮色界面",
         )
+
         SectionDivider()
-        SectionTitle("权限与服务")
-        StatusLine("无障碍（主服务）", uiState.accessibilityEnabled)
-        if (uiState.accessibilityEnabled && !uiState.accessibilityServiceConnected) {
-            Text(
-                text = "已开启，服务连接中…",
-                color = CortanaColors.OnBackgroundSecondary,
-                fontSize = JoyTextSizes.Caption,
-                modifier = Modifier.padding(start = 4.dp),
-            )
+        SectionTitle("接口")
+        OutlinedButton(
+            onClick = { showApiConfig = true },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("配置 API（大模型 / 语音识别）")
         }
         Text(
-            text = "提示：如果在系统设置里「强制停止」过本应用，无障碍会自动关闭，需要再打开一次。",
+            text = apiConfigSummary(uiState),
             color = CortanaColors.OnBackgroundMuted,
             fontSize = JoyTextSizes.Caption,
             lineHeight = JoyTextSizes.CaptionLineHeight,
-            modifier = Modifier.padding(vertical = 4.dp),
         )
+
+        SectionDivider()
+        SectionTitle("权限与服务")
+        StatusLine("无障碍（主服务）", uiState.accessibilityEnabled && uiState.accessibilityServiceConnected)
+        if (uiState.accessibilityEnabled && !uiState.accessibilityServiceConnected) {
+            HintText("已开启，服务连接中…")
+        }
+        StatusLine("麦克风", uiState.recordAudioGranted)
+        StatusLine("联系人", uiState.readContactsGranted)
+        StatusLine("通知使用权", uiState.notificationAccessGranted)
+        StatusLine("悬浮助手", overlayRunning)
+        JoyImeStatusLine(
+            enabled = uiState.joyImeEnabled,
+            selectedAsDefault = uiState.joyImeSelectedAsDefault,
+        )
+        HintText("若曾「强制停止」本应用，无障碍会自动关闭，需再打开一次。")
+
+        OutlinedButton(
+            onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("打开无障碍设置") }
+        OutlinedButton(
+            onClick = { context.startActivity(OverlayPermission.createSettingsIntent(context)) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (OverlayPermission.canDrawOverlays(context)) "悬浮窗权限已开启" else "开启悬浮窗权限") }
+        if (!uiState.recordAudioGranted) {
+            OutlinedButton(
+                onClick = onRequestAudioPermission,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("授予麦克风权限") }
+        }
+        if (!uiState.readContactsGranted) {
+            OutlinedButton(
+                onClick = onRequestContactsPermission,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("授予联系人权限") }
+        }
+        if (!uiState.notificationAccessGranted) {
+            OutlinedButton(
+                onClick = {
+                    context.startActivity(NotificationAccessPermission.createSettingsIntent(context))
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("开启通知使用权") }
+        }
 
         SectionDivider()
         SectionTitle("组件")
@@ -128,34 +179,6 @@ fun SettingsPage(
                 context.startActivity(WeChatA11yComponent.openAccessibilitySettingsIntent())
             },
         )
-
-        StatusLine("麦克风", uiState.recordAudioGranted)
-        StatusLine("联系人", uiState.readContactsGranted)
-        StatusLine("通知使用权", uiState.notificationAccessGranted)
-        StatusLine("悬浮助手", overlayRunning)
-        JoyImeStatusLine(
-            enabled = uiState.joyImeEnabled,
-            selectedAsDefault = uiState.joyImeSelectedAsDefault,
-        )
-        if (uiState.joyImeEnabled && !uiState.joyImeSelectedAsDefault) {
-            Text(
-                text = "已启用但未设默认：助手会用粘贴输入；设为默认可提高微信等自动输入成功率。",
-                color = CortanaColors.OnBackgroundSecondary,
-                fontSize = JoyTextSizes.Caption,
-                modifier = Modifier.padding(start = 4.dp),
-            )
-        }
-        Text(
-            text = stringResource(com.tetraploid.joyforold.R.string.joy_ime_settings_hint),
-            color = CortanaColors.OnBackgroundMuted,
-            fontSize = JoyTextSizes.Caption,
-            modifier = Modifier.padding(vertical = 4.dp),
-        )
-
-        OutlinedButton(
-            onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("打开无障碍设置") }
         OutlinedButton(
             onClick = { context.startActivity(JoyImeHelper.createSettingsIntent()) },
             modifier = Modifier.fillMaxWidth(),
@@ -168,25 +191,7 @@ fun SettingsPage(
                 },
             )
         }
-        OutlinedButton(
-            onClick = { context.startActivity(OverlayPermission.createSettingsIntent(context)) },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("开启悬浮窗权限") }
-        OutlinedButton(
-            onClick = onRequestAudioPermission,
-            enabled = !uiState.recordAudioGranted,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (uiState.recordAudioGranted) "麦克风已授予" else "授予麦克风权限") }
-        OutlinedButton(
-            onClick = onRequestContactsPermission,
-            enabled = !uiState.readContactsGranted,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (uiState.readContactsGranted) "联系人已授予" else "授予联系人权限") }
-        OutlinedButton(
-            onClick = { context.startActivity(NotificationAccessPermission.createSettingsIntent(context)) },
-            enabled = !uiState.notificationAccessGranted,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (uiState.notificationAccessGranted) "通知使用权已开启" else "开启通知使用权") }
+        HintText(stringResource(com.tetraploid.joyforold.R.string.joy_ime_settings_hint))
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
@@ -210,88 +215,32 @@ fun SettingsPage(
         }
 
         SectionDivider()
-        SectionTitle("隐私与权限")
-        Text(
-            text = "开启后，助手可将当前屏幕结构发送到云端，用于微信发消息、点按钮等 UI 自动化。仅在使用相关功能时上传，不会持续上传。",
-            color = CortanaColors.OnBackgroundMuted,
-            fontSize = JoyTextSizes.Caption,
-            modifier = Modifier.padding(vertical = 4.dp),
+        SectionTitle("隐私")
+        HintText("开启后，助手可将当前屏幕结构发到云端，用于发消息、点按钮等。仅在使用相关功能时上传。")
+        SettingsSwitchRow(
+            title = "允许云端理解屏幕内容",
+            checked = uiState.cloudContextConsentGranted,
+            onCheckedChange = onSetCloudContextConsent,
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "允许云端理解屏幕内容",
-                color = CortanaColors.OnBackground,
-                fontSize = JoyTextSizes.BodySecondary,
-                modifier = Modifier.weight(1f),
-            )
-            Switch(
-                checked = uiState.cloudContextConsentGranted,
-                onCheckedChange = onSetCloudContextConsent,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = CortanaColors.Accent,
-                    checkedTrackColor = CortanaColors.SurfaceElevated,
-                ),
-            )
-        }
 
         SectionDivider()
-        SectionTitle("语音对话")
-        Text(
-            text = "开启后，助手播报时可直接说话打断，无需等播完。本地检测人声后停播并开麦；若仍有回声，会自动过滤已播报内容。",
-            color = CortanaColors.OnBackgroundMuted,
-            fontSize = JoyTextSizes.Caption,
-            modifier = Modifier.padding(vertical = 4.dp),
+        SectionTitle("语音")
+        HintText("开启后，播报时可直接说话打断，无需等播完。")
+        SettingsSwitchRow(
+            title = "播报时可语音打断",
+            checked = uiState.voiceBargeInEnabled,
+            onCheckedChange = onSetVoiceBargeIn,
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "播报时可语音打断",
-                color = CortanaColors.OnBackground,
-                fontSize = JoyTextSizes.BodySecondary,
-                modifier = Modifier.weight(1f),
-            )
-            Switch(
-                checked = uiState.voiceBargeInEnabled,
-                onCheckedChange = onSetVoiceBargeIn,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = CortanaColors.Accent,
-                    checkedTrackColor = CortanaColors.SurfaceElevated,
-                ),
-            )
-        }
 
         SectionDivider()
         SectionTitle("本地语音唤醒")
-        Text(
-            "模型：${uiState.wakeWordModelVersion}",
-            color = CortanaColors.OnBackgroundMuted,
-            fontSize = JoyTextSizes.Caption,
+        HintText("模型：${uiState.wakeWordModelVersion}")
+        SettingsSwitchRow(
+            title = if (uiState.wakeWordRunning) "唤醒服务已运行" else "开启本地唤醒",
+            checked = uiState.wakeWordEnabled,
+            onCheckedChange = onSetWakeWordEnabled,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Switch(
-                checked = uiState.wakeWordEnabled,
-                onCheckedChange = onSetWakeWordEnabled,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = CortanaColors.Accent,
-                    checkedTrackColor = CortanaColors.SurfaceElevated,
-                ),
-            )
-            Text(
-                if (uiState.wakeWordRunning) "唤醒服务已运行" else "唤醒服务未运行",
-                color = if (uiState.wakeWordRunning) CortanaColors.Success else CortanaColors.OnBackgroundMuted,
-                fontSize = JoyTextSizes.Caption,
-            )
-        }
-        uiState.wakeWordTestHint?.let {
-            Text(it, color = CortanaColors.AccentMuted, fontSize = JoyTextSizes.Caption)
-        }
+        uiState.wakeWordTestHint?.let { HintText(it, accent = true) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             WakeWordSensitivityPreset.entries.forEach { preset ->
                 val selected = uiState.wakeWordPreset == preset
@@ -338,11 +287,53 @@ fun SettingsPage(
                 )
             }
         }
-        uiState.wakeWordCalibrationHint?.let {
-            Text(it, color = CortanaColors.AccentMuted, fontSize = JoyTextSizes.Caption)
+        uiState.wakeWordCalibrationHint?.let { HintText(it, accent = true) }
+    }
+}
+
+private fun apiConfigSummary(uiState: AgentUiState): String {
+    val llm = if (uiState.apiKey.isNotBlank()) "LLM 已配置" else "LLM 未配置"
+    val asr = when {
+        uiState.asrApiKey.isNotBlank() -> "语音识别已配置（新版）"
+        uiState.asrAppId.isNotBlank() && uiState.asrAccessToken.isNotBlank() ->
+            "语音识别已配置（旧版）"
+        else -> "语音识别未配置"
+    }
+    return "$llm · $asr"
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    hint: String? = null,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                color = CortanaColors.OnBackground,
+                fontSize = JoyTextSizes.Body,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = CortanaColors.Accent,
+                    checkedTrackColor = CortanaColors.SurfaceElevated,
+                ),
+            )
+        }
+        if (!hint.isNullOrBlank()) {
+            HintText(hint)
         }
     }
-
 }
 
 @Composable
@@ -375,16 +366,7 @@ private fun WeChatSupportComponentCard(
                 fontSize = JoyTextSizes.Caption,
             )
         }
-        Text(
-            text = "内置组件 · 随主应用一起安装",
-            color = CortanaColors.OnBackgroundMuted,
-            fontSize = JoyTextSizes.Caption,
-        )
-        Text(
-            text = WeChatA11yComponent.statusHint(status),
-            color = CortanaColors.OnBackgroundSecondary,
-            fontSize = JoyTextSizes.Caption,
-        )
+        HintText(WeChatA11yComponent.statusHint(status))
         OutlinedButton(
             onClick = onOpenSettings,
             modifier = Modifier.fillMaxWidth(),
@@ -407,25 +389,39 @@ private fun SectionTitle(text: String) {
         color = CortanaColors.Accent,
         fontSize = JoyTextSizes.Label,
         letterSpacing = 0.6.sp,
-        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+        modifier = Modifier.padding(top = 4.dp),
     )
 }
 
 @Composable
 private fun SectionDivider() {
-    HorizontalDivider(color = CortanaColors.Divider, modifier = Modifier.padding(vertical = 4.dp))
+    HorizontalDivider(color = CortanaColors.Divider, modifier = Modifier.padding(vertical = 2.dp))
+}
+
+@Composable
+private fun HintText(text: String, accent: Boolean = false) {
+    Text(
+        text = text,
+        color = if (accent) CortanaColors.AccentMuted else CortanaColors.OnBackgroundMuted,
+        fontSize = JoyTextSizes.Caption,
+        lineHeight = JoyTextSizes.CaptionLineHeight,
+    )
 }
 
 @Composable
 private fun JoyImeStatusLine(enabled: Boolean, selectedAsDefault: Boolean) {
-    val (text, color) = when {
+    val (text, ok) = when {
         selectedAsDefault ->
-            "Joy 输入助手：已就绪（自己打字会自动切回原键盘）" to CortanaColors.Success
+            "Joy 输入助手：已就绪" to true
         enabled ->
-            "Joy 输入助手：已启用（可选设为默认）" to CortanaColors.OnBackgroundSecondary
-        else -> "Joy 输入助手：未启用（可选）" to CortanaColors.OnBackgroundMuted
+            "Joy 输入助手：已启用（可选设为默认）" to false
+        else -> "Joy 输入助手：未启用（可选）" to false
     }
-    Text(text = text, color = color, fontSize = JoyTextSizes.Caption)
+    Text(
+        text = text,
+        color = if (ok) CortanaColors.Success else CortanaColors.OnBackgroundMuted,
+        fontSize = JoyTextSizes.Caption,
+    )
 }
 
 @Composable
